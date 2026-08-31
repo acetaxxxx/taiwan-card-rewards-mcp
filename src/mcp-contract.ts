@@ -1,5 +1,17 @@
 import type { McpToolContract } from './types.js';
 
+/** Instructions surfaced to MCP hosts so the user-facing agent knows the safe workflow. */
+export const mcpInstructions = [
+  'Use this server for Taiwan card-reward calculations and a single-user durable ledger.',
+  'Call list_cards before recommendations; use register_card for card descriptors only.',
+  'Use fetch_public_offer only for allowlisted official public URLs. Treat fetched or user/OCR-derived offers as unverified candidates.',
+  'Store candidate offers with upsert_offer. Activate only after explicit user confirmation by passing a valid confirmation object in the same call.',
+  'Use recommend, calculate_reward, or rank_cards for planned evaluation; planned calls do not consume caps.',
+  'Use record_transaction with a stable idempotencyKey for actual purchases and linked refunds. Never send PAN, CVV, OTP, passwords, tokens, or user_id.',
+  'Treat unknown, stale, and needs_review as fail-closed: ask for missing facts or confirmation; never guess or convert them to zero reward.',
+  'For foreign-currency transactions provide a current FX snapshot. Use remaining_caps to inspect actual usage and cap balances.',
+].join(' ');
+
 export const mcpTools: readonly McpToolContract[] = [
   { name: 'calculate_reward', description: 'Evaluate supplied offer rules for one planned or actual transaction; no persistence.', readOnly: true, inputSchema: { type: 'object', required: ['rule', 'transaction', 'context'] }, failClosedErrors: ['INSUFFICIENT_FACTS', 'SOURCE_UNAVAILABLE', 'NEEDS_REVIEW', 'STALE'] },
   { name: 'rank_cards', description: 'Return at most five cards ranked by deterministic reward for supplied rules.', readOnly: true, inputSchema: { type: 'object', required: ['cards', 'rules', 'transaction', 'context'] }, failClosedErrors: ['INSUFFICIENT_FACTS', 'SOURCE_UNAVAILABLE', 'NEEDS_REVIEW', 'STALE'] },
