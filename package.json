@@ -1,0 +1,23 @@
+{
+  "name": "taiwan-card-rewards-mcp",
+  "version": "0.1.0",
+  "type": "module",
+  "files": ["dist"],
+  "bin": {
+    "taiwan-card-rewards-mcp": "dist/cli.js"
+  },
+  "exports": {
+    ".": "./dist/index.js",
+    "./mcp-contract": "./dist/mcp-contract.js"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  }
+}

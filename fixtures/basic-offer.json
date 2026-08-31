@@ -1,0 +1,10 @@
+{
+  "card": { "id": "card-demo", "issuer": "Example Bank", "productName": "Travel Card", "network": "Visa" },
+  "rule": {
+    "id": "offer-demo-v1", "cardId": "card-demo", "version": "2026-01-01", "sourceSnapshotId": "source-demo-1", "status": "active", "validFrom": "2026-01-01T00:00:00Z", "settlementCurrency": "TWD",
+    "match": { "countries": ["JP"], "channels": ["in_store"], "paymentMethods": ["mobile_wallet"] },
+    "reward": { "kind": "percentage", "rateBps": 300 },
+    "cap": { "kind": "calendar_month", "cap": { "amountMinor": 100000, "currency": "TWD" }, "usageKey": "offer-demo-v1:2026-08" }
+  },
+  "source": { "id": "source-demo-1", "url": "https://example.invalid/offer", "fetchedAt": "2026-08-01T00:00:00Z", "contentHash": "fixture", "parserVersion": "fixture-1" }
+}
