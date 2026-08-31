@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 import * as readline from 'node:readline';
 import { parseStartupArgs, StartupContractError } from './startup.js';
-import { FileStore } from './store.js';
+import { FileStore, type LedgerStore } from './store.js';
 import { RewardService } from './service.js';
 import { RewardServiceError } from './errors.js';
 import { mcpTools } from './mcp-contract.js';
 import { evaluateOffer, rankCards } from './evaluator.js';
-import { validateContext, validateToolArgs, validateTransaction, validateCard, validateRule, validateSnapshot } from './validation.js';
+import { validateContext, validateToolArgs, validateTransaction, validateCard, validateConfirmation, validateRule, validateSnapshot } from './validation.js';
 
 type JsonRpc = { jsonrpc?: string; id?: string | number | null; method?: string; params?: Record<string, unknown> };
 type Reply = { jsonrpc: '2.0'; id: string | number | null; result?: unknown; error?: { code: number; message: string; data?: unknown } };
@@ -24,7 +24,7 @@ function rejectSensitiveFields(value: unknown): void {
 
 async function main(): Promise<void> {
   const config = parseStartupArgs(process.argv.slice(2));
-  const store = new FileStore(config);
+  const store: LedgerStore = new FileStore(config);
   const service = new RewardService(store, config.user, config.sourceHosts);
   const close = () => { store.close(); process.exit(0); };
   process.once('SIGINT', close);
@@ -51,13 +51,14 @@ async function main(): Promise<void> {
 
 async function callTool(service: RewardService, params: Record<string, unknown>): Promise<unknown> {
   const name = params.name;
-  if (typeof name !== 'string') throw new Error('tool name is required');
-  const args = validateToolArgs(name, params.arguments ?? {});
-  rejectSensitiveFields(args);
+  if (typeof name !== 'string') throw new RewardServiceError('INVALID_INPUT', 'tool name is required');
+  const rawArgs = params.arguments ?? {};
+  rejectSensitiveFields(rawArgs);
+  const args = validateToolArgs(name, rawArgs);
   switch (name) {
     case 'register_card': return service.registerCard(validateCard(args.card));
     case 'list_cards': return service.listCards();
-    case 'upsert_offer': return service.upsertOffer(validateSnapshot(args.snapshot), validateRule(args.rule));
+    case 'upsert_offer': return service.upsertOffer(validateSnapshot(args.snapshot), validateRule(args.rule), args.confirmation !== undefined ? validateConfirmation(args.confirmation) : undefined);
     case 'recommend': return service.recommend(validateTransaction(args.transaction), typeof args.limit === 'number' ? args.limit : 5);
     case 'record_transaction': return service.recordTransaction(validateTransaction(args.transaction));
     case 'remaining_caps': return service.remainingCaps(String(args.cardId));

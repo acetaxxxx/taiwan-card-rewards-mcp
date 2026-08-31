@@ -28,14 +28,38 @@ _Avoid_: unknown user, anonymous card
 ## Offers and eligibility
 
 **Offer Evidence**:
-A dated, source-linked statement of a bank or issuer's published benefit,
-condition, exclusion, fee, or valuation.
-_Avoid_: rule, recommendation, search result
+A dated statement of a bank or issuer's published benefit, condition,
+exclusion, fee, or valuation with a traceable official source URL, page,
+announcement identifier, or source description.
+_Avoid_: rule, recommendation, search result, unsupported claim
+
+**User-Supplied Offer Input**:
+A transcription or structured description supplied by a user to represent an
+offer that may be shown in an image or otherwise unavailable as machine-readable
+text; it is a candidate input, not official evidence.
+_Avoid_: official evidence, verified rule, user claim
+
+**Offer Input Provenance**:
+The record linking an offer input to its official URL or source description,
+submitter, submission time, and content fingerprint so the input can be reviewed
+without treating the submitter's interpretation as issuer-authoritative.
+_Avoid_: source URL only, audit log
+
+**Offer Confirmation**:
+The user's explicit confirmation that a candidate transcription accurately
+represents the cited official offer and may be used to activate its rule.
+_Avoid_: agent approval, implicit consent, page visit
 
 **Offer Rule**:
 A versioned, declarative interpretation of Offer Evidence that defines when a
 reward applies and how it is calculated.
 _Avoid_: source page, prompt instruction, arbitrary script
+
+**Predicate AST**:
+A declarative tree of reward conditions and operators, including conjunction,
+alternatives, thresholds, and exclusions, that can be evaluated without running
+agent-supplied code.
+_Avoid_: free-form rule text, executable rule, model guess
 
 **Rule Version**:
 An immutable set of Offer Rule terms valid for a stated time interval and source
@@ -162,6 +186,18 @@ An AI agent's contextual choice or explanation based on Reward Breakdowns, user
 priorities, and operational conditions; it is not the ledger's authority.
 _Avoid_: calculation verdict, guaranteed outcome
 
+**Uncertainty-Aware Ranking**:
+A result ordering that places confident `ok` calculations first and retains
+`unknown`, `stale`, or `needs_review` results with their explicit status rather
+than treating them as equivalent recommendations.
+_Avoid_: estimated ranking, fallback ranking
+
+**Calculation Trust Gate**:
+The provenance and confirmation conditions that a Reward Rule must satisfy
+before its calculation can produce a confident result; the gate is part of the
+calculation authority, not merely a caller convention.
+_Avoid_: caller promise, warning flag, best effort
+
 ## Domain invariants
 
 - Offer Evidence is not an Offer Rule. A source-linked fact must be interpreted
@@ -175,6 +211,25 @@ _Avoid_: calculation verdict, guaranteed outcome
 - Unknown Condition and Stale Evidence cannot silently become a match, a zero,
   or a confident Recommendation; the AI agent must refresh evidence or ask the
   user when the missing fact is user-owned.
+- User-Supplied Offer Input remains `candidate` until its official source,
+  required fields, and interpretation have been reviewed; it cannot silently
+  activate a rule.
+- A candidate rule becomes eligible for `active` status only after an Offer
+  Confirmation; an agent may prepare or validate it but cannot substitute for
+  that confirmation.
+- An Offer Confirmation may use a source URL or another traceable official
+  source reference; a user confirmation without any source provenance cannot
+  activate a rule.
+- The first planned calculation slice uses Predicate AST rules and structured
+  inputs; image interpretation happens before the MCP boundary and is not part
+  of the calculator's authority.
+- Offer Confirmation covers the official source, offer period, reward
+  conditions, exclusions, reward unit, and cap; a general approval without those
+  semantics is insufficient.
+- An Explicit Sort may retain uncertain results for transparency, but
+  Uncertainty-Aware Ranking must keep them visibly separate from `ok` results.
+- A Reward Calculation must enforce its Calculation Trust Gate itself; a caller
+  cannot make an unprovenanced or unconfirmed rule trustworthy by assertion.
 - A Reward Calculation is not a Recommendation. The calculation supplies
   explainable facts and explicit sort options; the agent supplies contextual
   judgment.

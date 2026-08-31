@@ -26,8 +26,16 @@ export class StoreError extends Error {
   }
 }
 
+/** A replaceable persistence boundary for credit-card rewards state. */
+export interface LedgerStore {
+  read(): StoredState;
+  write(next: StoredState): void;
+  update(mutator: (state: StoredState) => void): StoredState;
+  close(): void;
+}
+
 /** A single-process, tenant-bound JSON store. The future sidecar can replace this interface with SQLite. */
-export class FileStore {
+export class FileStore implements LedgerStore {
   readonly filePath: string;
   readonly lockPath: string;
   private readonly lockFd: number;

@@ -1,0 +1,3 @@
+# Complete initial MCP surface with layered trust gates
+
+The first implementation delivers the complete nine-tool MCP surface, including catalog, public-source, recommendation, transaction, cap, and refund operations, while preserving a pure calculation core. It supports purchase, partial and repeated refunds, idempotency, and cap reconciliation rather than exposing incomplete write tools. Persistence is accessed through a `LedgerStore`/repository seam with the current FileStore as its first adapter, leaving SQLite/WAL migration independent of domain logic. Trust is layered: MCP validation enforces the contract and the evaluator independently enforces provenance and user confirmation, so no caller can turn an untrusted rule into a confident reward calculation.

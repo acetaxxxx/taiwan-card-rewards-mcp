@@ -38,4 +38,25 @@ describe('deterministic evaluator', () => {
     expect(evaluateOffer(rule, { ...tx, mode: 'actual' }, context).status).toBe('unknown');
     expect(evaluateOffer(rule, { ...tx, kind: 'refund', refundOfId: 't1' }, context).status).toBe('unknown');
   });
+
+  it('orders Top-5 deterministically by card identity after confidence and reward', () => {
+    const cards: CardDescriptor[] = [
+      { id: 'c5', issuer: 'Bank', productName: 'Five' },
+      { id: 'c2', issuer: 'Bank', productName: 'Two' },
+      { id: 'c1', issuer: 'Bank', productName: 'One' },
+    ];
+    const rules = cards.map((item) => ({ ...rule, id: `r-${item.id}`, cardId: item.id }));
+    const result = rankCards(cards, rules, tx, context);
+    expect(result.map((entry) => entry.cardId)).toEqual(['c1', 'c2', 'c5']);
+    expect(result.map((entry) => entry.rank)).toEqual([1, 2, 3]);
+  });
+
+  it('places uncertain entries after confident entries and preserves reasons', () => {
+    const uncertainCards: CardDescriptor[] = [card, { id: 'c0', issuer: 'Bank', productName: 'Zero' }];
+    const uncertainRules = [{ ...rule, match: {} }, { ...rule, id: 'r-c0', cardId: 'c0', match: { channels: ['online'] } }];
+    const result = rankCards(uncertainCards, uncertainRules, { ...tx, channel: undefined }, context);
+    expect(result.map((entry) => entry.status)).toEqual(['ok', 'unknown']);
+    expect(result.map((entry) => entry.cardId)).toEqual(['c1', 'c0']);
+    expect(result[1]?.unknownReasons).toContain('missing channel');
+  });
 });
