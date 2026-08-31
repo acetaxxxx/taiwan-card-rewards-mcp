@@ -26,5 +26,15 @@ jobs:
         run: npm run typecheck
       - name: Build
         run: npm run build
+      - name: Pack distributable tarball
+        run: |
+          mkdir -p artifacts
+          npm pack --ignore-scripts --pack-destination artifacts
+      - name: Upload distributable tarball
+        uses: actions/upload-artifact@v4
+        with:
+          name: taiwan-card-rewards-mcp-tarball
+          path: artifacts/*.tgz
+          if-no-files-found: error
       - name: Test
         run: npm test
