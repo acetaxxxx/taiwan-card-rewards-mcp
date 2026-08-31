@@ -33,6 +33,20 @@ The system enforces a strict separation of concerns between the AI Agent and the
 
 ## 2. Installation & Startup Contract
 
+For a GitHub checkout, run `npm ci --ignore-scripts && npm run build`, then configure the host with `node dist/cli.js`. Git-based `npx` installation is also supported: npm runs the package `prepare` script and builds `dist/` automatically.
+
+```bash
+npx --yes github:acetaxxxx/taiwan-card-rewards-mcp#main \
+  --data-dir /absolute/existing/tenant-directory
+```
+
+Pin a release tag for repeatable use:
+
+```bash
+npx --yes github:acetaxxxx/taiwan-card-rewards-mcp#v0.2.0 \
+  --data-dir /absolute/existing/tenant-directory
+```
+
 ### Process Boundary & Single-Tenant Scope
 - **Transport**: Standard I/O only (`stdio` newline-delimited JSON-RPC). No HTTP, SSE, or network ports are opened.
 - **Tenant Isolation**: The parent process launches **one independent MCP process per user**, bound to a dedicated `--data-dir`.
@@ -51,7 +65,7 @@ node dist/cli.js --data-dir <absolute-path> [--user <user-id>]
 
 ---
 
-## 3. The 9-Tool MCP Surface
+## 3. The 8-Tool MCP Surface
 
 The MCP server exposes exactly 8 tools. Standalone `confirm_offer` is not part of the surface; candidate activation is folded directly into `upsert_offer`.
 
