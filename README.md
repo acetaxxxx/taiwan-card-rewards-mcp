@@ -21,6 +21,17 @@ Available tools are `register_card`, `list_cards`, `upsert_offer`, `recommend`, 
 - Missing merchant/channel/payment/currency/date facts, missing cap usage, stale or unreviewed rules, and missing FX snapshots return `unknown`, `stale`, or `needs_review`; callers must not turn those into a confident recommendation.
 - The file store is intentionally a narrow Phase 1 implementation. The future auth-aware sidecar can replace it while preserving the evaluator and MCP names.
 
+## Planning documents
+
+The design and planning material for this repository is kept under `docs/`:
+
+- `docs/design/codebase-design.md` — package boundaries and implementation seam
+- `docs/adr/0001-independent-card-rewards-domain-and-agent-supplied-rules.md` — domain and rule-source decisions
+- `docs/research/taiwan-credit-cards-official-research.md` — first-party source research
+- `docs/specs/taiwan-card-rewards-mcp-reference-study.md` — reference-project comparison and product plan
+- `docs/specs/card-rewards-mcp-repository.md` — independent-repository and Aion integration contract
+- `docs/integration/CARD_REWARDS_SKILL_BINDING_PLAN.md` — planned Skill/Agent binding; not an installed Skill
+
 ## TDD and CI strategy
 
 GitHub Actions runs on Ubuntu 24.04 with Node 22.14.0: `npm ci --ignore-scripts`, `npm run typecheck`, `npm run build`, and `npm test`. The workflow is path-scoped to this package and uses the committed lockfile; it never invokes `npx` without a pinned package version. Fixtures should cover exact-match, missing condition, stale rule, cap exhaustion, planned-vs-actual non-mutation, duplicate idempotency, refund, currency mismatch, FX conversion, and deterministic Top-5 ties. Keep bank-specific rules out of the core tests.
