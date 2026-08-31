@@ -12,7 +12,7 @@ The store takes an exclusive process lock (`card-rewards.lock`) for the lifetime
 
 Build with `npm run build`, then configure Aion's stdio MCP server with command `npx` (or the installed `taiwan-card-rewards-mcp` binary) and arguments `--data-dir /absolute/existing/tenant-directory`. The process reads newline-delimited JSON-RPC from stdin and writes responses to stdout; it does not open an HTTP/SSE listener. Each user must receive a separate process and data directory. Reusing one data directory is explicit shared tenancy; `--user` is display metadata only.
 
-Available tools are `register_card`, `list_cards`, `upsert_offer`, `recommend`, `record_transaction`, `remaining_caps`, and `fetch_public_offer`. Phase 1 recommendation and cap usage read only actual transactions; planned transactions never mutate the store. Repeated actual calls require the same idempotency key and payload; mismatches fail closed. Refunds must reference an existing recorded transaction.
+Available tools are the complete 9-tool MCP surface: `calculate_reward`, `rank_cards`, `register_card`, `list_cards`, `upsert_offer`, `recommend`, `record_transaction`, `remaining_caps`, and `fetch_public_offer`. For comprehensive workflow instructions, see the [AI Agent Usage Guide](docs/agents/usage-guide.md). Phase 1 recommendation and cap usage read only actual transactions; planned transactions never mutate the store. Repeated actual calls require the same idempotency key and payload; mismatches fail closed. Refunds must reference an existing recorded transaction.
 
 ## Boundaries
 
@@ -21,10 +21,11 @@ Available tools are `register_card`, `list_cards`, `upsert_offer`, `recommend`, 
 - Missing merchant/channel/payment/currency/date facts, missing cap usage, stale or unreviewed rules, and missing FX snapshots return `unknown`, `stale`, or `needs_review`; callers must not turn those into a confident recommendation.
 - The file store is intentionally a narrow Phase 1 implementation. The future auth-aware sidecar can replace it while preserving the evaluator and MCP names.
 
-## Planning documents
+## Planning and documentation
 
-The design and planning material for this repository is kept under `docs/`:
+The design, research, specifications, and agent usage guides are kept under `docs/`:
 
+- `docs/agents/usage-guide.md` — AI Agent usage guide for installation, workflows, and fail-closed safety
 - `docs/design/codebase-design.md` — package boundaries and implementation seam
 - `docs/adr/0001-independent-card-rewards-domain-and-agent-supplied-rules.md` — domain and rule-source decisions
 - `docs/research/taiwan-credit-cards-official-research.md` — first-party source research
