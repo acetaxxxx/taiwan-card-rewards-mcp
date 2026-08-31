@@ -1,0 +1,89 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/acetaxxxx/taiwan-card-rewards-mcp/schemas/card-rewards-state.schema.json",
+  "title": "Taiwan Card Rewards persisted state",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "cards", "snapshots", "rules", "transactions"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "cards": { "type": "array", "items": { "$ref": "#/$defs/card" } },
+    "snapshots": { "type": "array", "items": { "$ref": "#/$defs/snapshot" } },
+    "rules": { "type": "array", "items": { "$ref": "#/$defs/rule" } },
+    "transactions": { "type": "array", "items": { "$ref": "#/$defs/recordedTransaction" } }
+  },
+  "$defs": {
+    "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_:-]{0,127}$" },
+    "currency": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_:-]{0,127}$" },
+    "dateTime": { "type": "string", "format": "date-time" },
+    "money": {
+      "type": "object", "additionalProperties": false,
+      "required": ["amountMinor", "currency"],
+      "properties": { "amountMinor": { "type": "integer", "minimum": 0 }, "currency": { "$ref": "#/$defs/currency" } }
+    },
+    "signedMoney": {
+      "type": "object", "additionalProperties": false,
+      "required": ["amountMinor", "currency"],
+      "properties": { "amountMinor": { "type": "integer" }, "currency": { "$ref": "#/$defs/currency" } }
+    },
+    "card": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "issuer", "productName"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" }, "issuer": { "type": "string", "minLength": 1 }, "productName": { "type": "string", "minLength": 1 },
+        "network": { "type": "string" }, "last4": { "type": "string", "pattern": "^[0-9]{4}$" }, "country": { "type": "string" },
+        "billingCycleDay": { "type": "integer", "minimum": 1, "maximum": 31 }, "timezone": { "type": "string", "minLength": 1 }
+      }
+    },
+    "provenance": {
+      "type": "object", "additionalProperties": false, "required": ["submittedAt", "contentFingerprint"],
+      "properties": { "sourceUrl": { "type": "string" }, "sourceDescription": { "type": "string" }, "submitter": { "type": "string" }, "submittedAt": { "$ref": "#/$defs/dateTime" }, "contentFingerprint": { "type": "string", "minLength": 1 } }
+    },
+    "snapshot": {
+      "type": "object", "additionalProperties": false, "required": ["id", "url", "fetchedAt", "contentHash", "parserVersion"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" }, "url": { "type": "string", "format": "uri" }, "fetchedAt": { "$ref": "#/$defs/dateTime" },
+        "contentHash": { "type": "string", "minLength": 1 }, "parserVersion": { "type": "string", "minLength": 1 },
+        "validFrom": { "$ref": "#/$defs/dateTime" }, "validTo": { "$ref": "#/$defs/dateTime" }, "excerpt": { "type": "string" },
+        "verified": { "type": "boolean" }, "sourceType": { "enum": ["official", "user_input"] }, "provenance": { "$ref": "#/$defs/provenance" }
+      }
+    },
+    "predicateValue": { "oneOf": [{ "type": "string" }, { "type": "number" }, { "type": "boolean" }, { "type": "array", "items": { "type": "string" } }] },
+    "predicate": {
+      "oneOf": [
+        { "type": "object", "additionalProperties": false, "required": ["op", "rules"], "properties": { "op": { "enum": ["AND", "OR"] }, "rules": { "type": "array", "minItems": 1, "maxItems": 64, "items": { "$ref": "#/$defs/predicate" } } } },
+        { "type": "object", "additionalProperties": false, "required": ["op", "rule"], "properties": { "op": { "const": "NOT" }, "rule": { "$ref": "#/$defs/predicate" } } },
+        { "type": "object", "additionalProperties": false, "required": ["field", "op", "value"], "properties": { "field": { "type": "string", "pattern": "^(transaction|user)\\.[A-Za-z][A-Za-z0-9_.]{0,127}$" }, "op": { "enum": ["EQUALS", "MATCH_ALLOWLIST"] }, "value": { "$ref": "#/$defs/predicateValue" } } }
+      ]
+    },
+    "confirmation": {
+      "type": "object", "additionalProperties": false, "required": ["confirmedAt", "confirmedBy", "sourceReference", "offerPeriod", "rewardUnit"],
+      "properties": { "confirmedAt": { "$ref": "#/$defs/dateTime" }, "confirmedBy": { "type": "string", "minLength": 1 }, "sourceReference": { "type": "string", "minLength": 1 }, "offerPeriod": { "type": "object", "additionalProperties": false, "required": ["validFrom"], "properties": { "validFrom": { "$ref": "#/$defs/dateTime" }, "validTo": { "$ref": "#/$defs/dateTime" } } }, "rewardUnit": { "$ref": "#/$defs/currency" }, "rewardConditionsSummary": { "type": "string" }, "capSummary": { "type": "string" } }
+    },
+    "rule": {
+      "type": "object", "additionalProperties": false, "required": ["id", "cardId", "version", "sourceSnapshotId", "status", "validFrom", "settlementCurrency", "match", "reward"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" }, "cardId": { "$ref": "#/$defs/id" }, "version": { "type": "string", "minLength": 1 }, "sourceSnapshotId": { "$ref": "#/$defs/id" },
+        "status": { "enum": ["candidate", "active", "stale", "superseded", "needs_review", "unknown"] }, "validFrom": { "$ref": "#/$defs/dateTime" }, "validTo": { "$ref": "#/$defs/dateTime" }, "settlementCurrency": { "$ref": "#/$defs/currency" },
+        "match": { "type": "object", "additionalProperties": false, "properties": { "merchants": { "type": "array", "items": { "$ref": "#/$defs/id" } }, "mccs": { "type": "array", "items": { "$ref": "#/$defs/id" } }, "countries": { "type": "array", "items": { "$ref": "#/$defs/id" } }, "channels": { "type": "array", "items": { "$ref": "#/$defs/id" } }, "paymentMethods": { "type": "array", "items": { "$ref": "#/$defs/id" } } },
+        "predicate": { "$ref": "#/$defs/predicate" }, "requires": { "type": "array", "uniqueItems": true, "items": { "enum": ["source_verified", "user_confirmation"] } },
+        "reward": { "type": "object", "additionalProperties": false, "required": ["kind"], "properties": { "kind": { "enum": ["percentage", "flat"] }, "rateBps": { "type": "number", "minimum": 0, "maximum": 1000000000000 }, "amountMinor": { "type": "integer", "minimum": 0 }, "currency": { "$ref": "#/$defs/currency" } } },
+        "cap": { "type": "object", "additionalProperties": false, "required": ["kind", "cap", "usageKey"], "properties": { "kind": { "enum": ["calendar_month", "billing_cycle", "campaign"] }, "cap": { "$ref": "#/$defs/money" }, "usageKey": { "$ref": "#/$defs/id" } } },
+        "confirmation": { "$ref": "#/$defs/confirmation" }
+      }
+    },
+    "fx": { "type": "object", "additionalProperties": false, "required": ["id", "baseCurrency", "quoteCurrency", "ratePpm", "capturedAt"], "properties": { "id": { "$ref": "#/$defs/id" }, "baseCurrency": { "$ref": "#/$defs/currency" }, "quoteCurrency": { "$ref": "#/$defs/currency" }, "ratePpm": { "type": "number", "minimum": 1, "maximum": 1000000000000 }, "capturedAt": { "$ref": "#/$defs/dateTime" }, "maxAgeSeconds": { "type": "integer", "minimum": 1 } } },
+    "transaction": { "type": "object", "additionalProperties": false, "required": ["cardId", "kind", "mode", "occurredAt", "amount"], "properties": { "idempotencyKey": { "type": "string" }, "cardId": { "$ref": "#/$defs/id" }, "kind": { "enum": ["purchase", "refund"] }, "mode": { "enum": ["planned", "actual"] }, "merchant": { "type": "string" }, "mcc": { "type": "string" }, "country": { "type": "string" }, "channel": { "type": "string" }, "paymentMethod": { "type": "string" }, "occurredAt": { "$ref": "#/$defs/dateTime" }, "amount": { "$ref": "#/$defs/money" }, "fx": { "$ref": "#/$defs/fx" }, "refundOfId": { "$ref": "#/$defs/id" }, "originalRewardMinor": { "type": "integer", "minimum": 0 } } },
+    "rewardBreakdown": { "type": "object", "additionalProperties": false, "required": ["status", "cardId", "transaction", "unknownReasons"], "properties": { "status": { "enum": ["ok", "no_match", "unknown", "needs_review", "stale"] }, "cardId": { "$ref": "#/$defs/id" }, "transaction": { "$ref": "#/$defs/transaction" }, "ruleId": { "$ref": "#/$defs/id" }, "ruleVersion": { "type": "string" }, "sourceSnapshotId": { "$ref": "#/$defs/id" }, "grossReward": { "$ref": "#/$defs/signedMoney" }, "cappedReward": { "$ref": "#/$defs/signedMoney" }, "capRemainingBefore": { "$ref": "#/$defs/money" }, "capRemainingAfter": { "$ref": "#/$defs/money" }, "unknownReasons": { "type": "array", "items": { "type": "string" } } } },
+    "recordedTransaction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["transaction", "reward"],
+      "properties": {
+        "transaction": { "$ref": "#/$defs/transaction" },
+        "reward": { "$ref": "#/$defs/rewardBreakdown" }
+      }
+    }
+  }
+}
+}

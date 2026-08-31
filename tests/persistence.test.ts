@@ -142,6 +142,22 @@ describe("LedgerStore persistence seam and FileStore adapter", () => {
     }
   });
 
+  it("fails closed when a persisted nested record violates its domain schema", () => {
+    const dir = mkdtempSync(join(tmpdir(), "card-rewards-nested-corrupt-"));
+    try {
+      writeFileSync(join(dir, "card-rewards.json"), JSON.stringify({
+        schemaVersion: 1,
+        cards: [{ id: "card-1", issuer: "TestBank", productName: "TravelCard", unexpected: true }],
+        snapshots: [],
+        rules: [],
+        transactions: [],
+      }));
+      expect(() => new FileStore(config(dir))).toThrow(/STORE_CORRUPT/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("allows RewardService to operate over any LedgerStore implementation", () => {
     class InMemoryLedgerStore implements LedgerStore {
       private state: StoredState = emptyState();

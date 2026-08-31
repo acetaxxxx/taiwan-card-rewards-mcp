@@ -3,6 +3,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { CardDescriptor, OfferRuleVersion, OfferSourceSnapshot, RewardBreakdown, TransactionTuple } from './types.js';
 import type { StartupConfig } from './startup.js';
+import { validateStoredState } from './validation.js';
 
 export interface RecordedTransaction {
   transaction: TransactionTuple;
@@ -96,11 +97,7 @@ export class FileStore implements LedgerStore {
   private load(): StoredState {
     if (!fs.existsSync(this.filePath)) return emptyState();
     try {
-      const parsed = JSON.parse(fs.readFileSync(this.filePath, 'utf8')) as StoredState;
-      if (parsed.schemaVersion !== 1 || !Array.isArray(parsed.cards) || !Array.isArray(parsed.snapshots) || !Array.isArray(parsed.rules) || !Array.isArray(parsed.transactions)) {
-        throw new Error('unsupported state schema');
-      }
-      return parsed;
+      return validateStoredState(JSON.parse(fs.readFileSync(this.filePath, 'utf8')));
     } catch (error) {
       throw new StoreError('STORE_CORRUPT', error instanceof Error ? error.message : 'invalid state file');
     }

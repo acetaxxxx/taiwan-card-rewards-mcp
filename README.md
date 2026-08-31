@@ -26,6 +26,7 @@ Available tools are the complete 8-tool MCP surface: `calculate_reward`, `rank_c
 The design, research, specifications, and agent usage guides are kept under `docs/`:
 
 - `docs/agents/usage-guide.md` — AI Agent usage guide for installation, workflows, and fail-closed safety
+- `schemas/card-rewards-state.schema.json` — persisted `card-rewards.json` JSON Schema (schemaVersion 1)
 - `docs/design/codebase-design.md` — package boundaries and implementation seam
 - `docs/adr/0001-independent-card-rewards-domain-and-agent-supplied-rules.md` — domain and rule-source decisions
 - `docs/research/taiwan-credit-cards-official-research.md` — first-party source research

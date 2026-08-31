@@ -1,4 +1,5 @@
-import type { CardDescriptor, CardProduct, CapPeriod, EligibilityFact, EvaluationContext, FxSnapshot, HeldCard, Money, OfferConfirmation, OfferProvenance, OfferRuleVersion, OfferSourceSnapshot, Predicate, PredicateValue, RewardSpec, RuleMatch, TransactionTuple } from './types.js';
+import type { CardDescriptor, CardProduct, CapPeriod, EligibilityFact, EvaluationContext, FxSnapshot, HeldCard, Money, OfferConfirmation, OfferProvenance, OfferRuleVersion, OfferSourceSnapshot, Predicate, PredicateValue, RewardBreakdown, RewardSpec, RuleMatch, TransactionTuple } from './types.js';
+import type { StoredState } from './store.js';
 import { RewardServiceError } from './errors.js';
 
 const ID = /^[A-Za-z0-9][A-Za-z0-9_:-]{0,127}$/;
@@ -341,6 +342,50 @@ export function validateContext(value: unknown): EvaluationContext {
     ...(eligibilityFacts ? { eligibilityFacts } : {}),
     ...(userFacts ? { userFacts } : {}),
   };
+}
+
+function validateSignedMoney(value: unknown, name: string): Money {
+  const item = object(value, name);
+  keys(item, ['amountMinor', 'currency'], name);
+  if (typeof item.amountMinor !== 'number' || !Number.isSafeInteger(item.amountMinor)) throw new RewardServiceError('INVALID_INPUT', `${name}.amountMinor must be a safe integer`);
+  return { amountMinor: item.amountMinor, currency: requiredString(item.currency, `${name}.currency`, true).toUpperCase() };
+}
+
+export function validateRewardBreakdown(value: unknown): RewardBreakdown {
+  const item = object(value, 'reward');
+  keys(item, ['status', 'cardId', 'transaction', 'ruleId', 'ruleVersion', 'sourceSnapshotId', 'grossReward', 'cappedReward', 'capRemainingBefore', 'capRemainingAfter', 'unknownReasons'], 'reward');
+  const status = requiredString(item.status, 'reward.status');
+  if (!['ok', 'no_match', 'unknown', 'needs_review', 'stale'].includes(status)) throw new RewardServiceError('INVALID_INPUT', 'reward.status is invalid');
+  if (!Array.isArray(item.unknownReasons) || item.unknownReasons.some((reason) => typeof reason !== 'string')) throw new RewardServiceError('INVALID_INPUT', 'reward.unknownReasons must be a string array');
+  return {
+    status: status as RewardBreakdown['status'],
+    cardId: requiredString(item.cardId, 'reward.cardId', true),
+    transaction: validateTransaction(item.transaction),
+    ...(item.ruleId === undefined ? {} : { ruleId: requiredString(item.ruleId, 'reward.ruleId', true) }),
+    ...(item.ruleVersion === undefined ? {} : { ruleVersion: requiredString(item.ruleVersion, 'reward.ruleVersion') }),
+    ...(item.sourceSnapshotId === undefined ? {} : { sourceSnapshotId: requiredString(item.sourceSnapshotId, 'reward.sourceSnapshotId', true) }),
+    ...(item.grossReward === undefined ? {} : { grossReward: validateSignedMoney(item.grossReward, 'reward.grossReward') }),
+    ...(item.cappedReward === undefined ? {} : { cappedReward: validateSignedMoney(item.cappedReward, 'reward.cappedReward') }),
+    ...(item.capRemainingBefore === undefined ? {} : { capRemainingBefore: validateMoney(item.capRemainingBefore, 'reward.capRemainingBefore') }),
+    ...(item.capRemainingAfter === undefined ? {} : { capRemainingAfter: validateMoney(item.capRemainingAfter, 'reward.capRemainingAfter') }),
+    unknownReasons: [...item.unknownReasons],
+  };
+}
+
+export function validateStoredState(value: unknown): StoredState {
+  const item = object(value, 'stored state');
+  keys(item, ['schemaVersion', 'cards', 'snapshots', 'rules', 'transactions'], 'stored state');
+  if (item.schemaVersion !== 1) throw new RewardServiceError('STORE_CORRUPT', 'unsupported state schema');
+  if (!Array.isArray(item.cards) || !Array.isArray(item.snapshots) || !Array.isArray(item.rules) || !Array.isArray(item.transactions)) throw new RewardServiceError('STORE_CORRUPT', 'state collections must be arrays');
+  const transactions = item.transactions.map((value, index) => {
+    const record = object(value, `stored state.transactions[${index}]`);
+    keys(record, ['transaction', 'reward'], `stored state.transactions[${index}]`);
+    const transaction = validateTransaction(record.transaction);
+    const reward = validateRewardBreakdown(record.reward);
+    if (JSON.stringify(reward.transaction) !== JSON.stringify(transaction)) throw new RewardServiceError('STORE_CORRUPT', `stored state.transactions[${index}] transaction mismatch`);
+    return { transaction, reward };
+  });
+  return { schemaVersion: 1, cards: item.cards.map(validateCard), snapshots: item.snapshots.map(validateSnapshot), rules: item.rules.map(validateRule), transactions };
 }
 
 export function validateToolArgs(name: string, value: unknown): Record<string, unknown> {
