@@ -8,7 +8,7 @@ Users need a trustworthy way to compare Taiwan credit-card rewards for a planned
 
 ## Solution
 
-Deliver the complete nine-tool, user-scoped stdio MCP surface around a pure deterministic reward calculator and a tenant-bound durable store. The first implementation supports Predicate AST rules, Card Products plus Held Card and Eligibility Facts in calculation inputs, official source provenance, user-confirmed candidate activation, planned and actual transactions, partial and repeated refunds, idempotency, cap reconciliation, currency and FX context, deterministic uncertainty-aware Top-5 ranking, and public-source fetching restricted to an explicit official-host allowlist.
+Deliver the complete eight-tool, user-scoped stdio MCP surface around a pure deterministic reward calculator and a tenant-bound durable store. The first implementation supports Predicate AST rules, Card Products plus Held Card and Eligibility Facts in calculation inputs, official source provenance, user-confirmed candidate activation, planned and actual transactions, partial and repeated refunds, idempotency, cap reconciliation, currency and FX context, and deterministic uncertainty-aware Top-5 ranking. Bank pages, images, and PDFs are obtained and parsed outside the MCP by the Agent or UI.
 
 Images are handled before the MCP boundary by an agent or UI. The MCP accepts structured candidate JSON, not raw image processing. User-assisted input is never treated as official evidence by implication: it remains candidate until traceable official provenance and the complete rule semantics have been reviewed and the user has explicitly confirmed them. Raw images are not retained by default.
 
@@ -45,7 +45,6 @@ Images are handled before the MCP boundary by an agent or UI. The MCP accepts st
 29. As a cardholder, I want the MCP process to require a trusted, canonical data directory, so that tools cannot select or override another user's storage.
 30. As a cardholder, I want tool inputs to exclude user identifiers, data paths, credentials, PAN, CVV, OTP, cookies, and tokens, so that the model cannot spoof identity or submit sensitive financial secrets.
 31. As a cardholder, I want public-offer fetching restricted to official hosts explicitly supplied by the trusted parent, so that arbitrary URLs, private IPs, redirects, and SSRF targets are rejected.
-32. As a cardholder, I want fetched source content bounded by size and time limits, so that a public source cannot exhaust the process.
 33. As a cardholder, I want the system to preserve source hashes, parser versions, fetch times, validity periods, and excerpts, so that an Offer Rule can be traced to the evidence used to create it.
 34. As a cardholder, I want a second process using the same data directory rejected, so that concurrent writers cannot corrupt my ledger.
 35. As a cardholder, I want atomic durable writes and explicit corruption errors, so that an interrupted write does not silently replace valid history with partial state.
@@ -56,7 +55,7 @@ Images are handled before the MCP boundary by an agent or UI. The MCP accepts st
 ## Implementation Decisions
 
 - The system remains an external AionCore stdio MCP. AionCore supplies a separate process and canonical data directory per user. The MCP does not expose an HTTP or SSE listener.
-- The complete initial MCP surface includes `calculate_reward`, `rank_cards`, `register_card`, `list_cards`, `upsert_offer`, `recommend`, `record_transaction`, `remaining_caps`, and `fetch_public_offer`.
+- The complete initial MCP surface includes `calculate_reward`, `rank_cards`, `register_card`, `list_cards`, `upsert_offer`, `recommend`, `record_transaction`, and `remaining_caps`.
 - `calculate_reward` and `rank_cards` remain pure calculation entry points. Their inputs include structured Card Products, Held Card and Eligibility Facts where needed, versioned rules, transactions, and evaluation context. They do not perform persistence.
 - `RewardService` remains the highest public domain seam for the stateful operations. The MCP adapter validates JSON-RPC and tool arguments, then delegates to the service. Private helpers are not public test seams.
 - Reward rules use a validated Predicate AST. The allowlisted operators are conjunction, alternatives, negation, field matching, thresholds, and exclusions. Unknown operators, malformed nodes, unknown fields, and invalid values are rejected as validation failures.
@@ -105,7 +104,7 @@ Images are handled before the MCP boundary by an agent or UI. The MCP accepts st
 
 ## Further Notes
 
-- The most important delivery risk is scope: complete exposure of all nine tools requires purchase, refund, cap, idempotency, source governance, and persistence behavior to be real rather than placeholder endpoints.
+- The most important delivery risk is scope: complete exposure of all eight tools requires purchase, refund, cap, idempotency, source governance, and persistence behavior to be real rather than placeholder endpoints.
 - The initial implementation should preserve one high-level service seam while keeping the evaluator pure. Any new seam should be introduced only when it removes a cross-cutting concern such as cycle resolution, FX provenance, or durable ledger replacement.
 - Existing repository behavior contains known follow-up risks around refund aggregation, billing-cycle calculation, deterministic tie-breaking, and the current source URL validation shape. The implementation must resolve those contract gaps rather than merely document them.
 - The local issue tracker stores this spec under `.scratch/complete-mcp-rewards/`. Follow-up implementation tickets should be separate files under `.scratch/complete-mcp-rewards/issues/`, numbered from `01`, and marked `ready-for-agent` when individually actionable.

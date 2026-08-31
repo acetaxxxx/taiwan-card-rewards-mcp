@@ -146,9 +146,9 @@ describe('Ticket 07: Billing cycles, currencies, and FX context', () => {
   describe('Service-level cycle resolution and multi-period cap reconciliation', () => {
     it('isolates cap consumption by calendar month and resets naturally across months', () => {
       const dir = mkdtempSync(join(tmpdir(), 'card-rewards-cycle-'));
-      const store = new FileStore({ dataDir: dir, sourceHosts: ['bank.example'] });
+      const store = new FileStore({ dataDir: dir });
       try {
-        const service = new RewardService(store, undefined, ['bank.example']);
+        const service = new RewardService(store, undefined);
         service.registerCard({ id: 'card-local', issuer: 'Local Bank', productName: 'Cashback Card' });
         service.upsertOffer(source, calendarMonthRule);
 
@@ -195,9 +195,9 @@ describe('Ticket 07: Billing cycles, currencies, and FX context', () => {
 
     it('resolves billing cycles with closing day (e.g. 15th) and reconciles refunds to original billing cycle', () => {
       const dir = mkdtempSync(join(tmpdir(), 'card-rewards-billing-'));
-      const store = new FileStore({ dataDir: dir, sourceHosts: ['bank.example'] });
+      const store = new FileStore({ dataDir: dir });
       try {
-        const service = new RewardService(store, undefined, ['bank.example']);
+        const service = new RewardService(store, undefined);
         // Card closing day is 15th of each month
         service.registerCard({
           id: 'card-travel',
@@ -257,9 +257,9 @@ describe('Ticket 07: Billing cycles, currencies, and FX context', () => {
 
     it('validates IANA timezone and rejects invalid timezones', () => {
       const dir = mkdtempSync(join(tmpdir(), 'card-rewards-tz-val-'));
-      const store = new FileStore({ dataDir: dir, sourceHosts: ['bank.example'] });
+      const store = new FileStore({ dataDir: dir });
       try {
-        const service = new RewardService(store, undefined, ['bank.example']);
+        const service = new RewardService(store, undefined);
         expect(() => {
           service.registerCard({
             id: 'card-bad-tz',
@@ -276,9 +276,9 @@ describe('Ticket 07: Billing cycles, currencies, and FX context', () => {
 
     it('resolves billing cycles with Asia/Taipei timezone boundary', () => {
       const dir = mkdtempSync(join(tmpdir(), 'card-rewards-tz-bound-'));
-      const store = new FileStore({ dataDir: dir, sourceHosts: ['bank.example'] });
+      const store = new FileStore({ dataDir: dir });
       try {
-        const service = new RewardService(store, undefined, ['bank.example']);
+        const service = new RewardService(store, undefined);
         service.registerCard({
           id: 'card-tw',
           issuer: 'Taipei Bank',

@@ -1,10 +1,9 @@
-import { contentHash, type LedgerStore, type RecordedTransaction, type StoredState } from './store.js';
+import { type LedgerStore, type RecordedTransaction, type StoredState } from './store.js';
 import { convertMinor, evaluateOffer, rankCards, resolveCyclePeriodKey } from './evaluator.js';
 import type { CardDescriptor, EvaluationContext, Money, OfferConfirmation, OfferRuleVersion, OfferSourceSnapshot, RankingEntry, RewardBreakdown, TransactionTuple } from './types.js';
 import type { StartupConfig } from './startup.js';
 import { RewardServiceError } from './errors.js';
 import { validateCard, validateConfirmation, validateRule, validateSnapshot, validateTransaction } from './validation.js';
-import { assertPublicAllowedHost, readResponseWithLimit } from './source-policy.js';
 
 export { RewardServiceError } from './errors.js';
 
@@ -13,7 +12,7 @@ export interface RemainingCap { ruleId: string; usageKey: string; remaining: Mon
 function nowIso(): string { return new Date().toISOString(); }
 
 export class RewardService {
-  constructor(readonly store: LedgerStore, readonly metadataUser: string | undefined, readonly allowedSourceHosts: readonly string[] = []) {}
+  constructor(readonly store: LedgerStore, readonly metadataUser: string | undefined) {}
 
   private context(state: StoredState, now = nowIso(), forTransaction?: TransactionTuple): EvaluationContext {
     const usageByKey: Record<string, Money> = {};
@@ -106,8 +105,6 @@ export class RewardService {
 
     if (!snapshot.id || !snapshot.url || !snapshot.contentHash || !snapshot.parserVersion) throw new RewardServiceError('INVALID_OFFER', 'source snapshot metadata is incomplete');
     if (rule.sourceSnapshotId !== snapshot.id || !rule.id || !rule.cardId) throw new RewardServiceError('INVALID_OFFER', 'rule must reference its source snapshot');
-    const snapshotHost = new URL(snapshot.url).hostname.toLowerCase();
-    if (!this.allowedSourceHosts.includes(snapshotHost)) throw new RewardServiceError('INVALID_OFFER', 'snapshot hostname is not on the trusted official allowlist');
     if (rule.cap && rule.cap.cap.currency !== rule.settlementCurrency) throw new RewardServiceError('INVALID_OFFER', 'cap currency must match settlementCurrency in Phase 1');
     this.store.update((state) => {
       const existingSnapshot = state.snapshots.find((item) => item.id === snapshot.id);
@@ -216,18 +213,4 @@ export class RewardService {
     });
   }
 
-  async fetchPublicOffer(rawUrl: string): Promise<OfferSourceSnapshot> {
-    let url: URL;
-    try { url = new URL(rawUrl); } catch { throw new RewardServiceError('SOURCE_UNAVAILABLE', 'URL is invalid'); }
-    if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.port) throw new RewardServiceError('SOURCE_UNAVAILABLE', 'only public HTTP(S) URLs without credentials or custom ports are allowed');
-    try {
-      await assertPublicAllowedHost(url, this.allowedSourceHosts);
-      const response = await fetch(url, { redirect: 'error', signal: AbortSignal.timeout(5000), headers: { accept: 'text/html,application/pdf,text/plain' } });
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      const contentType = response.headers.get('content-type')?.split(';', 1)[0]?.trim().toLowerCase();
-      if (contentType && !['text/html', 'application/pdf', 'text/plain'].includes(contentType)) throw new Error('source content type is not allowed');
-      const body = await readResponseWithLimit(response, 1_000_000);
-      return { id: `source-${contentHash(rawUrl).slice(0, 16)}`, url: rawUrl, fetchedAt: nowIso(), contentHash: contentHash(body), parserVersion: 'raw-text-1', excerpt: body.slice(0, 4000) };
-    } catch (error) { throw new RewardServiceError('SOURCE_UNAVAILABLE', error instanceof Error ? error.message : 'source fetch failed'); }
-  }
 }

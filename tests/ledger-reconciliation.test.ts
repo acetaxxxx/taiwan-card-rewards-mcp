@@ -13,9 +13,9 @@ const refund = (key: string, refundOfId: string, amountMinor: number): Transacti
 describe('purchase and refund reconciliation', () => {
   it('records partial refunds against the original reward and bounds repeated refunds', () => {
     const dir = mkdtempSync(join(tmpdir(), 'card-rewards-ledger-'));
-    const store = new FileStore({ dataDir: dir, sourceHosts: ['bank.example'] });
+    const store = new FileStore({ dataDir: dir });
     try {
-      const service = new RewardService(store, undefined, ['bank.example']);
+      const service = new RewardService(store, undefined);
       service.registerCard({ id: 'c1', issuer: 'Bank', productName: 'Card' });
       service.upsertOffer(source, rule);
       const original = service.recordTransaction(purchase('p1', 10000));

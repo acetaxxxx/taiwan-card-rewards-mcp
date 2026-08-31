@@ -322,9 +322,8 @@ not belong in the MCP tool schema.
 | `src/store.ts` | JSON state, process lock, atomic file replace | internal `LedgerStore` adapter | no SQLite/WAL, no separate ledger/cap/evidence records, stale lock recovery remains operational |
 | `src/types.ts` | combined wire and domain types | domain-language types plus transport DTOs | no Held Card/Eligibility Fact/Enrollment/Plan Selection/Cycle Window model; `Currency`/storage numbers are too permissive in places |
 | `src/validation.ts` | ingress shape checks | adapter validation plus domain invariant checks | no generic operator registry, no conflict detection, no complete currency/FX scope policy |
-| `src/mcp-contract.ts` | tool descriptions | thin MCP adapter contract | `recommend` and `rank_cards` imply semantic authority; `fetch_public_offer` conflates retrieval with rule publication |
-| `src/source-policy.ts` | safe public HTTP fetch | optional evidence-fetch adapter | network retrieval must remain outside rule activation and calculation |
-| `src/startup.ts` | canonical data directory and source-host config | process identity/persistence adapter | `--user` is currently metadata-only; parent-bound scope needs an explicit deployment contract before sidecar use |
+| `src/mcp-contract.ts` | tool descriptions | thin MCP adapter contract | `recommend` and `rank_cards` imply semantic authority; source retrieval remains outside the MCP |
+| `src/startup.ts` | canonical data directory | process identity/persistence adapter | `--user` is currently metadata-only; parent-bound scope needs an explicit deployment contract before sidecar use |
 
 ## Implementation sequence
 

@@ -5,7 +5,7 @@ Status: proposed for Phase 1
 ## Boundary
 
 `taiwan-card-rewards-mcp` is an independent product repository. It owns the rewards
-evaluator, file-backed store, MCP protocol adapter, public-source adapters,
+evaluator, file-backed store, MCP protocol adapter, source-governance adapters,
 release tags, and its own CI. Aion/AionCore owns conversation UX, Assistant
 and Skill configuration, MCP process launch, and the parent process security
 boundary. AionCore must not contain card, offer, transaction, or cap domain
@@ -18,7 +18,7 @@ review. It is not a reason to modify `aionCore/`.
 ## Release and reproducibility contract
 
 - Every Aion descriptor pins an immutable package version, for example
-  `taiwan-card-rewards-mcp@0.1.0`; never use `latest`, a moving tag, or an
+  `taiwan-card-rewards-mcp@0.2.0`; never use `latest`, a moving tag, or an
   unbounded version range in production.
 - The independent repository commits `package-lock.json`. CI uses a fixed
   Node version, `npm ci --ignore-scripts`, `npm run typecheck`, `npm run build`,
@@ -38,7 +38,7 @@ Example Aion stdio descriptor (illustrative; package version is mandatory):
   "transport": {
     "type": "stdio",
     "command": "npx",
-    "args": ["--yes", "taiwan-card-rewards-mcp@0.1.0", "--data-dir", "/srv/aion/users/<user>/taiwan-card-rewards-mcp"]
+    "args": ["--yes", "taiwan-card-rewards-mcp@0.2.0", "--data-dir", "/srv/aion/users/<user>/taiwan-card-rewards-mcp"]
   },
   "enabled": true
 }
@@ -84,7 +84,7 @@ calculation remains in the MCP package.
 
 ## Data and privacy contract
 
-The MCP may persist card aliases/descriptors, public source snapshots and
+The MCP may persist card aliases/descriptors, source snapshots and
 versioned rules, actual transactions, idempotency keys, and derived cap usage
 under the fixed data directory. It must never persist PAN, full card number,
 CVV/CVC, OTP, cookies, bank credentials, provider keys, or session tokens.

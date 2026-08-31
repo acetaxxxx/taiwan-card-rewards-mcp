@@ -23,12 +23,9 @@ class McpProcessClient {
   private pending: Map<string | number, { resolve: (res: JsonRpcResponse) => void; reject: (err: any) => void }> = new Map();
   public stderrOutput = "";
 
-  constructor(dataDir: string, allowedHosts: string[] = ["bank.example", "official.bank.com"]) {
+  constructor(dataDir: string) {
     const cliPath = resolve(__dirname, "../dist/cli.js");
     const args = [cliPath, "--data-dir", dataDir, "--user", "test-user"];
-    for (const host of allowedHosts) {
-      args.push("--source-host", host);
-    }
     this.proc = spawn(process.execPath, args, {
       stdio: ["pipe", "pipe", "pipe"],
     });
@@ -86,8 +83,8 @@ class McpProcessClient {
   }
 }
 
-describe("Ticket 08: Complete 9-Tool MCP Contract and Public-Source Security", () => {
-  it("exposes all nine approved MCP tools with valid schemas in tools/list", async () => {
+describe("MCP Contract and Agent Boundary", () => {
+  it("exposes all eight approved MCP tools with valid schemas in tools/list", async () => {
     const dir = mkdtempSync(join(tmpdir(), "mcp-contract-list-"));
     const client = new McpProcessClient(dir);
     try {
@@ -96,19 +93,18 @@ describe("Ticket 08: Complete 9-Tool MCP Contract and Public-Source Security", (
       expect(initRes.result).toBeDefined();
       expect(initRes.result.protocolVersion).toBe("2024-11-05");
       expect(initRes.result.serverInfo.name).toBe("taiwan-card-rewards-mcp");
-      expect(initRes.result.serverInfo.version).toBe("0.1.0");
+      expect(initRes.result.serverInfo.version).toBe("0.2.0");
       expect(initRes.result.instructions).toContain("single-user durable ledger");
       expect(initRes.result.instructions).toContain("fail-closed");
 
       // 2. tools/list
       const listRes = await client.send({ id: 2, method: "tools/list" });
       expect(listRes.result).toBeDefined();
-      expect(listRes.result.tools).toHaveLength(9);
+      expect(listRes.result.tools).toHaveLength(8);
 
       const toolNames = listRes.result.tools.map((t: any) => t.name).sort();
       const expectedNames = [
         "calculate_reward",
-        "fetch_public_offer",
         "list_cards",
         "rank_cards",
         "recommend",
@@ -118,7 +114,7 @@ describe("Ticket 08: Complete 9-Tool MCP Contract and Public-Source Security", (
         "upsert_offer",
       ].sort();
       expect(toolNames).toEqual(expectedNames);
-      expect(mcpTools).toHaveLength(9);
+      expect(mcpTools).toHaveLength(8);
 
       // Verify schema properties of all tools
       for (const tool of listRes.result.tools) {
@@ -220,51 +216,9 @@ describe("Ticket 08: Complete 9-Tool MCP Contract and Public-Source Security", (
     }
   });
 
-  it("enforces SSRF protection and hostname allowlisting on fetch_public_offer", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "mcp-contract-fetch-"));
-    const client = new McpProcessClient(dir, ["official.bank.com"]);
-    try {
-      // 1. Non-allowlisted host -> SOURCE_UNAVAILABLE
-      const unallowedRes = await client.send({
-        id: 30,
-        method: "tools/call",
-        params: {
-          name: "fetch_public_offer",
-          arguments: { url: "https://evil.attacker.com/offer" },
-        },
-      });
-      expect(unallowedRes.error?.message).toBe("SOURCE_UNAVAILABLE");
-
-      // 2. Credentials in URL -> SOURCE_UNAVAILABLE
-      const credsRes = await client.send({
-        id: 31,
-        method: "tools/call",
-        params: {
-          name: "fetch_public_offer",
-          arguments: { url: "https://user:pass@official.bank.com/offer" },
-        },
-      });
-      expect(credsRes.error?.message).toBe("SOURCE_UNAVAILABLE");
-
-      // 3. Custom port in URL -> SOURCE_UNAVAILABLE
-      const portRes = await client.send({
-        id: 32,
-        method: "tools/call",
-        params: {
-          name: "fetch_public_offer",
-          arguments: { url: "https://official.bank.com:8443/offer" },
-        },
-      });
-      expect(portRes.error?.message).toBe("SOURCE_UNAVAILABLE");
-    } finally {
-      await client.close();
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
-
-  it("executes the complete 9-tool end-to-end card rewards lifecycle over stdio JSON-RPC", async () => {
+  it("executes the complete 8-tool end-to-end card rewards lifecycle over stdio JSON-RPC", async () => {
     const dir = mkdtempSync(join(tmpdir(), "mcp-contract-e2e-"));
-    const client = new McpProcessClient(dir, ["official.bank.com"]);
+    const client = new McpProcessClient(dir);
     try {
       // Step 1: register_card
       const cardInput = {

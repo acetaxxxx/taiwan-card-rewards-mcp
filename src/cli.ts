@@ -25,7 +25,7 @@ function rejectSensitiveFields(value: unknown): void {
 async function main(): Promise<void> {
   const config = parseStartupArgs(process.argv.slice(2));
   const store: LedgerStore = new FileStore(config);
-  const service = new RewardService(store, config.user, config.sourceHosts);
+  const service = new RewardService(store, config.user);
   const close = () => { store.close(); process.exit(0); };
   process.once('SIGINT', close);
   process.once('SIGTERM', close);
@@ -37,7 +37,7 @@ async function main(): Promise<void> {
     try { request = JSON.parse(line) as JsonRpc; } catch { failure(null, -32700, 'Parse error'); continue; }
     if (request.method === 'notifications/initialized' || request.method?.startsWith('notifications/')) continue;
     try {
-      if (request.method === 'initialize') reply(request.id, { protocolVersion: '2024-11-05', capabilities: { tools: {} }, serverInfo: { name: 'taiwan-card-rewards-mcp', version: '0.1.0' }, instructions: mcpInstructions });
+      if (request.method === 'initialize') reply(request.id, { protocolVersion: '2024-11-05', capabilities: { tools: {} }, serverInfo: { name: 'taiwan-card-rewards-mcp', version: '0.2.0' }, instructions: mcpInstructions });
       else if (request.method === 'tools/list') reply(request.id, { tools: mcpTools.map((tool) => ({ name: tool.name, description: tool.description, inputSchema: tool.inputSchema })) });
       else if (request.method === 'tools/call') reply(request.id, toolResult(await callTool(service, request.params ?? {})));
       else failure(request.id, -32601, `Method not found: ${request.method ?? ''}`);
@@ -62,7 +62,6 @@ async function callTool(service: RewardService, params: Record<string, unknown>)
     case 'recommend': return service.recommend(validateTransaction(args.transaction), typeof args.limit === 'number' ? args.limit : 5);
     case 'record_transaction': return service.recordTransaction(validateTransaction(args.transaction));
     case 'remaining_caps': return service.remainingCaps(String(args.cardId));
-    case 'fetch_public_offer': return await service.fetchPublicOffer(String(args.url));
     case 'calculate_reward': return evaluateOffer(validateRule(args.rule), validateTransaction(args.transaction), validateContext(args.context));
     case 'rank_cards': {
       if (!Array.isArray(args.cards) || !Array.isArray(args.rules)) throw new RewardServiceError('INVALID_INPUT', 'cards and rules must be arrays');

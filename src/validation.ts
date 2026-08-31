@@ -345,7 +345,7 @@ export function validateContext(value: unknown): EvaluationContext {
 
 export function validateToolArgs(name: string, value: unknown): Record<string, unknown> {
   const args = object(value, 'tool arguments');
-  const allowed: Record<string, string[]> = { register_card: ['card'], list_cards: [], upsert_offer: ['snapshot', 'rule', 'confirmation'], recommend: ['transaction', 'limit'], record_transaction: ['transaction'], remaining_caps: ['cardId'], fetch_public_offer: ['url'], calculate_reward: ['rule', 'transaction', 'context'], rank_cards: ['cards', 'rules', 'transaction', 'context'] };
+  const allowed: Record<string, string[]> = { register_card: ['card'], list_cards: [], upsert_offer: ['snapshot', 'rule', 'confirmation'], recommend: ['transaction', 'limit'], record_transaction: ['transaction'], remaining_caps: ['cardId'], calculate_reward: ['rule', 'transaction', 'context'], rank_cards: ['cards', 'rules', 'transaction', 'context'] };
   if (!allowed[name]) throw new RewardServiceError('TOOL_NOT_FOUND', `unknown tool: ${name}`);
   keys(args, allowed[name], `tool ${name}`);
   return args;

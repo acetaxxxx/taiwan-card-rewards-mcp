@@ -16,7 +16,7 @@ import {
 import type { StartupConfig } from "../src/startup.js";
 
 function config(dataDir: string): StartupConfig {
-  return { dataDir: resolve(dataDir), sourceHosts: ["bank.example"] };
+  return { dataDir: resolve(dataDir) };
 }
 
 const sampleCard: CardDescriptor = { id: "card-1", issuer: "TestBank", productName: "TravelCard" };
@@ -165,7 +165,7 @@ describe("LedgerStore persistence seam and FileStore adapter", () => {
     }
 
     const memoryStore = new InMemoryLedgerStore();
-    const service = new RewardService(memoryStore, "test-user", ["bank.example"]);
+    const service = new RewardService(memoryStore, "test-user");
 
     const registered = service.registerCard(sampleCard);
     expect(registered.id).toBe("card-1");

@@ -41,20 +41,19 @@ The system enforces a strict separation of concerns between the AI Agent and the
 ### Command & Arguments
 
 ```bash
-node dist/cli.js --data-dir <absolute-path> [--source-host <official-bank-host>]... [--user <user-id>]
+node dist/cli.js --data-dir <absolute-path> [--user <user-id>]
 ```
 
 | Argument | Requirement | Description |
 |---|:---:|---|
 | `--data-dir <path>` | **Required** | Absolute, existing directory for user storage. Canonicalized via `realpath`; filesystem roots (`/`) are rejected. Tools cannot override this path. |
-| `--source-host <host>` | **Optional (Repeatable)** | Trusted official bank domain allowlist for `fetch_public_offer` (e.g. `--source-host bank.example.com`). |
 | `--user <id>` | **Optional** | Display and audit log metadata only. Never used as an access control or storage partition selector. |
 
 ---
 
 ## 3. The 9-Tool MCP Surface
 
-The MCP server exposes exactly 9 tools. Standalone `confirm_offer` is not part of the surface; candidate activation is folded directly into `upsert_offer`.
+The MCP server exposes exactly 8 tools. Standalone `confirm_offer` is not part of the surface; candidate activation is folded directly into `upsert_offer`.
 
 | Tool Name | Persistence | Description | Key Fail-Closed Errors |
 |---|:---:|---|---|
@@ -66,7 +65,6 @@ The MCP server exposes exactly 9 tools. Standalone `confirm_offer` is not part o
 | `recommend` | Read-only | Recommend up to 5 cards evaluated against registered cards and actual ledger usage without mutating usage. | `INSUFFICIENT_FACTS`, `NEEDS_REVIEW`, `STALE` |
 | `record_transaction` | Mutating | Record an actual purchase (with `idempotencyKey`) or linked refund, updating durable cap usage. | `IDEMPOTENCY_CONFLICT`, `INVALID_REFUND`, `INSUFFICIENT_FACTS`, `NEEDS_REVIEW` |
 | `remaining_caps` | Read-only | Query remaining reward cap balances per rule and usageKey derived from actual transactions. | `INVALID_INPUT`, `STORE_UNAVAILABLE` |
-| `fetch_public_offer` | Read-only | Safe public fetch of official promotion text with SSRF, redirect, and size boundaries. | `SOURCE_UNAVAILABLE`, `NEEDS_REVIEW` |
 
 ---
 
@@ -77,7 +75,7 @@ The MCP server exposes exactly 9 tools. Standalone `confirm_offer` is not part o
 2. If the user holds a new card, call `register_card` with card descriptors (e.g. `{ id: "esun-kumamon", issuer: "ESunBank", productName: "Kumamon Card", network: "JCB", country: "TW" }`).
 
 ### B. Offer Ingestion, OCR & Candidate Activation
-1. **Official Web Sources**: Call `fetch_public_offer` with an allowlisted bank URL to obtain an unverified source snapshot with SHA-256 `contentHash` and raw excerpt.
+1. **Official Web Sources**: The Agent or UI retrieves official bank pages using its own approved browsing or ingestion path, then supplies an unverified structured source snapshot with provenance and content fingerprint. The MCP does not retrieve web content.
 2. **Flyers, App Screenshots & OCR**: Perform image/PDF processing **outside the MCP**. Extract declarative rule fields and assemble a candidate `OfferSourceSnapshot` with `sourceType: "user_input"` and `provenance`.
 3. **Candidate Activation (`upsert_offer`)**:
    - Rules created from unverified inputs or images remain in `status: "candidate"` and will fail the Calculation Trust Gate (`needs_review`).

@@ -4,10 +4,9 @@ import { join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { FileStore } from '../src/store.js';
 import { validateCard, validateToolArgs } from '../src/validation.js';
-import { assertPublicAllowedHost } from '../src/source-policy.js';
 import type { StartupConfig } from '../src/startup.js';
 
-function config(dataDir: string): StartupConfig { return { dataDir: resolve(dataDir), sourceHosts: ['bank.example'] }; }
+function config(dataDir: string): StartupConfig { return { dataDir: resolve(dataDir) }; }
 
 describe('Phase 1 safety boundaries', () => {
   it('allows only one process owner for a data directory', () => {
@@ -25,7 +24,4 @@ describe('Phase 1 safety boundaries', () => {
     expect(() => validateToolArgs('register_card', { card: {}, dataDir: '/tmp/other' })).toThrow(/UNKNOWN_FIELD/);
   });
 
-  it('requires an explicit trusted hostname before DNS resolution', async () => {
-    await expect(assertPublicAllowedHost(new URL('https://bank.example/'), [])).rejects.toThrow(/allowlist/);
-  });
 });

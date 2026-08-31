@@ -18,13 +18,13 @@ class InMemoryLedgerStore implements LedgerStore {
   close(): void {}
 }
 
-describe('Ticket 04 & Contract Convergence: 9 tools and Offer Confirmation in upsert_offer', () => {
+describe('Ticket 04 & Contract Convergence: 8 tools and Offer Confirmation in upsert_offer', () => {
   let store: InMemoryLedgerStore;
   let service: RewardService;
 
   beforeEach(() => {
     store = new InMemoryLedgerStore();
-    service = new RewardService(store, 'test-user', ['bank.example', 'official.bank.tw']);
+    service = new RewardService(store, 'test-user');
   });
 
   const validSnapshot: OfferSourceSnapshot = {
@@ -57,7 +57,7 @@ describe('Ticket 04 & Contract Convergence: 9 tools and Offer Confirmation in up
   };
 
   it('maintains exactly 9 public MCP tools and does not expose a standalone confirm_offer tool', () => {
-    expect(mcpTools).toHaveLength(9);
+    expect(mcpTools).toHaveLength(8);
     const toolNames = mcpTools.map((t) => t.name);
     expect(toolNames).not.toContain('confirm_offer');
     expect(toolNames).toContain('upsert_offer');

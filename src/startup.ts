@@ -6,8 +6,6 @@ export interface StartupConfig {
   dataDir: string;
   /** Display/metadata only; never an authorization or storage selector. */
   user?: string;
-  /** Trusted official source hosts, supplied by the parent, never by tools. */
-  sourceHosts?: string[];
 }
 
 export class StartupContractError extends Error {
@@ -40,7 +38,6 @@ function canonicalDataDir(raw: string): string {
 export function parseStartupArgs(argv: readonly string[]): StartupConfig {
   let dataDir: string | undefined;
   let user: string | undefined;
-  const sourceHosts: string[] = [];
   for (let index = 0; index < argv.length; index += 1) {
     const flag = argv[index];
     if (flag === '--data-dir') {
@@ -53,17 +50,12 @@ export function parseStartupArgs(argv: readonly string[]): StartupConfig {
       if (!value || value.startsWith('--')) throw new StartupContractError('INVALID_USER', '--user requires a value');
       user = value;
       index += 1;
-    } else if (flag === '--source-host') {
-      const value = argv[index + 1];
-      if (!value || value.startsWith('--') || !/^(?=.{1,253}$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/.test(value.toLowerCase())) throw new StartupContractError('INVALID_SOURCE_HOST', '--source-host must be a DNS hostname');
-      sourceHosts.push(value.toLowerCase());
-      index += 1;
     } else {
       throw new StartupContractError('UNKNOWN_ARGUMENT', `unsupported startup argument: ${flag}`);
     }
   }
   if (!dataDir) throw new StartupContractError('MISSING_DATA_DIR', '--data-dir is required');
-  return { dataDir: canonicalDataDir(dataDir), ...(user ? { user } : {}), ...(sourceHosts.length ? { sourceHosts: [...new Set(sourceHosts)] } : {}) };
+  return { dataDir: canonicalDataDir(dataDir), ...(user ? { user } : {}) };
 }
 
 /** Tool calls must use this startup-bound directory; arbitrary paths are forbidden. */
