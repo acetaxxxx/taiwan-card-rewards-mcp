@@ -6,7 +6,7 @@ import { RewardService } from './service.js';
 import { RewardServiceError } from './errors.js';
 import { mcpInstructions, mcpTools } from './mcp-contract.js';
 import { evaluateOffer, rankCards } from './evaluator.js';
-import { validateContext, validateToolArgs, validateTransaction, validateCard, validateConfirmation, validateRule, validateSnapshot } from './validation.js';
+import { validateCardSwitchInput, validateContext, validateToolArgs, validateTransaction, validateCard, validateConfirmation, validateRule, validateSnapshot } from './validation.js';
 
 type JsonRpc = { jsonrpc?: string; id?: string | number | null; method?: string; params?: Record<string, unknown> };
 type Reply = { jsonrpc: '2.0'; id: string | number | null; result?: unknown; error?: { code: number; message: string; data?: unknown } };
@@ -37,7 +37,7 @@ async function main(): Promise<void> {
     try { request = JSON.parse(line) as JsonRpc; } catch { failure(null, -32700, 'Parse error'); continue; }
     if (request.method === 'notifications/initialized' || request.method?.startsWith('notifications/')) continue;
     try {
-      if (request.method === 'initialize') reply(request.id, { protocolVersion: '2024-11-05', capabilities: { tools: {} }, serverInfo: { name: 'taiwan-card-rewards-mcp', version: '0.2.0' }, instructions: mcpInstructions });
+      if (request.method === 'initialize') reply(request.id, { protocolVersion: '2024-11-05', capabilities: { tools: {} }, serverInfo: { name: 'taiwan-card-rewards-mcp', version: '0.3.0' }, instructions: mcpInstructions });
       else if (request.method === 'tools/list') reply(request.id, { tools: mcpTools.map((tool) => ({ name: tool.name, description: tool.description, inputSchema: tool.inputSchema })) });
       else if (request.method === 'tools/call') reply(request.id, toolResult(await callTool(service, request.params ?? {})));
       else failure(request.id, -32601, `Method not found: ${request.method ?? ''}`);
@@ -61,7 +61,9 @@ async function callTool(service: RewardService, params: Record<string, unknown>)
     case 'upsert_offer': return service.upsertOffer(validateSnapshot(args.snapshot), validateRule(args.rule), args.confirmation !== undefined ? validateConfirmation(args.confirmation) : undefined);
     case 'recommend': return service.recommend(validateTransaction(args.transaction), typeof args.limit === 'number' ? args.limit : 5);
     case 'record_transaction': return service.recordTransaction(validateTransaction(args.transaction));
-    case 'remaining_caps': return service.remainingCaps(String(args.cardId));
+    case 'remaining_caps': return service.remainingCaps(String(args.cardId), typeof args.asOf === 'string' ? args.asOf : undefined);
+    case 'get_card_switch_status': return service.getCardSwitchStatus(String(args.cardId), typeof args.asOfUtc === 'string' ? args.asOfUtc : undefined);
+    case 'upsert_card_switch': return service.upsertCardSwitch(validateCardSwitchInput(args.input));
     case 'calculate_reward': return evaluateOffer(validateRule(args.rule), validateTransaction(args.transaction), validateContext(args.context));
     case 'rank_cards': {
       if (!Array.isArray(args.cards) || !Array.isArray(args.rules)) throw new RewardServiceError('INVALID_INPUT', 'cards and rules must be arrays');

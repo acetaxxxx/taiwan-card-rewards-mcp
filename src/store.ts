@@ -1,7 +1,7 @@
 import * as crypto from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import type { CardDescriptor, OfferRuleVersion, OfferSourceSnapshot, RewardBreakdown, TransactionTuple } from './types.js';
+import type { CardDescriptor, CardSwitchCampaign, CardSwitchEnrollment, CardSwitchProjection, OfferRuleVersion, OfferSourceSnapshot, RewardBreakdown, TransactionTuple } from './types.js';
 import type { StartupConfig } from './startup.js';
 import { validateStoredState } from './validation.js';
 
@@ -16,9 +16,12 @@ export interface StoredState {
   snapshots: OfferSourceSnapshot[];
   rules: OfferRuleVersion[];
   transactions: RecordedTransaction[];
+  campaigns: CardSwitchCampaign[];
+  switchEnrollments: CardSwitchEnrollment[];
+  cardSwitches: CardSwitchProjection[];
 }
 
-export const emptyState = (): StoredState => ({ schemaVersion: 1, cards: [], snapshots: [], rules: [], transactions: [] });
+export const emptyState = (): StoredState => ({ schemaVersion: 1, cards: [], snapshots: [], rules: [], transactions: [], campaigns: [], switchEnrollments: [], cardSwitches: [] });
 
 export class StoreError extends Error {
   constructor(public readonly code: string, message: string) {

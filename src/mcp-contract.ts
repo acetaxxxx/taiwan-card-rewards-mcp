@@ -10,6 +10,7 @@ export const mcpInstructions = [
   'Use record_transaction with a stable idempotencyKey for actual purchases and linked refunds. Never send PAN, CVV, OTP, passwords, tokens, or user_id.',
   'Treat unknown, stale, and needs_review as fail-closed: ask for missing facts or confirmation; never guess or convert them to zero reward.',
   'For foreign-currency transactions provide a current FX snapshot. Use remaining_caps to inspect actual usage and cap balances.',
+  'For card benefit switching, use get_card_switch_status to inspect candidates and upsert_card_switch only after the user confirms a completed bank-app action; same-day writes are allowed but return warnings.',
 ].join(' ');
 
 export const mcpTools: readonly McpToolContract[] = [
@@ -20,7 +21,9 @@ export const mcpTools: readonly McpToolContract[] = [
   { name: 'upsert_offer', description: 'Store a public offer source snapshot and versioned rule, optionally confirming candidate rules with Offer Confirmation.', readOnly: false, inputSchema: { type: 'object', required: ['snapshot', 'rule'] }, failClosedErrors: ['INVALID_OFFER', 'INVALID_CONFIRMATION', 'STORE_UNAVAILABLE'] },
   { name: 'recommend', description: 'Return up to five deterministic card recommendations using persisted rules and actual usage.', readOnly: true, inputSchema: { type: 'object', required: ['transaction'] }, failClosedErrors: ['INSUFFICIENT_FACTS', 'NEEDS_REVIEW', 'STALE'] },
   { name: 'record_transaction', description: 'Record an actual purchase or linked refund and update durable usage.', readOnly: false, inputSchema: { type: 'object', required: ['transaction'] }, failClosedErrors: ['IDEMPOTENCY_CONFLICT', 'INVALID_REFUND', 'INSUFFICIENT_FACTS', 'NEEDS_REVIEW'] },
-  { name: 'remaining_caps', description: 'Report remaining reward cap amounts derived from actual transactions.', readOnly: true, inputSchema: { type: 'object', required: ['cardId'] }, failClosedErrors: ['STORE_UNAVAILABLE'] },
+  { name: 'remaining_caps', description: 'Report remaining reward cap amounts derived from actual transactions.', readOnly: true, inputSchema: { type: 'object', required: ['cardId'], properties: { cardId: { type: 'string' }, asOf: { type: 'string', format: 'date-time' } } }, failClosedErrors: ['STORE_UNAVAILABLE'] },
+  { name: 'get_card_switch_status', description: 'Inspect the latest confirmed card benefit switch and available campaign candidates.', readOnly: true, inputSchema: { type: 'object', required: ['cardId'] }, failClosedErrors: ['CARD_NOT_FOUND', 'STORE_UNAVAILABLE'] },
+  { name: 'upsert_card_switch', description: 'Record or adjust a user-confirmed completed bank-app benefit switch.', readOnly: false, inputSchema: { type: 'object', required: ['input'] }, failClosedErrors: ['CARD_NOT_FOUND', 'IDEMPOTENCY_CONFLICT', 'INVALID_CONFIRMATION', 'STORE_UNAVAILABLE'] },
 ];
 
 export const failClosedErrors = {

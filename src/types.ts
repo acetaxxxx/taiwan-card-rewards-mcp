@@ -174,6 +174,76 @@ export interface RewardBreakdown {
   unknownReasons: string[];
 }
 
+export type CardSwitchAction = 'record' | 'adjust';
+
+export interface CardSwitchConfirmation {
+  confirmedBy: string;
+  confirmedAtUtc: string;
+  completed: boolean;
+}
+
+export interface CardSwitchCampaign {
+  id: string;
+  issuer: string;
+  network?: string | undefined;
+  cardId?: string | undefined;
+  sourceUrl: string;
+  sourceSnapshotAt: string;
+  ruleVersion: string;
+  effectiveFrom: string;
+  effectiveTo?: string | undefined;
+  eligibility?: readonly string[] | undefined;
+  rewardCaps?: readonly Money[] | undefined;
+}
+
+export interface CardSwitchEnrollment {
+  campaignId: string;
+  cardId: string;
+  enrolled: boolean;
+  usageByPeriod?: Readonly<Record<string, Money>> | undefined;
+}
+
+export interface CardSwitchProjection {
+  cardId: string;
+  timezone: string;
+  switchedAtUtc: string;
+  switchedAtLocal: string;
+  switchedLocalDate: string;
+  benefit: string;
+  sourceUrl: string;
+  sourceSnapshotAt: string;
+  ruleVersion: string;
+  confirmation: CardSwitchConfirmation;
+  action: CardSwitchAction;
+  idempotencyKey: string;
+  adjustmentReason?: string | undefined;
+}
+
+export interface CardSwitchInput {
+  action: CardSwitchAction;
+  cardId: string;
+  timezone: string;
+  switchedAtUtc: string;
+  benefit: string;
+  sourceUrl: string;
+  sourceSnapshotAt: string;
+  ruleVersion: string;
+  confirmation: CardSwitchConfirmation;
+  idempotencyKey: string;
+  adjustmentReason?: string | undefined;
+  campaign?: CardSwitchCampaign | undefined;
+  enrollment?: CardSwitchEnrollment | undefined;
+}
+
+export interface CardSwitchStatus {
+  cardId: string;
+  current?: CardSwitchProjection | undefined;
+  alreadySwitchedToday: boolean;
+  availableCandidates: readonly CardSwitchCampaign[];
+  currentlyUnavailable: readonly { campaign: CardSwitchCampaign; reason: string }[];
+  warnings: readonly string[];
+}
+
 export interface EvaluationContext {
   now: string;
   usageByKey?: Readonly<Record<string, Money>> | undefined;

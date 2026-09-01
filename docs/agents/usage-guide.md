@@ -65,9 +65,9 @@ node dist/cli.js --data-dir <absolute-path> [--user <user-id>]
 
 ---
 
-## 3. The 8-Tool MCP Surface
+## 3. The MCP Tool Surface
 
-The MCP server exposes exactly 8 tools. Standalone `confirm_offer` is not part of the surface; candidate activation is folded directly into `upsert_offer`.
+The MCP server exposes the 9 reward tools plus two card-switch tools. Standalone `confirm_offer` is not part of the surface; candidate activation is folded directly into `upsert_offer`.
 
 | Tool Name | Persistence | Description | Key Fail-Closed Errors |
 |---|:---:|---|---|
@@ -79,6 +79,8 @@ The MCP server exposes exactly 8 tools. Standalone `confirm_offer` is not part o
 | `recommend` | Read-only | Recommend up to 5 cards evaluated against registered cards and actual ledger usage without mutating usage. | `INSUFFICIENT_FACTS`, `NEEDS_REVIEW`, `STALE` |
 | `record_transaction` | Mutating | Record an actual purchase (with `idempotencyKey`) or linked refund, updating durable cap usage. | `IDEMPOTENCY_CONFLICT`, `INVALID_REFUND`, `INSUFFICIENT_FACTS`, `NEEDS_REVIEW` |
 | `remaining_caps` | Read-only | Query remaining reward cap balances per rule and usageKey derived from actual transactions. | `INVALID_INPUT`, `STORE_UNAVAILABLE` |
+| `get_card_switch_status` | Read-only | Show latest confirmed switch, available candidates, and unavailable campaigns with reasons. | `CARD_NOT_FOUND`, `STORE_UNAVAILABLE` |
+| `upsert_card_switch` | Mutating | Record or adjust a user-confirmed completed bank-app switch with idempotency. | `CARD_NOT_FOUND`, `INVALID_CONFIRMATION`, `IDEMPOTENCY_CONFLICT` |
 
 ---
 
@@ -139,6 +141,22 @@ The MCP server exposes exactly 8 tools. Standalone `confirm_offer` is not part o
 ---
 
 ## 5. Fail-Closed Statuses & Agent Action Guide
+
+### Card benefit switching
+
+Call `get_card_switch_status` before discussing or recording a benefit switch.
+It returns the latest per-card projection, `availableCandidates`, and
+`currentlyUnavailable` campaigns with reasons; candidates with unknown
+eligibility remain visible with warnings. The agent decides which campaign to
+recommend. After the user confirms that the change was completed in the bank
+app, call `upsert_card_switch` with `input.action` set to `record` or `adjust`,
+an idempotency key, timezone, source URL/snapshot, rule version, and a
+`confirmation` whose `completed` value is `true`.
+
+The server records UTC and card-timezone local timestamps/date, benefit, source,
+confirmation, and adjustment reason. A second confirmed write on the same local
+day is allowed and returns `alreadySwitchedToday: true` plus a warning. Never
+record an intended or unconfirmed app action.
 
 The calculation engine returns explicit evaluation statuses. Agents must handle them according to these principles:
 

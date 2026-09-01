@@ -84,7 +84,7 @@ class McpProcessClient {
 }
 
 describe("MCP Contract and Agent Boundary", () => {
-  it("exposes all eight approved MCP tools with valid schemas in tools/list", async () => {
+  it("exposes all ten approved MCP tools with valid schemas in tools/list", async () => {
     const dir = mkdtempSync(join(tmpdir(), "mcp-contract-list-"));
     const client = new McpProcessClient(dir);
     try {
@@ -93,14 +93,14 @@ describe("MCP Contract and Agent Boundary", () => {
       expect(initRes.result).toBeDefined();
       expect(initRes.result.protocolVersion).toBe("2024-11-05");
       expect(initRes.result.serverInfo.name).toBe("taiwan-card-rewards-mcp");
-      expect(initRes.result.serverInfo.version).toBe("0.2.0");
+      expect(initRes.result.serverInfo.version).toBe("0.3.0");
       expect(initRes.result.instructions).toContain("single-user durable ledger");
       expect(initRes.result.instructions).toContain("fail-closed");
 
       // 2. tools/list
       const listRes = await client.send({ id: 2, method: "tools/list" });
       expect(listRes.result).toBeDefined();
-      expect(listRes.result.tools).toHaveLength(8);
+      expect(listRes.result.tools).toHaveLength(10);
 
       const toolNames = listRes.result.tools.map((t: any) => t.name).sort();
       const expectedNames = [
@@ -111,10 +111,12 @@ describe("MCP Contract and Agent Boundary", () => {
         "record_transaction",
         "register_card",
         "remaining_caps",
+        "get_card_switch_status",
+        "upsert_card_switch",
         "upsert_offer",
       ].sort();
       expect(toolNames).toEqual(expectedNames);
-      expect(mcpTools).toHaveLength(8);
+      expect(mcpTools).toHaveLength(10);
 
       // Verify schema properties of all tools
       for (const tool of listRes.result.tools) {
@@ -364,7 +366,7 @@ describe("MCP Contract and Agent Boundary", () => {
       const capBeforeRes = await client.send({
         id: 107,
         method: "tools/call",
-        params: { name: "remaining_caps", arguments: { cardId: "esun-travel-card" } },
+          params: { name: "remaining_caps", arguments: { cardId: "esun-travel-card", asOf: "2026-08-15T12:00:00Z" } },
       });
       expect(capBeforeRes.result.structuredContent[0].remaining.amountMinor).toBe(50000);
 
@@ -390,7 +392,7 @@ describe("MCP Contract and Agent Boundary", () => {
       const capAfterSpend = await client.send({
         id: 109,
         method: "tools/call",
-        params: { name: "remaining_caps", arguments: { cardId: "esun-travel-card" } },
+        params: { name: "remaining_caps", arguments: { cardId: "esun-travel-card", asOf: "2026-08-15T12:00:00Z" } },
       });
       expect(capAfterSpend.result.structuredContent[0].remaining.amountMinor).toBe(33000);
 
@@ -424,7 +426,7 @@ describe("MCP Contract and Agent Boundary", () => {
       const capAfterRefund = await client.send({
         id: 112,
         method: "tools/call",
-        params: { name: "remaining_caps", arguments: { cardId: "esun-travel-card" } },
+        params: { name: "remaining_caps", arguments: { cardId: "esun-travel-card", asOf: "2026-08-16T12:00:00Z" } },
       });
       expect(capAfterRefund.result.structuredContent[0].remaining.amountMinor).toBe(50000);
     } finally {

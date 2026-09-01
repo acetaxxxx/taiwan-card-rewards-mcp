@@ -1,9 +1,10 @@
 import { type LedgerStore, type RecordedTransaction, type StoredState } from './store.js';
 import { convertMinor, evaluateOffer, rankCards, resolveCyclePeriodKey } from './evaluator.js';
-import type { CardDescriptor, EvaluationContext, Money, OfferConfirmation, OfferRuleVersion, OfferSourceSnapshot, RankingEntry, RewardBreakdown, TransactionTuple } from './types.js';
+import type { CardDescriptor, CardSwitchInput, CardSwitchStatus, EvaluationContext, Money, OfferConfirmation, OfferRuleVersion, OfferSourceSnapshot, RankingEntry, RewardBreakdown, TransactionTuple } from './types.js';
 import type { StartupConfig } from './startup.js';
 import { RewardServiceError } from './errors.js';
 import { validateCard, validateConfirmation, validateRule, validateSnapshot, validateTransaction } from './validation.js';
+import { cardSwitchStatus, projectionFromInput } from './card-switch.js';
 
 export { RewardServiceError } from './errors.js';
 
@@ -67,6 +68,42 @@ export class RewardService {
   }
 
   listCards(): CardDescriptor[] { return this.store.read().cards; }
+
+  getCardSwitchStatus(cardId: string, asOfUtc = nowIso()): CardSwitchStatus {
+    const state = this.store.read();
+    const card = state.cards.find((item) => item.id === cardId);
+    if (!card) throw new RewardServiceError('CARD_NOT_FOUND', `card ${cardId} not found`);
+    const current = state.cardSwitches.filter((item) => item.cardId === cardId).at(-1);
+    return cardSwitchStatus(card, current, state.campaigns, asOfUtc);
+  }
+
+  upsertCardSwitch(input: CardSwitchInput): CardSwitchStatus {
+    const state = this.store.read();
+    const card = state.cards.find((item) => item.id === input.cardId);
+    if (!card) throw new RewardServiceError('CARD_NOT_FOUND', `card ${input.cardId} not found`);
+    const projection = projectionFromInput(input);
+    const duplicate = state.cardSwitches.find((item) => item.idempotencyKey === input.idempotencyKey);
+    if (duplicate) {
+      if (JSON.stringify(duplicate) !== JSON.stringify(projection)) throw new RewardServiceError('IDEMPOTENCY_CONFLICT', 'idempotencyKey already belongs to a different card switch');
+      return cardSwitchStatus(card, duplicate, state.campaigns, input.switchedAtUtc);
+    }
+    this.store.update((next) => {
+      if (input.campaign) {
+        const index = next.campaigns.findIndex((item) => item.id === input.campaign!.id);
+        if (index >= 0) next.campaigns[index] = input.campaign!;
+        else next.campaigns.push(input.campaign!);
+      }
+      if (input.enrollment) {
+        const index = next.switchEnrollments.findIndex((item) => item.campaignId === input.enrollment!.campaignId && item.cardId === input.enrollment!.cardId);
+        if (index >= 0) next.switchEnrollments[index] = input.enrollment!;
+        else next.switchEnrollments.push(input.enrollment!);
+      }
+      next.cardSwitches.push(projection);
+    });
+    const next = this.store.read();
+    const current = next.cardSwitches.filter((item) => item.cardId === input.cardId).at(-1);
+    return cardSwitchStatus(card, current, next.campaigns, input.switchedAtUtc);
+  }
 
   upsertOffer(
     snapshot: OfferSourceSnapshot,
