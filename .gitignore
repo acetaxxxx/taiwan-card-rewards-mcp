@@ -2,3 +2,10 @@ node_modules/
 dist/
 coverage/
 *.log
+
+# Local AionUi-injected skills are not repository content.
+.agents/skills/aionui-config
+.agents/skills/cron
+.agents/skills/officecli
+.agents/skills/session-message
+.agents/skills/skill-creator
