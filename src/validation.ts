@@ -1,4 +1,4 @@
-import type { CardDescriptor, CardProduct, CapPeriod, CardSwitchCampaign, CardSwitchConfirmation, CardSwitchInput, CardSwitchEnrollment, CardSwitchProjection, EligibilityFact, EvaluationContext, FxSnapshot, HeldCard, Money, OfferConfirmation, OfferProvenance, OfferRuleVersion, OfferSourceSnapshot, Predicate, PredicateValue, RewardBreakdown, RewardSpec, RuleMatch, TransactionTuple } from './types.js';
+import type { CardDescriptor, CardProduct, CapPeriod, CapPoolDefinition, CardSwitchCampaign, CardSwitchConfirmation, CardSwitchInput, CardSwitchEnrollment, CardSwitchProjection, EligibilityFact, EvaluationContext, FxSnapshot, HeldCard, Money, OfferConfirmation, OfferProvenance, OfferRuleVersion, OfferSourceSnapshot, Predicate, PredicateValue, RewardBreakdown, RewardSpec, RuleMatch, TransactionTuple } from './types.js';
 import type { StoredState } from './store.js';
 import { RewardServiceError } from './errors.js';
 
@@ -233,22 +233,17 @@ export function validateConfirmation(value: unknown): OfferConfirmation {
 
 export function validateRule(value: unknown): OfferRuleVersion {
   const item = object(value, 'rule');
-  keys(item, ['id', 'cardId', 'version', 'sourceSnapshotId', 'status', 'validFrom', 'validTo', 'settlementCurrency', 'match', 'predicate', 'requires', 'reward', 'cap', 'confirmation'], 'rule');
+  keys(item, ['id', 'cardId', 'version', 'sourceSnapshotId', 'status', 'validFrom', 'validTo', 'settlementCurrency', 'match', 'predicate', 'requires', 'reward', 'capPoolRefs', 'confirmation', 'combination'], 'rule');
   const status = requiredString(item.status, 'rule.status');
   if (!['candidate', 'active', 'stale', 'superseded', 'needs_review', 'unknown'].includes(status)) throw new RewardServiceError('INVALID_INPUT', 'rule.status is invalid');
   const rewardItem = object(item.reward, 'rule.reward');
-  keys(rewardItem, ['kind', 'rateBps', 'amountMinor', 'currency'], 'rule.reward');
+  keys(rewardItem, ['kind', 'code', 'rateBps', 'amountMinor', 'currency', 'roundingMode', 'roundingScope', 'unitAmountMinor', 'unitRewardMinor', 'stepAmountMinor', 'stepRewardMinor'], 'rule.reward');
   const kind = requiredString(rewardItem.kind, 'rule.reward.kind');
-  if (kind !== 'percentage' && kind !== 'flat') throw new RewardServiceError('INVALID_INPUT', 'rule.reward.kind is invalid');
-  const reward: RewardSpec = kind === 'percentage' ? { kind: 'percentage', rateBps: finiteRate(rewardItem.rateBps, 'rule.reward.rateBps') } : { kind: 'flat', amountMinor: safeInt(rewardItem.amountMinor, 'rule.reward.amountMinor'), ...(rewardItem.currency === undefined ? {} : { currency: requiredString(rewardItem.currency, 'rule.reward.currency', true).toUpperCase() }) };
-  let cap: OfferRuleVersion['cap'];
-  if (item.cap !== undefined) {
-    const capItem = object(item.cap, 'rule.cap');
-    keys(capItem, ['kind', 'cap', 'usageKey'], 'rule.cap');
-    const capKind = requiredString(capItem.kind, 'rule.cap.kind');
-    if (!['calendar_month', 'billing_cycle', 'campaign'].includes(capKind)) throw new RewardServiceError('INVALID_INPUT', 'rule.cap.kind is invalid');
-    cap = { kind: capKind as CapPeriod['kind'], cap: validateMoney(capItem.cap, 'rule.cap.cap'), usageKey: requiredString(capItem.usageKey, 'rule.cap.usageKey', true) };
-  }
+  const roundingMode = rewardItem.roundingMode === undefined ? undefined : requiredString(rewardItem.roundingMode, 'rule.reward.roundingMode');
+  const roundingScope = rewardItem.roundingScope === undefined ? undefined : requiredString(rewardItem.roundingScope, 'rule.reward.roundingScope');
+  if (roundingMode !== undefined && !['floor', 'ceil', 'half_up', 'nearest'].includes(roundingMode)) throw new RewardServiceError('INVALID_INPUT', 'rule.reward.roundingMode is invalid');
+  if (roundingScope !== undefined && !['per_transaction', 'per_period'].includes(roundingScope)) throw new RewardServiceError('INVALID_INPUT', 'rule.reward.roundingScope is invalid');
+  const reward: RewardSpec = { kind, ...(rewardItem.code === undefined ? {} : { code: requiredString(rewardItem.code, 'rule.reward.code', true) }), ...(rewardItem.rateBps === undefined ? {} : { rateBps: finiteRate(rewardItem.rateBps, 'rule.reward.rateBps') }), ...(rewardItem.amountMinor === undefined ? {} : { amountMinor: safeInt(rewardItem.amountMinor, 'rule.reward.amountMinor') }), ...(rewardItem.currency === undefined ? {} : { currency: requiredString(rewardItem.currency, 'rule.reward.currency', true).toUpperCase() }), ...(roundingMode ? { roundingMode: roundingMode as RewardSpec['roundingMode'] } : {}), ...(roundingScope ? { roundingScope: roundingScope as RewardSpec['roundingScope'] } : {}), ...(rewardItem.unitAmountMinor === undefined ? {} : { unitAmountMinor: safeInt(rewardItem.unitAmountMinor, 'rule.reward.unitAmountMinor', 1) }), ...(rewardItem.unitRewardMinor === undefined ? {} : { unitRewardMinor: safeInt(rewardItem.unitRewardMinor, 'rule.reward.unitRewardMinor') }), ...(rewardItem.stepAmountMinor === undefined ? {} : { stepAmountMinor: safeInt(rewardItem.stepAmountMinor, 'rule.reward.stepAmountMinor', 1) }), ...(rewardItem.stepRewardMinor === undefined ? {} : { stepRewardMinor: safeInt(rewardItem.stepRewardMinor, 'rule.reward.stepRewardMinor') }) };
   const validFrom = requiredString(item.validFrom, 'rule.validFrom');
   if (!Number.isFinite(Date.parse(validFrom)) || !validFrom.includes('T')) throw new RewardServiceError('INVALID_INPUT', 'rule.validFrom must be an ISO date-time');
   const validTo = optionalString(item.validTo, 'rule.validTo');
@@ -261,7 +256,38 @@ export function validateRule(value: unknown): OfferRuleVersion {
     requires = [...new Set(item.requires)] as OfferRuleVersion['requires'];
   }
   const confirmation = item.confirmation !== undefined ? validateConfirmation(item.confirmation) : undefined;
-  return { id: requiredString(item.id, 'rule.id', true), cardId: requiredString(item.cardId, 'rule.cardId', true), version: requiredString(item.version, 'rule.version'), sourceSnapshotId: requiredString(item.sourceSnapshotId, 'rule.sourceSnapshotId', true), status: status as OfferRuleVersion['status'], validFrom, ...(validTo ? { validTo } : {}), settlementCurrency: requiredString(item.settlementCurrency, 'rule.settlementCurrency', true).toUpperCase(), match: validateMatch(item.match), ...(predicate ? { predicate } : {}), ...(requires?.length ? { requires } : {}), reward, ...(cap ? { cap } : {}), ...(confirmation ? { confirmation } : {}) };
+  let combination: OfferRuleVersion['combination'];
+  if (item.combination !== undefined) {
+    const c = object(item.combination, 'rule.combination');
+    keys(c, ['mode', 'groupId', 'version', 'priority', 'prerequisiteRuleIds'], 'rule.combination');
+    const mode = requiredString(c.mode, 'rule.combination.mode');
+    if (!mode) throw new RewardServiceError('INVALID_INPUT', 'rule.combination.mode is required');
+    combination = { mode, groupId: requiredString(c.groupId, 'rule.combination.groupId', true), version: requiredString(c.version, 'rule.combination.version'), ...(c.priority === undefined ? {} : { priority: safeInt(c.priority, 'rule.combination.priority') }), ...(c.prerequisiteRuleIds === undefined ? {} : { prerequisiteRuleIds: Array.isArray(c.prerequisiteRuleIds) ? c.prerequisiteRuleIds.map((v) => requiredString(v, 'rule.combination.prerequisiteRuleIds', true)) : [] }) };
+  }
+  let capPoolRefs: string[] | undefined;
+  if (item.capPoolRefs !== undefined) {
+    if (!Array.isArray(item.capPoolRefs) || item.capPoolRefs.length === 0 || item.capPoolRefs.some((v) => typeof v !== 'string' || !v.trim())) throw new RewardServiceError('INVALID_INPUT', 'rule.capPoolRefs must be a non-empty string array');
+    capPoolRefs = [...new Set(item.capPoolRefs.map((v) => requiredString(v, 'rule.capPoolRefs', true)))];
+  }
+  return { id: requiredString(item.id, 'rule.id', true), cardId: requiredString(item.cardId, 'rule.cardId', true), version: requiredString(item.version, 'rule.version'), sourceSnapshotId: requiredString(item.sourceSnapshotId, 'rule.sourceSnapshotId', true), status: status as OfferRuleVersion['status'], validFrom, ...(validTo ? { validTo } : {}), settlementCurrency: requiredString(item.settlementCurrency, 'rule.settlementCurrency', true).toUpperCase(), match: validateMatch(item.match), ...(predicate ? { predicate } : {}), ...(requires?.length ? { requires } : {}), reward, ...(capPoolRefs ? { capPoolRefs } : {}), ...(confirmation ? { confirmation } : {}), ...(combination ? { combination } : {}) };
+}
+
+export function validateCapPool(value: unknown): CapPoolDefinition {
+  const item = object(value, 'capPool');
+  keys(item, ['id', 'name', 'metric', 'period', 'limit', 'currency', 'timezone'], 'capPool');
+  const metric = requiredString(item.metric, 'capPool.metric');
+  const period = requiredString(item.period, 'capPool.period');
+  if (!['calendar_month', 'billing_cycle', 'quarter', 'year', 'campaign'].includes(period) || !['spend', 'reward', 'transaction_count'].includes(metric)) throw new RewardServiceError('STORE_CORRUPT', 'capPool period or metric is invalid');
+  const limit = safeInt(item.limit, 'capPool.limit', 0);
+  return {
+    id: requiredString(item.id, 'capPool.id', true),
+    ...(item.name === undefined ? {} : { name: requiredString(item.name, 'capPool.name') }),
+    metric: metric as CapPoolDefinition['metric'],
+    period: period as CapPoolDefinition['period'],
+    limit,
+    ...(item.currency === undefined ? {} : { currency: requiredString(item.currency, 'capPool.currency', true).toUpperCase() }),
+    ...(item.timezone === undefined ? {} : { timezone: validateTimezone(item.timezone, 'capPool.timezone') }),
+  };
 }
 
 export function validateTransaction(value: unknown): TransactionTuple {
@@ -291,15 +317,22 @@ export function validateTransaction(value: unknown): TransactionTuple {
   return { cardId: requiredString(item.cardId, 'transaction.cardId', true), kind: kind as TransactionTuple['kind'], mode: mode as TransactionTuple['mode'], occurredAt, amount: validateMoney(item.amount, 'transaction.amount'), ...(optional('idempotencyKey') ? { idempotencyKey: optional('idempotencyKey') } : {}), ...(optional('merchant') ? { merchant: optional('merchant') } : {}), ...(optional('mcc') ? { mcc: optional('mcc') } : {}), ...(optional('country', true) ? { country: optional('country', true) } : {}), ...(optional('channel') ? { channel: optional('channel') } : {}), ...(optional('paymentMethod') ? { paymentMethod: optional('paymentMethod') } : {}), ...(fx ? { fx } : {}), ...(optional('refundOfId', true) ? { refundOfId: optional('refundOfId', true) } : {}), ...(originalRewardMinor === undefined ? {} : { originalRewardMinor }) };
 }
 
+function validateUsageKey(key: string, name: string): string {
+  if (typeof key !== 'string' || !key.trim() || key.length > 256) throw new RewardServiceError('INVALID_INPUT', `${name} is invalid`);
+  if (key === '__proto__' || key === 'prototype' || key === 'constructor') throw new RewardServiceError('INVALID_INPUT', `${name} is forbidden`);
+  if (!/^[A-Za-z0-9][A-Za-z0-9_:|-]{0,255}$/.test(key)) throw new RewardServiceError('INVALID_INPUT', `${name} contains invalid characters`);
+  return key;
+}
+
 export function validateContext(value: unknown): EvaluationContext {
   const item = object(value, 'context');
-  keys(item, ['now', 'usageByKey', 'sourceSnapshots', 'userConfirmed', 'heldCards', 'eligibilityFacts', 'userFacts'], 'context');
+  keys(item, ['now', 'usageByKey', 'sourceSnapshots', 'capPools', 'userConfirmed', 'heldCards', 'eligibilityFacts', 'userFacts'], 'context');
   const now = requiredString(item.now, 'context.now');
   if (!Number.isFinite(Date.parse(now))) throw new RewardServiceError('INVALID_INPUT', 'context.now must be an ISO date');
   const usageByKey: Record<string, Money> = {};
   if (item.usageByKey !== undefined) {
     const usage = object(item.usageByKey, 'context.usageByKey');
-    for (const [key, value] of Object.entries(usage)) usageByKey[requiredString(key, 'context.usageByKey key', true)] = validateMoney(value, `context.usageByKey.${key}`);
+    for (const [key, value] of Object.entries(usage)) usageByKey[validateUsageKey(key, 'context.usageByKey key')] = validateMoney(value, `context.usageByKey.${key}`);
   }
   const sourceSnapshots: Record<string, OfferSourceSnapshot> = {};
   if (item.sourceSnapshots !== undefined) {
@@ -309,6 +342,11 @@ export function validateContext(value: unknown): EvaluationContext {
       if (snapshot.id !== key) throw new RewardServiceError('INVALID_INPUT', 'source snapshot map key must match snapshot.id');
       sourceSnapshots[key] = snapshot;
     }
+  }
+  let capPools: CapPoolDefinition[] | undefined;
+  if (item.capPools !== undefined) {
+    if (!Array.isArray(item.capPools)) throw new RewardServiceError('INVALID_INPUT', 'context.capPools must be an array');
+    capPools = item.capPools.map(validateCapPool);
   }
   if (item.userConfirmed !== undefined && typeof item.userConfirmed !== 'boolean') throw new RewardServiceError('INVALID_INPUT', 'context.userConfirmed must be boolean');
   let heldCards: HeldCard[] | undefined;
@@ -337,6 +375,7 @@ export function validateContext(value: unknown): EvaluationContext {
     now,
     ...(Object.keys(usageByKey).length ? { usageByKey } : {}),
     ...(Object.keys(sourceSnapshots).length ? { sourceSnapshots } : {}),
+    ...(capPools ? { capPools } : {}),
     ...(item.userConfirmed === undefined ? {} : { userConfirmed: item.userConfirmed }),
     ...(heldCards ? { heldCards } : {}),
     ...(eligibilityFacts ? { eligibilityFacts } : {}),
@@ -410,18 +449,30 @@ export function validateCardSwitchInput(value: unknown): CardSwitchInput {
   return { action, cardId: requiredString(item.cardId, 'input.cardId', true), timezone: validateTimezone(item.timezone, 'input.timezone'), switchedAtUtc: iso(item.switchedAtUtc, 'input.switchedAtUtc'), benefit: requiredString(item.benefit, 'input.benefit'), sourceUrl: requiredString(item.sourceUrl, 'input.sourceUrl'), sourceSnapshotAt: iso(item.sourceSnapshotAt, 'input.sourceSnapshotAt'), ruleVersion: requiredString(item.ruleVersion, 'input.ruleVersion'), confirmation: validateCardSwitchConfirmation(item.confirmation), idempotencyKey: requiredString(item.idempotencyKey, 'input.idempotencyKey', true), ...(item.adjustmentReason === undefined ? {} : { adjustmentReason: requiredString(item.adjustmentReason, 'input.adjustmentReason') }), ...(item.campaign === undefined ? {} : { campaign: validateCardSwitchCampaign(item.campaign) }), ...(item.enrollment === undefined ? {} : { enrollment: validateCardSwitchEnrollment(item.enrollment) }) };
 }
 
+export function validateUserBenefitInput(value: unknown): import('./types.js').UserBenefitInput {
+  const item = object(value, 'input');
+  keys(item, ['kind', 'action', 'cardId', 'campaignId', 'timezone', 'completedAt', 'effectiveFrom', 'effectiveTo', 'benefit', 'sourceUrl', 'sourceSnapshotAt', 'ruleVersion', 'confirmation', 'idempotencyKey', 'adjustmentReason'], 'input');
+  const kind = requiredString(item.kind, 'input.kind');
+  if (kind !== 'card_switch' && kind !== 'campaign_registration') throw new RewardServiceError('INVALID_INPUT', 'input.kind is invalid');
+  const action = requiredString(item.action, 'input.action');
+  if (action !== 'record' && action !== 'adjust') throw new RewardServiceError('INVALID_INPUT', 'input.action must be record or adjust');
+  return { kind, action, cardId: requiredString(item.cardId, 'input.cardId', true), ...(optionalString(item.campaignId, 'input.campaignId', true) ? { campaignId: optionalString(item.campaignId, 'input.campaignId', true) } : {}), timezone: validateTimezone(item.timezone, 'input.timezone'), completedAt: iso(item.completedAt, 'input.completedAt'), effectiveFrom: iso(item.effectiveFrom, 'input.effectiveFrom'), ...(item.effectiveTo === undefined ? {} : { effectiveTo: iso(item.effectiveTo, 'input.effectiveTo') }), benefit: requiredString(item.benefit, 'input.benefit'), sourceUrl: requiredString(item.sourceUrl, 'input.sourceUrl'), sourceSnapshotAt: iso(item.sourceSnapshotAt, 'input.sourceSnapshotAt'), ruleVersion: requiredString(item.ruleVersion, 'input.ruleVersion'), confirmation: validateCardSwitchConfirmation(item.confirmation), idempotencyKey: requiredString(item.idempotencyKey, 'input.idempotencyKey', true), ...(item.adjustmentReason === undefined ? {} : { adjustmentReason: requiredString(item.adjustmentReason, 'input.adjustmentReason') }) };
+}
+
 export function validateCardSwitchProjection(value: unknown): CardSwitchProjection {
   const item = object(value, 'cardSwitch');
-  keys(item, ['cardId', 'timezone', 'switchedAtUtc', 'switchedAtLocal', 'switchedLocalDate', 'benefit', 'sourceUrl', 'sourceSnapshotAt', 'ruleVersion', 'confirmation', 'action', 'idempotencyKey', 'adjustmentReason'], 'cardSwitch');
+  keys(item, ['kind', 'cardId', 'timezone', 'switchedAtUtc', 'switchedAtLocal', 'switchedLocalDate', 'benefit', 'sourceUrl', 'sourceSnapshotAt', 'ruleVersion', 'confirmation', 'action', 'idempotencyKey', 'adjustmentReason', 'effectiveFrom', 'effectiveTo', 'campaignId'], 'cardSwitch');
   const action = requiredString(item.action, 'cardSwitch.action');
   if (action !== 'record' && action !== 'adjust') throw new RewardServiceError('STORE_CORRUPT', 'cardSwitch.action is invalid');
-  return { cardId: requiredString(item.cardId, 'cardSwitch.cardId', true), timezone: validateTimezone(item.timezone, 'cardSwitch.timezone'), switchedAtUtc: iso(item.switchedAtUtc, 'cardSwitch.switchedAtUtc'), switchedAtLocal: requiredString(item.switchedAtLocal, 'cardSwitch.switchedAtLocal'), switchedLocalDate: requiredString(item.switchedLocalDate, 'cardSwitch.switchedLocalDate'), benefit: requiredString(item.benefit, 'cardSwitch.benefit'), sourceUrl: requiredString(item.sourceUrl, 'cardSwitch.sourceUrl'), sourceSnapshotAt: iso(item.sourceSnapshotAt, 'cardSwitch.sourceSnapshotAt'), ruleVersion: requiredString(item.ruleVersion, 'cardSwitch.ruleVersion'), confirmation: validateCardSwitchConfirmation(item.confirmation), action, idempotencyKey: requiredString(item.idempotencyKey, 'cardSwitch.idempotencyKey', true), ...(item.adjustmentReason === undefined ? {} : { adjustmentReason: requiredString(item.adjustmentReason, 'cardSwitch.adjustmentReason') }) };
+  const kind = item.kind === undefined ? 'card_switch' : requiredString(item.kind, 'cardSwitch.kind');
+  if (kind !== 'card_switch' && kind !== 'campaign_registration') throw new RewardServiceError('STORE_CORRUPT', 'cardSwitch.kind is invalid');
+  return { kind, cardId: requiredString(item.cardId, 'cardSwitch.cardId', true), timezone: validateTimezone(item.timezone, 'cardSwitch.timezone'), switchedAtUtc: iso(item.switchedAtUtc, 'cardSwitch.switchedAtUtc'), switchedAtLocal: requiredString(item.switchedAtLocal, 'cardSwitch.switchedAtLocal'), switchedLocalDate: requiredString(item.switchedLocalDate, 'cardSwitch.switchedLocalDate'), benefit: requiredString(item.benefit, 'cardSwitch.benefit'), sourceUrl: requiredString(item.sourceUrl, 'cardSwitch.sourceUrl'), sourceSnapshotAt: iso(item.sourceSnapshotAt, 'cardSwitch.sourceSnapshotAt'), ruleVersion: requiredString(item.ruleVersion, 'cardSwitch.ruleVersion'), confirmation: validateCardSwitchConfirmation(item.confirmation), action, idempotencyKey: requiredString(item.idempotencyKey, 'cardSwitch.idempotencyKey', true), ...(item.adjustmentReason === undefined ? {} : { adjustmentReason: requiredString(item.adjustmentReason, 'cardSwitch.adjustmentReason') }), ...(item.effectiveFrom === undefined ? {} : { effectiveFrom: iso(item.effectiveFrom, 'cardSwitch.effectiveFrom') }), ...(item.effectiveTo === undefined ? {} : { effectiveTo: iso(item.effectiveTo, 'cardSwitch.effectiveTo') }), ...(item.campaignId === undefined ? {} : { campaignId: requiredString(item.campaignId, 'cardSwitch.campaignId', true) }) };
 }
 
 export function validateStoredState(value: unknown): StoredState {
   const item = object(value, 'stored state');
-  keys(item, ['schemaVersion', 'cards', 'snapshots', 'rules', 'transactions', 'campaigns', 'switchEnrollments', 'cardSwitches'], 'stored state');
-  if (item.schemaVersion !== 1) throw new RewardServiceError('STORE_CORRUPT', 'unsupported state schema');
+  keys(item, ['schemaVersion', 'cards', 'snapshots', 'rules', 'transactions', 'campaigns', 'switchEnrollments', 'cardSwitches', 'capPools'], 'stored state');
+  if (item.schemaVersion !== 2) throw new RewardServiceError('INCOMPATIBLE_SCHEMA', 'schema v1 or another unsupported schema requires explicit migration or reset; data was not deleted');
   if (!Array.isArray(item.cards) || !Array.isArray(item.snapshots) || !Array.isArray(item.rules) || !Array.isArray(item.transactions)) throw new RewardServiceError('STORE_CORRUPT', 'state collections must be arrays');
   const transactions = item.transactions.map((value, index) => {
     const record = object(value, `stored state.transactions[${index}]`);
@@ -434,12 +485,14 @@ export function validateStoredState(value: unknown): StoredState {
   const campaigns = item.campaigns === undefined ? [] : (Array.isArray(item.campaigns) ? item.campaigns.map(validateCardSwitchCampaign) : (() => { throw new RewardServiceError('STORE_CORRUPT', 'campaigns must be an array'); })());
   const switchEnrollments = item.switchEnrollments === undefined ? [] : (Array.isArray(item.switchEnrollments) ? item.switchEnrollments.map(validateCardSwitchEnrollment) : (() => { throw new RewardServiceError('STORE_CORRUPT', 'switchEnrollments must be an array'); })());
   const cardSwitches = item.cardSwitches === undefined ? [] : (Array.isArray(item.cardSwitches) ? item.cardSwitches.map(validateCardSwitchProjection) : (() => { throw new RewardServiceError('STORE_CORRUPT', 'cardSwitches must be an array'); })());
-  return { schemaVersion: 1, cards: item.cards.map(validateCard), snapshots: item.snapshots.map(validateSnapshot), rules: item.rules.map(validateRule), transactions, campaigns, switchEnrollments, cardSwitches };
+  const capPools = item.capPools === undefined ? [] : (Array.isArray(item.capPools) ? item.capPools.map(validateCapPool) : (() => { throw new RewardServiceError('STORE_CORRUPT', 'capPools must be an array'); })());
+  if (new Set(capPools.map((pool) => pool.id)).size !== capPools.length) throw new RewardServiceError('STORE_CORRUPT', 'duplicate cap pool id');
+  return { schemaVersion: 2, cards: item.cards.map(validateCard), snapshots: item.snapshots.map(validateSnapshot), rules: item.rules.map(validateRule), transactions, campaigns, switchEnrollments, cardSwitches, capPools };
 }
 
 export function validateToolArgs(name: string, value: unknown): Record<string, unknown> {
   const args = object(value, 'tool arguments');
-  const allowed: Record<string, string[]> = { register_card: ['card'], list_cards: [], upsert_offer: ['snapshot', 'rule', 'confirmation'], recommend: ['transaction', 'limit'], record_transaction: ['transaction'], remaining_caps: ['cardId', 'asOf'], calculate_reward: ['rule', 'transaction', 'context'], rank_cards: ['cards', 'rules', 'transaction', 'context'], get_card_switch_status: ['cardId', 'asOfUtc'], upsert_card_switch: ['input'] };
+  const allowed: Record<string, string[]> = { register_card: ['card'], list_cards: [], upsert_offer: ['snapshot', 'rule', 'confirmation', 'capPools'], recommend: ['transaction', 'limit'], record_transaction: ['transaction'], remaining_caps: ['cardId', 'asOf'], calculate_reward: ['rule', 'transaction', 'context'], rank_cards: ['cards', 'rules', 'transaction', 'context'], get_user_benefit_status: ['kind', 'cardId', 'asOfUtc'], upsert_user_benefit_status: ['input'] };
   if (!allowed[name]) throw new RewardServiceError('TOOL_NOT_FOUND', `unknown tool: ${name}`);
   keys(args, allowed[name], `tool ${name}`);
   return args;

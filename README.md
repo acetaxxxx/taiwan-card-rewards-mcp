@@ -4,15 +4,15 @@ An AionCore-external, dependency-light contract and deterministic evaluator for 
 
 ## Startup contract (file-backed npx mode)
 
-The executable must require `--data-dir <absolute-existing-directory>`. Startup canonicalizes it with the filesystem real path, rejects missing/non-directory paths and filesystem roots, and rejects unknown startup arguments. The AI Agent or UI obtains and parses bank pages, images, or PDFs before submitting structured snapshots; the MCP does not make outbound network requests. This canonical directory is the sole tenant boundary and must be passed to every persistence operation; tools cannot override it. `--user`, if accepted, is display metadata only and never an authorization or storage selector. Reusing one `data-dir` is an explicit decision to share its data. Never store PAN, CVV, OTP, bank credentials, or provider keys.
+The executable must require `--data-dir <absolute-directory>`. Startup securely creates a missing directory (including nested parents), then canonicalizes it with the filesystem real path; it rejects non-directory paths, filesystem roots, unreadable paths, and unknown startup arguments. The AI Agent or UI obtains and parses bank pages, images, or PDFs before submitting structured snapshots; the MCP does not make outbound network requests. This canonical directory is the sole tenant boundary and must be passed to every persistence operation; tools cannot override it. `--user`, if accepted, is display metadata only and never an authorization or storage selector. Reusing one `data-dir` is an explicit decision to share its data. Never store PAN, CVV, OTP, bank credentials, or provider keys.
 
 The store takes an exclusive process lock (`card-rewards.lock`) for the lifetime of the stdio process. A second process using the same directory is rejected, including after an unclean shutdown; stale locks must be investigated and removed by an operator only after confirming that no process owns the directory.
 
 ## Run as an Aion stdio MCP server
 
-Build with `npm run build`, then configure Aion's stdio MCP server with command `npx` (or the installed `taiwan-card-rewards-mcp` binary) and arguments `--data-dir /absolute/existing/tenant-directory`. GitHub source installs are supported with `npx --yes github:acetaxxxx/taiwan-card-rewards-mcp#main`; npm runs the package `prepare` script to build `dist/`. Pin a release tag such as `#v0.2.2` for repeatable use. The process reads newline-delimited JSON-RPC from stdin and writes responses to stdout; it does not open an HTTP/SSE listener. Each user must receive a separate process and data directory. Reusing one data directory is explicit shared tenancy; `--user` is display metadata only.
+Build with `npm run build`, then configure Aion's stdio MCP server with command `npx` (or the installed `taiwan-card-rewards-mcp` binary) and arguments `--data-dir /absolute/tenant-directory`. GitHub source installs are supported with `npx --yes github:acetaxxxx/taiwan-card-rewards-mcp#main`; npm runs the package `prepare` script to build `dist/`. Pin a release tag such as `#v0.4.0` for repeatable use. The process reads newline-delimited JSON-RPC from stdin and writes responses to stdout; it does not open an HTTP/SSE listener. Each user must receive a separate process and data directory. Reusing one data directory is explicit shared tenancy; `--user` is display metadata only.
 
-Available tools are the existing 9 reward tools plus `get_card_switch_status` and `upsert_card_switch` for confirmed benefit switching. For comprehensive workflow instructions, see the [AI Agent Usage Guide](docs/agents/usage-guide.md). Phase 1 recommendation and cap usage read only actual transactions; planned transactions never mutate the store. Repeated actual calls require the same idempotency key and payload; mismatches fail closed. Refunds must reference an existing recorded transaction.
+Schema v2 (package/server 0.4.0) exposes 8 base reward tools plus `get_user_benefit_status` and `upsert_user_benefit_status` (10 tools total) for confirmed card switches and campaign registrations. For comprehensive workflow instructions, see the [AI Agent Usage Guide](docs/agents/usage-guide.md). Planned transactions never mutate the store. Repeated actual calls require the same idempotency key and payload; mismatches fail closed. Refunds must reference an existing recorded transaction.
 
 ## Boundaries
 
@@ -28,7 +28,7 @@ The design, research, specifications, and agent usage guides are kept under `doc
 - `docs/agents/usage-guide.md` — AI Agent usage guide for installation, workflows, and fail-closed safety
 - `docs/agents/skill-authoring-guide.md` — general guidance for creating a portable card-rewards agent skill
 - `docs/agents/card-rewards-skill-template.md` — copyable skill template without private configuration
-- `schemas/card-rewards-state.schema.json` — persisted `card-rewards.json` JSON Schema (schemaVersion 1)
+- `schemas/card-rewards-state.schema.json` — persisted `card-rewards.json` JSON Schema (schemaVersion 2; incompatible older data requires explicit migration/reset)
 - `docs/design/codebase-design.md` — package boundaries and implementation seam
 - `docs/adr/0001-independent-card-rewards-domain-and-agent-supplied-rules.md` — domain and rule-source decisions
 - `docs/research/taiwan-credit-cards-official-research.md` — first-party source research

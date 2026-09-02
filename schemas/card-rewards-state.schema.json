@@ -4,13 +4,14 @@
   "title": "Taiwan Card Rewards persisted state",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schemaVersion", "cards", "snapshots", "rules", "transactions"],
+  "required": ["schemaVersion", "cards", "snapshots", "rules", "transactions", "capPools"],
   "properties": {
-    "schemaVersion": { "const": 1 },
+    "schemaVersion": { "const": 2 },
     "cards": { "type": "array", "items": { "$ref": "#/$defs/card" } },
     "snapshots": { "type": "array", "items": { "$ref": "#/$defs/snapshot" } },
     "rules": { "type": "array", "items": { "$ref": "#/$defs/rule" } },
-    "transactions": { "type": "array", "items": { "$ref": "#/$defs/recordedTransaction" } }
+    "transactions": { "type": "array", "items": { "$ref": "#/$defs/recordedTransaction" } },
+    "capPools": { "type": "array", "items": { "type": "object", "additionalProperties": false, "required": ["id", "metric", "period", "limit"], "properties": { "id": { "$ref": "#/$defs/id" }, "name": { "type": "string" }, "metric": { "enum": ["spend", "reward", "transaction_count"] }, "period": { "enum": ["calendar_month", "billing_cycle", "quarter", "year", "campaign"] }, "limit": { "type": "integer", "minimum": 0 }, "currency": { "$ref": "#/$defs/currency" }, "timezone": { "type": "string" } } } }
   },
   "$defs": {
     "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_:-]{0,127}$" },
@@ -67,9 +68,10 @@
         "status": { "enum": ["candidate", "active", "stale", "superseded", "needs_review", "unknown"] }, "validFrom": { "$ref": "#/$defs/dateTime" }, "validTo": { "$ref": "#/$defs/dateTime" }, "settlementCurrency": { "$ref": "#/$defs/currency" },
         "match": { "type": "object", "additionalProperties": false, "properties": { "merchants": { "type": "array", "items": { "$ref": "#/$defs/id" } }, "mccs": { "type": "array", "items": { "$ref": "#/$defs/id" } }, "countries": { "type": "array", "items": { "$ref": "#/$defs/id" } }, "channels": { "type": "array", "items": { "$ref": "#/$defs/id" } }, "paymentMethods": { "type": "array", "items": { "$ref": "#/$defs/id" } } },
         "predicate": { "$ref": "#/$defs/predicate" }, "requires": { "type": "array", "uniqueItems": true, "items": { "enum": ["source_verified", "user_confirmation"] } },
-        "reward": { "type": "object", "additionalProperties": false, "required": ["kind"], "properties": { "kind": { "enum": ["percentage", "flat"] }, "rateBps": { "type": "number", "minimum": 0, "maximum": 1000000000000 }, "amountMinor": { "type": "integer", "minimum": 0 }, "currency": { "$ref": "#/$defs/currency" } } },
-        "cap": { "type": "object", "additionalProperties": false, "required": ["kind", "cap", "usageKey"], "properties": { "kind": { "enum": ["calendar_month", "billing_cycle", "campaign"] }, "cap": { "$ref": "#/$defs/money" }, "usageKey": { "$ref": "#/$defs/id" } } },
-        "confirmation": { "$ref": "#/$defs/confirmation" }
+        "reward": { "type": "object", "additionalProperties": false, "required": ["kind"], "properties": { "kind": { "type": "string", "minLength": 1 }, "code": { "type": "string" }, "rateBps": { "type": "number", "minimum": 0 }, "amountMinor": { "type": "integer" }, "currency": { "$ref": "#/$defs/currency" }, "roundingMode": { "enum": ["floor", "ceil", "half_up", "nearest"] }, "roundingScope": { "enum": ["per_transaction", "per_period"] }, "unitAmountMinor": { "type": "integer", "minimum": 1 }, "unitRewardMinor": { "type": "integer" }, "stepAmountMinor": { "type": "integer", "minimum": 1 }, "stepRewardMinor": { "type": "integer" } } },
+        "confirmation": { "$ref": "#/$defs/confirmation" },
+        "combination": { "type": "object", "additionalProperties": false, "required": ["mode", "groupId", "version"], "properties": { "mode": { "type": "string", "minLength": 1 }, "groupId": { "$ref": "#/$defs/id" }, "version": { "type": "string", "minLength": 1 }, "priority": { "type": "integer", "minimum": 0 }, "prerequisiteRuleIds": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/$defs/id" } } } },
+        "capPoolRefs": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "#/$defs/id" } }
       }
     },
     "fx": { "type": "object", "additionalProperties": false, "required": ["id", "baseCurrency", "quoteCurrency", "ratePpm", "capturedAt"], "properties": { "id": { "$ref": "#/$defs/id" }, "baseCurrency": { "$ref": "#/$defs/currency" }, "quoteCurrency": { "$ref": "#/$defs/currency" }, "ratePpm": { "type": "number", "minimum": 1, "maximum": 1000000000000 }, "capturedAt": { "$ref": "#/$defs/dateTime" }, "maxAgeSeconds": { "type": "integer", "minimum": 1 } } },

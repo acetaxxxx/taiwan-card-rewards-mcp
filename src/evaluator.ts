@@ -8,9 +8,25 @@ import type {
   OfferRuleVersion,
   Predicate,
   RankingEntry,
+  CapPoolDefinition,
   RewardBreakdown,
   TransactionTuple,
 } from './types.js';
+
+function poolCaps(rule: OfferRuleVersion, context: EvaluationContext): readonly CapPeriod[] {
+  if (!rule.capPoolRefs?.length) return [];
+  return rule.capPoolRefs.map((id) => {
+    const pool = context.capPools?.find((candidate) => candidate.id === id);
+    if (!pool) return { kind: 'calendar_month', cap: { amountMinor: 0, currency: rule.settlementCurrency }, usageKey: `__missing_pool__${id}`, capPoolId: id, metric: 'reward' };
+    return { kind: pool.period === 'billing_cycle' ? 'billing_cycle' : pool.period === 'campaign' ? 'campaign' : 'calendar_month', cap: { amountMinor: pool.limit, currency: pool.currency ?? rule.settlementCurrency }, usageKey: pool.id, capPoolId: pool.id, metric: pool.metric };
+  });
+}
+
+function roundReward(raw: number, mode: OfferRuleVersion['reward']['roundingMode']): number {
+  if (mode === 'ceil') return Math.ceil(raw);
+  if (mode === 'half_up' || mode === 'nearest') return Math.floor(raw + 0.5);
+  return Math.floor(raw);
+}
 
 const has = (value: string | undefined, allowed: string[] | undefined): boolean | undefined => {
   if (!allowed?.length) return true;
@@ -219,7 +235,7 @@ export function resolveCyclePeriodKey(
 
   if (cap.kind === 'calendar_month') {
     const padMonth = String(month).padStart(2, '0');
-    return `${cap.usageKey}:${year}-${padMonth}`;
+    return `${cap.capPoolId ?? cap.usageKey}:${year}-${padMonth}`;
   }
 
   if (cap.kind === 'billing_cycle') {
@@ -238,10 +254,10 @@ export function resolveCyclePeriodKey(
       }
     }
     const padMonth = String(closeMonth).padStart(2, '0');
-    return `${cap.usageKey}:${closeYear}-${padMonth}`;
+    return `${cap.capPoolId ?? cap.usageKey}:${closeYear}-${padMonth}`;
   }
 
-  return cap.usageKey;
+  return cap.capPoolId ?? cap.usageKey;
 }
 
 export function evaluateOffer(
@@ -309,27 +325,59 @@ export function evaluateOffer(
   }
   let grossMinor: number;
   if (tx.kind === 'refund') grossMinor = -(tx.originalRewardMinor ?? 0);
-  else if (rule.reward.kind === 'percentage') grossMinor = Math.floor((settlementAmount * (rule.reward.rateBps ?? 0)) / 10_000);
-  else {
+  else if (rule.reward.kind === 'percentage') {
+    const raw = (settlementAmount * (rule.reward.rateBps ?? 0)) / 10_000;
+    grossMinor = roundReward(raw, rule.reward.roundingMode);
+  } else if (rule.reward.kind === 'step' || rule.reward.kind === 'per_unit') {
+    const unit = rule.reward.stepAmountMinor ?? rule.reward.unitAmountMinor;
+    const reward = rule.reward.stepRewardMinor ?? rule.reward.unitRewardMinor;
+    if (!unit || reward === undefined || unit <= 0) return { ...base, status: 'unknown', ruleId: rule.id, ruleVersion: rule.version, unknownReasons: ['unsupported reward semantics: missing unit/step amounts'] };
+    const raw = (settlementAmount / unit) * reward;
+    grossMinor = roundReward(raw, rule.reward.roundingMode);
+  } else if (rule.reward.kind === 'flat') {
     if (rule.reward.currency && rule.reward.currency !== rule.settlementCurrency) {
       return { ...base, status: 'unknown', ruleId: rule.id, ruleVersion: rule.version, unknownReasons: ['flat reward currency mismatch'] };
     }
     grossMinor = rule.reward.amountMinor ?? 0;
-  }
+  } else return { ...base, status: 'unknown', ruleId: rule.id, ruleVersion: rule.version, unknownReasons: [`unsupported reward semantics: ${rule.reward.kind}`] };
   const money = (amountMinor: number): Money => ({ amountMinor, currency: rule.settlementCurrency });
   let cappedMinor = grossMinor;
   let capRemainingBefore: Money | undefined;
   let capRemainingAfter: Money | undefined;
-  if (rule.cap) {
-    const periodKey = resolveCyclePeriodKey(undefined, rule.cap, tx.occurredAt);
-    const usage = context.usageByKey?.[periodKey] ?? context.usageByKey?.[rule.cap.usageKey];
+  const caps = poolCaps(rule, context);
+  const spendCaps = caps.filter((cap) => cap.metric === 'spend');
+  let qualifyingAmount = settlementAmount;
+  for (const cap of spendCaps) {
+    const periodKey = resolveCyclePeriodKey(undefined, cap, tx.occurredAt);
+    const usage = context.usageByKey?.[`${cap.capPoolId ?? cap.usageKey}|${periodKey}`] ?? context.usageByKey?.[periodKey] ?? context.usageByKey?.[cap.usageKey];
     if (!usage) return { ...base, status: 'unknown', ruleId: rule.id, ruleVersion: rule.version, unknownReasons: ['missing ledger usage for cap'] };
-    const usedMinor = convertMinor(usage, rule.cap.cap.currency, tx);
+    const used = convertMinor(usage, cap.cap.currency, tx);
+    if (used === undefined) return { ...base, status: 'unknown', ruleId: rule.id, ruleVersion: rule.version, unknownReasons: ['missing FX snapshot for cap currency'] };
+    qualifyingAmount = Math.min(qualifyingAmount, Math.max(0, cap.cap.amountMinor - used));
+  }
+  if (qualifyingAmount !== settlementAmount) {
+    if (rule.reward.kind === 'percentage') grossMinor = roundReward((qualifyingAmount * (rule.reward.rateBps ?? 0)) / 10_000, rule.reward.roundingMode);
+    else if (rule.reward.kind === 'step' || rule.reward.kind === 'per_unit') { const unit = rule.reward.stepAmountMinor ?? rule.reward.unitAmountMinor; const reward = rule.reward.stepRewardMinor ?? rule.reward.unitRewardMinor; if (unit && reward !== undefined) grossMinor = roundReward((qualifyingAmount / unit) * reward, rule.reward.roundingMode); }
+  }
+  cappedMinor = grossMinor;
+  for (const cap of caps.filter((candidate) => candidate.metric === 'transaction_count')) {
+    const periodKey = resolveCyclePeriodKey(undefined, cap, tx.occurredAt);
+    const usage = context.usageByKey?.[`${cap.capPoolId ?? cap.usageKey}|${periodKey}`] ?? context.usageByKey?.[periodKey] ?? context.usageByKey?.[cap.usageKey];
+    if (!usage) return { ...base, status: 'unknown', ruleId: rule.id, ruleVersion: rule.version, unknownReasons: ['missing ledger usage for cap'] };
+    const used = usage.amountMinor;
+    if (used >= cap.cap.amountMinor) return { ...base, status: 'no_match', ruleId: rule.id, ruleVersion: rule.version, unknownReasons: ['transaction count cap exhausted'] };
+  }
+  for (const cap of caps) {
+    if (cap.metric === 'spend' || cap.metric === 'transaction_count') continue;
+    const periodKey = resolveCyclePeriodKey(undefined, cap, tx.occurredAt);
+    const usage = context.usageByKey?.[`${cap.capPoolId ?? cap.usageKey}|${periodKey}`] ?? context.usageByKey?.[periodKey] ?? context.usageByKey?.[cap.usageKey];
+    if (!usage) return { ...base, status: 'unknown', ruleId: rule.id, ruleVersion: rule.version, unknownReasons: ['missing ledger usage for cap'] };
+    const usedMinor = convertMinor(usage, cap.cap.currency, tx);
     if (usedMinor === undefined) return { ...base, status: 'unknown', ruleId: rule.id, ruleVersion: rule.version, unknownReasons: ['missing FX snapshot for cap currency'] };
-    const remaining = Math.max(0, rule.cap.cap.amountMinor - usedMinor);
-    capRemainingBefore = { amountMinor: remaining, currency: rule.cap.cap.currency };
-    cappedMinor = Math.min(grossMinor, remaining);
-    capRemainingAfter = { amountMinor: Math.max(0, remaining - Math.max(0, cappedMinor)), currency: rule.cap.cap.currency };
+    const remaining = Math.max(0, cap.cap.amountMinor - usedMinor);
+    capRemainingBefore = { amountMinor: remaining, currency: cap.cap.currency };
+    cappedMinor = Math.min(cappedMinor, remaining);
+    capRemainingAfter = { amountMinor: Math.max(0, remaining - Math.max(0, cappedMinor)), currency: cap.cap.currency };
   }
   return {
     ...base,
@@ -355,10 +403,49 @@ export function rankCards(
     .map((card) => {
       const cardRules = rules.filter((rule) => rule.cardId === card.id);
       const results = cardRules.map((rule) => evaluateOffer(rule, { ...tx, cardId: card.id }, context));
-      const usable = results.filter((result) => result.status === 'ok');
-      if (usable.length) {
-        const best = usable.sort((a, b) => (b.cappedReward?.amountMinor ?? 0) - (a.cappedReward?.amountMinor ?? 0))[0];
-        if (best) return best;
+      const unsupported = results
+        .map((result, index) => ({ result, rule: cardRules[index] }))
+        .find(({ result, rule }) => {
+          const mode = rule?.combination?.mode;
+          return result.status === 'ok' && mode !== undefined && !['additive', 'replace', 'best_of', 'exclusive', 'prerequisite'].includes(mode);
+        });
+      if (unsupported) {
+        return {
+          ...unsupported.result,
+          status: 'needs_review' as const,
+          unknownReasons: ['unsupported combination policy'],
+        };
+      }
+      const usable = results.map((result, index) => ({ result, rule: cardRules[index] })).filter(({ result, rule }) => {
+        if (result.status !== 'ok') return false;
+        const policy = rule?.combination;
+        if (!policy) return true;
+        if (!['additive', 'replace', 'best_of', 'exclusive', 'prerequisite'].includes(policy.mode)) return false;
+        if (policy.mode === 'prerequisite') return (policy.prerequisiteRuleIds ?? []).every((id) => results.some((candidate, candidateIndex) => cardRules[candidateIndex]?.id === id && candidate.status === 'ok'));
+        return true;
+      });
+      const grouped = new Map<string, typeof usable>();
+      usable.forEach((entry, index) => { const policy = entry.rule?.combination; const key = policy?.groupId ?? `__${index}`; const list = grouped.get(key) ?? []; list.push(entry); grouped.set(key, list); });
+      const candidates = [...grouped.values()].map((group) => {
+        const policy = group[0]?.rule?.combination;
+        if (policy?.mode === 'exclusive' && group.length > 1) return { ...group[0]!.result, status: 'needs_review' as const, unknownReasons: ['exclusive combination group has multiple matching offers'] };
+        if (policy?.mode === 'additive' && group.length > 1) {
+          const first = group[0]!.result;
+          const gross = group.reduce((sum, entry) => sum + (entry.result.grossReward?.amountMinor ?? 0), 0);
+          const capped = group.reduce((sum, entry) => sum + (entry.result.cappedReward?.amountMinor ?? 0), 0);
+          return { ...first, grossReward: first.grossReward ? { ...first.grossReward, amountMinor: gross } : undefined, cappedReward: first.cappedReward ? { ...first.cappedReward, amountMinor: capped } : undefined };
+        }
+        if (policy?.mode === 'replace') return [...group].sort((a, b) => (b.rule?.combination?.priority ?? 0) - (a.rule?.combination?.priority ?? 0) || (a.rule?.id ?? '').localeCompare(b.rule?.id ?? ''))[0]?.result;
+        return group.sort((a, b) => (b.result.cappedReward?.amountMinor ?? 0) - (a.result.cappedReward?.amountMinor ?? 0) || (a.rule?.id ?? '').localeCompare(b.rule?.id ?? ''))[0]?.result;
+      }).filter((entry): entry is RewardBreakdown => Boolean(entry));
+      if (candidates.length) {
+        const exclusive = candidates.filter((entry) => entry.ruleId && cardRules.find((r) => r.id === entry.ruleId)?.combination?.mode === 'exclusive');
+        if (exclusive.length > 1) return { ...exclusive[0]!, status: 'needs_review' as const, unknownReasons: ['multiple exclusive combination rules matched'] };
+        if (exclusive.length === 1) return exclusive[0]!;
+        const first = candidates[0]!;
+        const gross = candidates.reduce((sum, entry) => sum + (entry.grossReward?.amountMinor ?? 0), 0);
+        const capped = candidates.reduce((sum, entry) => sum + (entry.cappedReward?.amountMinor ?? 0), 0);
+        return { ...first, grossReward: first.grossReward ? { ...first.grossReward, amountMinor: gross } : undefined, cappedReward: first.cappedReward ? { ...first.cappedReward, amountMinor: capped } : undefined };
       }
       const uncertain = results.find((result) => result.status === 'unknown' || result.status === 'needs_review' || result.status === 'stale');
       return uncertain ?? { status: 'no_match' as const, cardId: card.id, transaction: { ...tx, cardId: card.id }, unknownReasons: [] };

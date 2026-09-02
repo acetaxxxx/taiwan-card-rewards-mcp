@@ -24,6 +24,10 @@ refunds. Use this skill for questions, confirmation, and presentation.
 
 ## Read flow
 
+Research official bank/network terms for rounding, registration, stacking, and caps before creating rules. Keep third-party findings explicitly as candidates and ask the user to resolve uncertainty.
+
+Refresh checklist: search issuer card/campaign/registration pages, app notices, network, wallet, merchant, and official terms/FAQ/PDF sources. Capture period repetition, quota/first-N, open/close/effective dates, eligibility, reward unit/rounding/step, `capPoolRefs`, and additive/replace/best_of/exclusive/prerequisite policy. Community/blog/forum/video/user reports are lead-only evidence; retain provenance and seek official corroboration. Ask when registration/plan selection happened, expose confirmed benefits as `availableNow` and unmet actions as `availableAfterActions`, and ask about a Backfilled Purchase when a past transaction was omitted.
+
 1. Collect only the facts needed for this request.
 2. Load cards and relevant enrollment/plan state.
 3. Calculate or rank with source snapshot, rule version, effective dates, cap,

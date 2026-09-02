@@ -46,6 +46,10 @@ prove that each write call uses a validated schema.
 
 ## 3. Research and ingest offers in layers
 
+For schema v2, research the issuing bank/network's official terms for rounding mode/scope, registration, stacking, and shared caps before encoding a rule. Record URL, snapshot time, rule version, and effective dates. Third-party findings stay candidates; ask the user whenever an official term or required fact is uncertain. Unsupported reward semantics are fail-closed.
+
+Discovery checklist: search issuer card pages, campaign and registration pages, app notices, Visa/Mastercard/JCB campaigns, wallet/payment channels, merchant co-promotions, and official terms/FAQ/PDFs. Capture repeat-registration period, quota/first-N, open/close/effective dates, eligible cards/users/channels, reward unit/rounding/step, `capPoolRefs`, and combination policy. Community sites, blogs, forums, videos, and user reports may discover leads; record author, published/observed date, accessedAt, fingerprint, and firsthand vs repost, then corroborate officially. If corroboration is absent keep candidate/needs_review. Ask whether and when registration or plan selection was completed; show confirmed items in `availableNow`, unmet actions in `availableAfterActions`, and prompt for a Backfilled Purchase when a past spend was forgotten.
+
 Prefer first-party issuer/bank/network pages and official terms. Third-party
 articles, search results, screenshots, OCR, and user-provided text are useful
 candidate evidence, not authoritative rules. Preserve the distinction:

@@ -1,17 +1,18 @@
 import { describe, expect, it } from 'vitest';
-import { evaluateOffer, rankCards } from '../src/index.js';
+import { evaluateOffer, rankCards, validateRule } from '../src/index.js';
 import type { CardDescriptor, EvaluationContext, OfferRuleVersion, TransactionTuple } from '../src/types.js';
 
 const card: CardDescriptor = { id: 'c1', issuer: 'Bank', productName: 'Travel' };
 const rule: OfferRuleVersion = {
   id: 'r1', cardId: 'c1', version: '1', sourceSnapshotId: 's1', status: 'active', validFrom: '2026-01-01T00:00:00Z', settlementCurrency: 'TWD',
   match: { countries: ['JP'], channels: ['in_store'], paymentMethods: ['mobile_wallet'] }, reward: { kind: 'percentage', rateBps: 300 },
-  cap: { kind: 'calendar_month', cap: { amountMinor: 100000, currency: 'TWD' }, usageKey: 'r1:2026-08' },
+  capPoolRefs: ['p1'],
 };
 const tx: TransactionTuple = { cardId: 'c1', kind: 'purchase', mode: 'planned', occurredAt: '2026-08-20T00:00:00Z', amount: { amountMinor: 200000, currency: 'TWD' }, country: 'JP', channel: 'in_store', paymentMethod: 'mobile_wallet' };
 const context: EvaluationContext = {
   now: '2026-08-18T00:00:00Z',
-  usageByKey: { 'r1:2026-08': { amountMinor: 50000, currency: 'TWD' } },
+  capPools: [{ id: 'p1', metric: 'reward', period: 'calendar_month', limit: 100000, currency: 'TWD' }],
+  usageByKey: { 'p1|p1:2026-08': { amountMinor: 50000, currency: 'TWD' }, 'p1:2026-08': { amountMinor: 50000, currency: 'TWD' } },
   sourceSnapshots: { s1: { id: 's1', url: 'https://example.invalid/offer', fetchedAt: '2026-08-01T00:00:00Z', contentHash: 'fixture', parserVersion: '1' } },
 };
 
@@ -27,6 +28,15 @@ describe('deterministic evaluator', () => {
     const result = evaluateOffer(rule, { ...tx, channel: undefined }, context);
     expect(result.status).toBe('unknown');
     expect(result.unknownReasons).toContain('missing channel');
+  });
+  it('supports schema v2 half-up rounding for percentage rewards', () => {
+    const parsed = validateRule({
+      ...rule,
+      reward: { ...rule.reward, rateBps: 5000, roundingMode: 'half_up' },
+    });
+    const result = evaluateOffer(parsed, { ...tx, amount: { amountMinor: 1, currency: 'TWD' } }, context);
+    expect(result.status).toBe('ok');
+    expect(result.grossReward?.amountMinor).toBe(1);
   });
   it('ranks at most five cards and keeps uncertain entries explicit', () => {
     const result = rankCards([card], [rule], tx, context);

@@ -93,7 +93,7 @@ describe("MCP Contract and Agent Boundary", () => {
       expect(initRes.result).toBeDefined();
       expect(initRes.result.protocolVersion).toBe("2024-11-05");
       expect(initRes.result.serverInfo.name).toBe("taiwan-card-rewards-mcp");
-      expect(initRes.result.serverInfo.version).toBe("0.3.1");
+      expect(initRes.result.serverInfo.version).toBe("0.4.0");
       expect(initRes.result.instructions).toContain("single-user durable ledger");
       expect(initRes.result.instructions).toContain("fail-closed");
 
@@ -111,8 +111,8 @@ describe("MCP Contract and Agent Boundary", () => {
         "record_transaction",
         "register_card",
         "remaining_caps",
-        "get_card_switch_status",
-        "upsert_card_switch",
+        "get_user_benefit_status",
+        "upsert_user_benefit_status",
         "upsert_offer",
       ].sort();
       expect(toolNames).toEqual(expectedNames);
@@ -273,12 +273,17 @@ describe("MCP Contract and Agent Boundary", () => {
         settlementCurrency: "TWD",
         match: { countries: ["JP"] },
         reward: { kind: "percentage", rateBps: 850 },
-        cap: {
-          kind: "calendar_month",
-          cap: { amountMinor: 50000, currency: "TWD" },
-          usageKey: "kumamon-jp-cap",
-        },
+        capPoolRefs: ["pool-kumamon-jp"],
       };
+      const capPoolInput = [
+        {
+          id: "pool-kumamon-jp",
+          metric: "reward",
+          period: "calendar_month",
+          limit: 50000,
+          currency: "TWD",
+        },
+      ];
       const confirmationInput = {
         confirmedAt: "2026-08-01T00:00:00Z",
         confirmedBy: "user",
@@ -298,6 +303,7 @@ describe("MCP Contract and Agent Boundary", () => {
             snapshot: snapshotInput,
             rule: ruleInput,
             confirmation: confirmationInput,
+            capPools: capPoolInput,
           },
         },
       });
@@ -314,7 +320,8 @@ describe("MCP Contract and Agent Boundary", () => {
       };
       const calcContext = {
         now: "2026-08-15T12:00:00Z",
-        usageByKey: { "kumamon-jp-cap": { amountMinor: 0, currency: "TWD" } },
+        capPools: capPoolInput,
+        usageByKey: { "pool-kumamon-jp|pool-kumamon-jp:2026-08": { amountMinor: 0, currency: "TWD" } },
         sourceSnapshots: { "snap-kumamon-2026": snapshotInput },
       };
       const calcRes = await client.send({

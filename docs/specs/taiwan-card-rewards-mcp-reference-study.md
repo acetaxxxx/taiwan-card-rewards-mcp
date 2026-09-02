@@ -104,15 +104,16 @@ Phase 1 的公開 tool 建議如下；名稱可與目前 working copy 漸進對�
 
 | Tool | 用途 | 重要限制 |
 |---|---|---|
-| `list_cards` | 列出目前 user 已登錄卡片 | 只回傳該 process scope |
-| `register_card` | 新增卡片產品/別名 | 不接受 PAN/CVV/帳密；不接受 user/path |
-| `get_missing_facts` | 找出推薦前缺少的條件 | 只列可回答的必要條件 |
-| `confirm_card_facts` | 保存使用者確認的切換/登錄/扣繳等狀態 | 帶有效時間與確認來源 |
-| `refresh_public_offers` | 依官方 allowlist 取得/更新來源快照 | SSRF 防護、限制大小/時間；失敗標 stale/unknown |
-| `recommend_cards` | 回傳最多五張卡 | 顯示 gross/net、cap、支付方式、條件、來源時間、rule version、信心狀態 |
-| `get_cap_status` | 查剩餘回饋額度與可刷滿額金額 | 依正確帳單週期與時區計算 |
-| `record_transaction` | 記錄 actual 消費 | 必須 idempotency key；同 key payload 不同就拒絕 |
-| `refund_transaction` | 以原始交易為準做退款/沖銷 | 不接受孤立退款；保留可追溯關聯 |
+| `calculate_reward` | 純計算單一規則回饋 | 純計算無 side effect、無檔案/網路存取 |
+| `rank_cards` | 純計算多卡回饋排名 | 確定性排序、保留不確定狀態 |
+| `register_card` | 登錄或更新卡片產品/別名 | 不接受 PAN/CVV/帳密；不接受 user/path |
+| `list_cards` | 列出目前 user 已登錄卡片 | 只回傳該 user process scope |
+| `upsert_offer` | 匯入來源快照與規則版本 | 候選規則需經確認才能啟用 |
+| `recommend` | 推薦最多五張卡 | 依已確認權益與真實上限試算，不修改 ledger |
+| `record_transaction` | 記錄 actual 消費或退款 | 必須 idempotency key；同 key payload 不同就拒絕 |
+| `remaining_caps` | 查各上限池剩餘回饋額度 | 依正確帳單週期與時區計算 |
+| `get_user_benefit_status` | 查詢使用者目前生效之方案切換與活動登錄狀態 | 回傳當期投影與候選方案 |
+| `upsert_user_benefit_status` | 記錄使用者確認之方案切換或活動登錄 | 需明確確認時間與有效期間 |
 
 `planned` 試算不應改變 cap ledger；`actual` 才能消耗額度。推薦輸出如果資料
 不足，應回傳 `needs_confirmation`、`stale` 或 `insufficient_evidence`，而不是

@@ -37,14 +37,14 @@ For a GitHub checkout, run `npm ci --ignore-scripts && npm run build`, then conf
 
 ```bash
 npx --yes github:acetaxxxx/taiwan-card-rewards-mcp#main \
-  --data-dir /absolute/existing/tenant-directory
+  --data-dir /absolute/tenant-directory
 ```
 
 Pin a release tag for repeatable use:
 
 ```bash
-npx --yes github:acetaxxxx/taiwan-card-rewards-mcp#v0.2.2 \
-  --data-dir /absolute/existing/tenant-directory
+npx --yes github:acetaxxxx/taiwan-card-rewards-mcp#v0.4.0 \
+  --data-dir /absolute/tenant-directory
 ```
 
 ### Process Boundary & Single-Tenant Scope
@@ -60,14 +60,14 @@ node dist/cli.js --data-dir <absolute-path> [--user <user-id>]
 
 | Argument | Requirement | Description |
 |---|:---:|---|
-| `--data-dir <path>` | **Required** | Absolute, existing directory for user storage. Canonicalized via `realpath`; filesystem roots (`/`) are rejected. Tools cannot override this path. |
+| `--data-dir <path>` | **Required** | Absolute directory for user storage. Missing nested directories are created securely, then canonicalized via `realpath`; filesystem roots (`/`) and non-directories are rejected. Tools cannot override this path. |
 | `--user <id>` | **Optional** | Display and audit log metadata only. Never used as an access control or storage partition selector. |
 
 ---
 
 ## 3. The MCP Tool Surface
 
-The MCP server exposes the 9 reward tools plus two card-switch tools. Standalone `confirm_offer` is not part of the surface; candidate activation is folded directly into `upsert_offer`.
+The MCP server exposes 8 base reward tools plus two generic benefit tools. Standalone `confirm_offer` is not part of the surface; candidate activation is folded directly into `upsert_offer`.
 
 | Tool Name | Persistence | Description | Key Fail-Closed Errors |
 |---|:---:|---|---|
@@ -79,8 +79,8 @@ The MCP server exposes the 9 reward tools plus two card-switch tools. Standalone
 | `recommend` | Read-only | Recommend up to 5 cards evaluated against registered cards and actual ledger usage without mutating usage. | `INSUFFICIENT_FACTS`, `NEEDS_REVIEW`, `STALE` |
 | `record_transaction` | Mutating | Record an actual purchase (with `idempotencyKey`) or linked refund, updating durable cap usage. | `IDEMPOTENCY_CONFLICT`, `INVALID_REFUND`, `INSUFFICIENT_FACTS`, `NEEDS_REVIEW` |
 | `remaining_caps` | Read-only | Query remaining reward cap balances per rule and usageKey derived from actual transactions. | `INVALID_INPUT`, `STORE_UNAVAILABLE` |
-| `get_card_switch_status` | Read-only | Show latest confirmed switch, available candidates, and unavailable campaigns with reasons. | `CARD_NOT_FOUND`, `STORE_UNAVAILABLE` |
-| `upsert_card_switch` | Mutating | Record or adjust a user-confirmed completed bank-app switch with idempotency. | `CARD_NOT_FOUND`, `INVALID_CONFIRMATION`, `IDEMPOTENCY_CONFLICT` |
+| `get_user_benefit_status` | Read-only | Show current benefit plus available-now and action-required candidates. | `CARD_NOT_FOUND`, `STORE_UNAVAILABLE` |
+| `upsert_user_benefit_status` | Mutating | Record or correct a user-confirmed completed card switch or campaign registration. | `CARD_NOT_FOUND`, `INVALID_CONFIRMATION`, `IDEMPOTENCY_CONFLICT` |
 
 ---
 
@@ -144,12 +144,12 @@ The MCP server exposes the 9 reward tools plus two card-switch tools. Standalone
 
 ### Card benefit switching
 
-Call `get_card_switch_status` before discussing or recording a benefit switch.
+Call `get_user_benefit_status` before discussing or recording a benefit.
 It returns the latest per-card projection, `availableCandidates`, and
 `currentlyUnavailable` campaigns with reasons; candidates with unknown
 eligibility remain visible with warnings. The agent decides which campaign to
 recommend. After the user confirms that the change was completed in the bank
-app, call `upsert_card_switch` with `input.action` set to `record` or `adjust`,
+app, call `upsert_user_benefit_status` with `input.action` set to `record` or `adjust`,
 an idempotency key, timezone, source URL/snapshot, rule version, and a
 `confirmation` whose `completed` value is `true`.
 

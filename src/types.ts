@@ -10,6 +10,8 @@ export type Predicate =
   | { op: 'NOT'; rule: Predicate }
   | { field: string; op: PredicateLeafOperator; value: PredicateValue };
 export type CalculationTrustRequirement = 'source_verified' | 'user_confirmation';
+export type RewardCombinationMode = 'additive' | 'replace' | 'best_of' | 'exclusive' | 'prerequisite';
+export interface RewardCombinationPolicy { mode: RewardCombinationMode | string; groupId: string; version: string; priority?: number | undefined; prerequisiteRuleIds?: readonly string[] | undefined; }
 
 export interface Money {
   amountMinor: number;
@@ -95,11 +97,19 @@ export interface RuleMatch {
 }
 
 export interface RewardSpec {
-  kind: 'percentage' | 'flat';
+  /** Extensible semantic identifier; unsupported kinds are evaluated as unknown. */
+  kind: string;
+  code?: string | undefined;
   /** Basis points: 100 = 1%. */
   rateBps?: number | undefined;
   amountMinor?: number | undefined;
   currency?: Currency | undefined;
+  roundingMode?: 'floor' | 'ceil' | 'half_up' | 'nearest' | undefined;
+  roundingScope?: 'per_transaction' | 'per_period' | undefined;
+  unitAmountMinor?: number | undefined;
+  unitRewardMinor?: number | undefined;
+  stepAmountMinor?: number | undefined;
+  stepRewardMinor?: number | undefined;
 }
 
 export interface CapPeriod {
@@ -107,6 +117,18 @@ export interface CapPeriod {
   cap: Money;
   /** Usage comes from the ledger, never from this rule document. */
   usageKey: string;
+  capPoolId?: string | undefined;
+  capPoolRefs?: readonly string[] | undefined;
+  metric?: 'spend' | 'reward' | 'transaction_count' | undefined;
+}
+export interface CapPoolDefinition {
+  id: string;
+  name?: string | undefined;
+  metric: 'spend' | 'reward' | 'transaction_count';
+  period: 'calendar_month' | 'billing_cycle' | 'quarter' | 'year' | 'campaign';
+  limit: number;
+  currency?: Currency | undefined;
+  timezone?: string | undefined;
 }
 
 export interface OfferRuleVersion {
@@ -122,8 +144,10 @@ export interface OfferRuleVersion {
   predicate?: Predicate | undefined;
   requires?: readonly CalculationTrustRequirement[] | undefined;
   reward: RewardSpec;
-  cap?: CapPeriod | undefined;
   confirmation?: OfferConfirmation | undefined;
+  combination?: RewardCombinationPolicy | undefined;
+  /** Schema v2 canonical cap references. */
+  capPoolRefs?: readonly string[] | undefined;
 }
 
 export interface FxSnapshot {
@@ -204,6 +228,7 @@ export interface CardSwitchEnrollment {
 }
 
 export interface CardSwitchProjection {
+  kind?: UserBenefitKind | undefined;
   cardId: string;
   timezone: string;
   switchedAtUtc: string;
@@ -217,6 +242,9 @@ export interface CardSwitchProjection {
   action: CardSwitchAction;
   idempotencyKey: string;
   adjustmentReason?: string | undefined;
+  effectiveFrom?: string | undefined;
+  effectiveTo?: string | undefined;
+  campaignId?: string | undefined;
 }
 
 export interface CardSwitchInput {
@@ -244,6 +272,31 @@ export interface CardSwitchStatus {
   warnings: readonly string[];
 }
 
+export type UserBenefitKind = 'card_switch' | 'campaign_registration';
+export interface UserBenefitInput {
+  kind: UserBenefitKind;
+  action: CardSwitchAction;
+  cardId: string;
+  campaignId?: string | undefined;
+  timezone: string;
+  completedAt: string;
+  effectiveFrom: string;
+  effectiveTo?: string | undefined;
+  benefit: string;
+  sourceUrl: string;
+  sourceSnapshotAt: string;
+  ruleVersion: string;
+  confirmation: CardSwitchConfirmation;
+  idempotencyKey: string;
+  adjustmentReason?: string | undefined;
+}
+
+export interface UserBenefitStatus extends CardSwitchStatus {
+  kind: UserBenefitKind;
+  availableNow: readonly CardSwitchCampaign[];
+  availableAfterActions: readonly { campaign: CardSwitchCampaign; requiredActions: readonly string[] }[];
+}
+
 export interface EvaluationContext {
   now: string;
   usageByKey?: Readonly<Record<string, Money>> | undefined;
@@ -252,6 +305,8 @@ export interface EvaluationContext {
   heldCards?: readonly HeldCard[] | undefined;
   eligibilityFacts?: readonly EligibilityFact[] | undefined;
   userFacts?: Readonly<Record<string, PredicateValue>> | undefined;
+  capPools?: readonly CapPoolDefinition[] | undefined;
+  benefitStatuses?: readonly UserBenefitStatus[] | undefined;
 }
 
 export interface RankingEntry extends RewardBreakdown {

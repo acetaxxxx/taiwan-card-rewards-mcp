@@ -7,9 +7,9 @@ export function localParts(utc: string, timezone: string): { date: string; times
   return { date, timestamp: `${date}T${values.hour}:${values.minute}:${values.second}` };
 }
 
-export function projectionFromInput(input: CardSwitchInput): CardSwitchProjection {
+export function projectionFromInput(input: CardSwitchInput & { effectiveFrom?: string | undefined; effectiveTo?: string | undefined; campaignId?: string | undefined }): CardSwitchProjection {
   const local = localParts(input.switchedAtUtc, input.timezone);
-  return { cardId: input.cardId, timezone: input.timezone, switchedAtUtc: input.switchedAtUtc, switchedAtLocal: local.timestamp, switchedLocalDate: local.date, benefit: input.benefit, sourceUrl: input.sourceUrl, sourceSnapshotAt: input.sourceSnapshotAt, ruleVersion: input.ruleVersion, confirmation: input.confirmation, action: input.action, idempotencyKey: input.idempotencyKey, ...(input.adjustmentReason === undefined ? {} : { adjustmentReason: input.adjustmentReason }) };
+  return { cardId: input.cardId, timezone: input.timezone, switchedAtUtc: input.switchedAtUtc, switchedAtLocal: local.timestamp, switchedLocalDate: local.date, benefit: input.benefit, sourceUrl: input.sourceUrl, sourceSnapshotAt: input.sourceSnapshotAt, ruleVersion: input.ruleVersion, confirmation: input.confirmation, action: input.action, idempotencyKey: input.idempotencyKey, ...(input.adjustmentReason === undefined ? {} : { adjustmentReason: input.adjustmentReason }), ...(input.effectiveFrom === undefined ? {} : { effectiveFrom: input.effectiveFrom }), ...(input.effectiveTo === undefined ? {} : { effectiveTo: input.effectiveTo }), ...(input.campaignId === undefined ? {} : { campaignId: input.campaignId }) };
 }
 
 function campaignMatchesCard(campaign: CardSwitchCampaign, card: CardDescriptor): string | undefined {

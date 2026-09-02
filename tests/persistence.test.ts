@@ -45,7 +45,7 @@ describe("LedgerStore persistence seam and FileStore adapter", () => {
     try {
       const store: LedgerStore = new FileStore(config(dir));
       const initial = store.read();
-      expect(initial.schemaVersion).toBe(1);
+      expect(initial.schemaVersion).toBe(2);
       expect(initial.cards).toEqual([]);
       expect(initial.snapshots).toEqual([]);
       expect(initial.rules).toEqual([]);
@@ -82,7 +82,7 @@ describe("LedgerStore persistence seam and FileStore adapter", () => {
 
       const store2: LedgerStore = new FileStore(config(dir));
       const recovered = store2.read();
-      expect(recovered.schemaVersion).toBe(1);
+      expect(recovered.schemaVersion).toBe(2);
       expect(recovered.cards).toHaveLength(1);
       expect(recovered.cards[0]?.id).toBe("card-1");
       expect(recovered.snapshots[0]?.id).toBe("snap-1");
@@ -114,7 +114,7 @@ describe("LedgerStore persistence seam and FileStore adapter", () => {
     try {
       writeFileSync(join(dir, "card-rewards.lock"), JSON.stringify({ pid: 2147483647, startedAt: "2026-09-02T00:00:00.000Z" }));
       const store = new FileStore(config(dir));
-      expect(store.read().schemaVersion).toBe(1);
+      expect(store.read().schemaVersion).toBe(2);
       store.close();
     } finally {
       rmSync(dir, { recursive: true, force: true });

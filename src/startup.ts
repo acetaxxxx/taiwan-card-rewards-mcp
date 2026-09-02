@@ -17,6 +17,13 @@ export class StartupContractError extends Error {
 
 function canonicalDataDir(raw: string): string {
   if (!raw || !path.isAbsolute(raw)) throw new StartupContractError('INVALID_DATA_DIR', '--data-dir must be an absolute path');
+  // Refuse the root before mkdirSync can ever be asked to operate on it.
+  const lexicalRoot = path.parse(raw).root || path.win32.parse(raw).root;
+  if (raw === lexicalRoot || path.normalize(raw) === lexicalRoot) throw new StartupContractError('DANGEROUS_DATA_DIR', 'a filesystem root cannot be a tenant directory');
+  if (!fs.existsSync(raw)) {
+    try { fs.mkdirSync(raw, { recursive: true, mode: 0o700 }); }
+    catch { throw new StartupContractError('INVALID_DATA_DIR', '--data-dir could not be created'); }
+  }
   let canonical: string;
   try {
     canonical = fs.realpathSync(raw);
@@ -25,6 +32,7 @@ function canonicalDataDir(raw: string): string {
   }
   try {
     if (!fs.statSync(canonical).isDirectory()) throw new StartupContractError('INVALID_DATA_DIR', '--data-dir must be a directory');
+    fs.accessSync(canonical, fs.constants.R_OK | fs.constants.W_OK);
   } catch (error) {
     if (error instanceof StartupContractError) throw error;
     throw new StartupContractError('INVALID_DATA_DIR', '--data-dir must be readable');

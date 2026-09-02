@@ -47,11 +47,7 @@ const foreignCardRule: OfferRuleVersion = {
   settlementCurrency: 'TWD',
   match: { countries: ['US'] },
   reward: { kind: 'percentage', rateBps: 300 }, // 3%
-  cap: {
-    kind: 'billing_cycle',
-    cap: { amountMinor: 30000, currency: 'TWD' }, // 300 TWD cap per billing cycle
-    usageKey: 'rule-foreign:cycle',
-  },
+  capPoolRefs: ['pool-foreign-cycle'],
 };
 
 const calendarMonthRule: OfferRuleVersion = {
@@ -64,11 +60,23 @@ const calendarMonthRule: OfferRuleVersion = {
   settlementCurrency: 'TWD',
   match: {},
   reward: { kind: 'percentage', rateBps: 500 }, // 5%
-  cap: {
-    kind: 'calendar_month',
-    cap: { amountMinor: 50000, currency: 'TWD' }, // 500 TWD cap per calendar month
-    usageKey: 'rule-cal-month:month',
-  },
+  capPoolRefs: ['pool-cal-month'],
+};
+
+const foreignPool: CapPoolDefinition = {
+  id: 'pool-foreign-cycle',
+  metric: 'reward',
+  period: 'billing_cycle',
+  limit: 30000,
+  currency: 'TWD',
+};
+
+const calMonthPool: CapPoolDefinition = {
+  id: 'pool-cal-month',
+  metric: 'reward',
+  period: 'calendar_month',
+  limit: 50000,
+  currency: 'TWD',
 };
 
 describe('Ticket 07: Billing cycles, currencies, and FX context', () => {
@@ -87,7 +95,8 @@ describe('Ticket 07: Billing cycles, currencies, and FX context', () => {
       const context: EvaluationContext = {
         now: '2026-08-20T12:00:00Z',
         sourceSnapshots: { 'snap-fx': source },
-        usageByKey: { 'rule-foreign:cycle': { amountMinor: 0, currency: 'TWD' } },
+        capPools: [foreignPool],
+        usageByKey: { 'pool-foreign-cycle|pool-foreign-cycle:2026-09': { amountMinor: 0, currency: 'TWD' } },
       };
 
       const result = evaluateOffer(foreignCardRule, tx, context);
@@ -112,7 +121,8 @@ describe('Ticket 07: Billing cycles, currencies, and FX context', () => {
       const context: EvaluationContext = {
         now: '2026-08-20T12:00:00Z',
         sourceSnapshots: { 'snap-fx': source },
-        usageByKey: { 'rule-foreign:cycle': { amountMinor: 0, currency: 'TWD' } },
+        capPools: [foreignPool],
+        usageByKey: { 'pool-foreign-cycle|pool-foreign-cycle:2026-09': { amountMinor: 0, currency: 'TWD' } },
       };
 
       const result = evaluateOffer(foreignCardRule, txNoFx, context);
@@ -134,7 +144,8 @@ describe('Ticket 07: Billing cycles, currencies, and FX context', () => {
       const context: EvaluationContext = {
         now: '2026-08-20T12:00:00Z',
         sourceSnapshots: { 'snap-fx': source },
-        usageByKey: { 'rule-foreign:cycle': { amountMinor: 0, currency: 'TWD' } },
+        capPools: [foreignPool],
+        usageByKey: { 'pool-foreign-cycle|pool-foreign-cycle:2026-09': { amountMinor: 0, currency: 'TWD' } },
       };
 
       const result = evaluateOffer(foreignCardRule, txStaleFx, context);
@@ -150,7 +161,7 @@ describe('Ticket 07: Billing cycles, currencies, and FX context', () => {
       try {
         const service = new RewardService(store, undefined);
         service.registerCard({ id: 'card-local', issuer: 'Local Bank', productName: 'Cashback Card' });
-        service.upsertOffer(source, calendarMonthRule);
+        service.upsertOffer(source, calendarMonthRule, undefined, [calMonthPool]);
 
         // August spend: 8,000 TWD -> 5% = 400 TWD (40,000 minor) against 500 TWD cap (cap remaining: 100 TWD)
         const augTx: TransactionTuple = {
@@ -204,7 +215,7 @@ describe('Ticket 07: Billing cycles, currencies, and FX context', () => {
           issuer: 'Travel Bank',
           productName: 'Traveler Elite',
         });
-        service.upsertOffer(source, foreignCardRule);
+        service.upsertOffer(source, foreignCardRule, undefined, [foreignPool]);
 
         // Cycle 1 (Closing 2026-08-15, period 2026-07-16..2026-08-15):
         // Spend on 2026-08-10: $50 USD = 1,600 TWD -> 3% = 48 TWD (4,800 minor)
@@ -286,16 +297,19 @@ describe('Ticket 07: Billing cycles, currencies, and FX context', () => {
           billingCycleDay: 15,
           timezone: 'Asia/Taipei',
         });
+        const twCyclePool: CapPoolDefinition = {
+          id: 'pool-tw-cycle',
+          metric: 'reward',
+          period: 'billing_cycle',
+          limit: 20000,
+          currency: 'TWD',
+        };
         service.upsertOffer(source, {
           ...calendarMonthRule,
           id: 'rule-tw-cycle',
           cardId: 'card-tw',
-          cap: {
-            kind: 'billing_cycle',
-            cap: { amountMinor: 20000, currency: 'TWD' }, // 200 TWD
-            usageKey: 'rule-tw-cycle:cap',
-          },
-        });
+          capPoolRefs: ['pool-tw-cycle'],
+        }, undefined, [twCyclePool]);
 
         // 2026-08-15T15:30:00Z is 2026-08-15 23:30:00 in Asia/Taipei (Day 15 <= 15 -> Cycle 2026-08)
         const txSameDay: TransactionTuple = {

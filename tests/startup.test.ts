@@ -14,7 +14,7 @@ describe('startup contract', () => {
     expect(config.user).toBe('label');
     fs.rmSync(parent, { recursive: true, force: true });
   });
-  it('rejects missing, relative, root, unknown, and tool-overridden paths', () => {
+  it('rejects missing argument, relative, root, unknown, and tool-overridden paths', () => {
     expect(() => parseStartupArgs([])).toThrowError(StartupContractError);
     expect(() => parseStartupArgs(['--data-dir', 'relative'])).toThrowError(/absolute/);
     expect(() => parseStartupArgs(['--data-dir', path.parse(process.cwd()).root])).toThrowError(/root/);
@@ -22,6 +22,21 @@ describe('startup contract', () => {
     const parent = fs.mkdtempSync(path.join(os.tmpdir(), 'card-rewards-'));
     const config = parseStartupArgs(['--data-dir', parent]);
     expect(() => assertToolDataDir(config, path.join(parent, 'other'))).toThrowError(/override/);
+    fs.rmSync(parent, { recursive: true, force: true });
+  });
+  it('creates nested missing absolute data directories', () => {
+    const parent = fs.mkdtempSync(path.join(os.tmpdir(), 'card-rewards-'));
+    const nested = path.join(parent, 'one', 'two', 'tenant');
+    const config = parseStartupArgs(['--data-dir', nested]);
+    expect(fs.statSync(nested).isDirectory()).toBe(true);
+    expect(config.dataDir).toBe(fs.realpathSync(nested));
+    fs.rmSync(parent, { recursive: true, force: true });
+  });
+  it('rejects an existing regular file as data directory', () => {
+    const parent = fs.mkdtempSync(path.join(os.tmpdir(), 'card-rewards-'));
+    const file = path.join(parent, 'not-a-directory');
+    fs.writeFileSync(file, 'x');
+    expect(() => parseStartupArgs(['--data-dir', file])).toThrowError(/directory/);
     fs.rmSync(parent, { recursive: true, force: true });
   });
 });

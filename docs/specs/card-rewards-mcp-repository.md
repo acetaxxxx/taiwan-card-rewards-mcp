@@ -18,7 +18,7 @@ review. It is not a reason to modify `aionCore/`.
 ## Release and reproducibility contract
 
 - Every Aion descriptor pins an immutable package version, for example
-  `taiwan-card-rewards-mcp@0.2.2`; never use `latest`, a moving tag, or an
+  `taiwan-card-rewards-mcp@0.4.0`; never use `latest`, a moving tag, or an
   unbounded version range in production.
 - The independent repository commits `package-lock.json`. CI uses a fixed
   Node version, `npm ci --ignore-scripts`, `npm run typecheck`, `npm run build`,
@@ -38,7 +38,7 @@ Example Aion stdio descriptor (illustrative; package version is mandatory):
   "transport": {
     "type": "stdio",
     "command": "npx",
-    "args": ["--yes", "taiwan-card-rewards-mcp@0.2.2", "--data-dir", "/srv/aion/users/<user>/taiwan-card-rewards-mcp"]
+    "args": ["--yes", "taiwan-card-rewards-mcp@0.4.0", "--data-dir", "/srv/aion/users/<user>/taiwan-card-rewards-mcp"]
   },
   "enabled": true
 }
@@ -50,9 +50,9 @@ process launch. It must not be an LLM-controlled tool argument.
 ## Identity and tenant trust boundary
 
 - The parent creates one MCP process per Aion user and supplies one fixed,
-  absolute, existing, readable `--data-dir` for that process.
-- The MCP canonicalizes the path with `realpath`, rejects missing/non-directory
-  paths, filesystem roots, unknown startup arguments, and tool-level path
+  absolute, readable `--data-dir` for that process; missing nested directories are created at startup.
+- The MCP creates missing nested directories, then canonicalizes the path with
+  `realpath`, rejects non-directory paths, filesystem roots, unknown startup arguments, and tool-level path
   overrides. The canonical directory is the sole tenant boundary.
 - `--user`, if present, is display/metadata only. It is not authorization,
   account selection, or a storage partition. The MCP must not expose a

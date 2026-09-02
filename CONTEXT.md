@@ -166,6 +166,28 @@ _Avoid_: duplicate tolerance, best-effort append
 
 ## Outcomes and collaboration
 
+**Campaign Registration**: A user's confirmed completion of an issuer registration for a campaign and effective interval.
+
+**Current Benefit State**: The replaceable, user-scoped state describing the currently selected plan or registration, not an event history.
+
+**Reward Rounding Policy**: The versioned official rule for rounding reward units and the scope at which rounding occurs.
+
+**Step Reward**: A reward earned per complete spend step or unit, with explicit step amount and reward amount.
+
+**Reward Combination Policy**: The versioned rule for combining offers: additive, replace, best_of, exclusive, or prerequisite.
+
+**Combination Group**: Offers governed by one combination policy.
+
+**Cap Pool**: The explicit period-scoped aggregate of cap usage shared by rules.
+
+**Cap Pool Reference**: A rule's explicit reference to every Cap Pool it consumes.
+
+**Immediately Available Offer**: An offer whose required registration, plan selection, and facts are confirmed now.
+
+**Action-Required Offer**: A candidate requiring a user action or unresolved fact before confident reward calculation.
+
+**Backfilled Purchase**: An actual past purchase entered after occurrence because the user forgot to record it; it is evaluated in its original period.
+
 **Unknown Condition**:
 A required fact, source, rate, or operator result that is unavailable or
 ambiguous, so the calculation cannot claim a confident outcome.
@@ -199,6 +221,13 @@ calculation authority, not merely a caller convention.
 _Avoid_: caller promise, warning flag, best effort
 
 ## Domain invariants
+
+- One Held Card has one issuer, but a transaction may match issuer, network, wallet, or merchant sources.
+- Cap usage aggregates only by explicit Cap Pool; a rule may consume multiple pools and usage is never inferred from issuer or rule ID.
+- Unknown rounding, combination, registration, or required facts are non-confident and prompt the user.
+- A confirmed completedAt can affect an asOf projection but never silently rewrites a Recorded Purchase; corrections require confirmation and idempotency.
+- Unregistered or unknown campaigns are excluded from confirmed reward while remaining Action-Required candidates.
+- A Backfilled Purchase uses its original occurredAt, rule version, current benefit facts, timezone/cycle, and original-period cap pools. It never silently rewrites an existing Recorded Purchase.
 
 - Offer Evidence is not an Offer Rule. A source-linked fact must be interpreted
   into a versioned declarative rule before it can affect a calculation.

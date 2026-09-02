@@ -68,7 +68,7 @@ FX lookup order.
 ## The external interface
 
 The preferred interface has five semantic entry points. They are fewer than the
-current nine tool contracts because list/cap/history reads belong to one
+10-tool MCP surface because list/cap/history reads belong to one
 inspection operation, and refund is a ledger operation rather than a separate
 calculation authority.
 
