@@ -6,6 +6,8 @@ integration contract for `taiwan-card-rewards-mcp`.
 ## Start here
 
 - [AI Agent usage guide](agents/usage-guide.md)
+- [Agent skill-authoring guide](agents/skill-authoring-guide.md)
+- [Card-rewards skill template](agents/card-rewards-skill-template.md)
 - [Codebase design](design/codebase-design.md)
 - [Domain and agent-supplied rule ADR](adr/0001-independent-card-rewards-domain-and-agent-supplied-rules.md)
 - [Official Taiwan credit-card research](research/taiwan-credit-cards-official-research.md)

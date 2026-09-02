@@ -26,6 +26,8 @@ Available tools are the existing 9 reward tools plus `get_card_switch_status` an
 The design, research, specifications, and agent usage guides are kept under `docs/`:
 
 - `docs/agents/usage-guide.md` — AI Agent usage guide for installation, workflows, and fail-closed safety
+- `docs/agents/skill-authoring-guide.md` — general guidance for creating a portable card-rewards agent skill
+- `docs/agents/card-rewards-skill-template.md` — copyable skill template without private configuration
 - `schemas/card-rewards-state.schema.json` — persisted `card-rewards.json` JSON Schema (schemaVersion 1)
 - `docs/design/codebase-design.md` — package boundaries and implementation seam
 - `docs/adr/0001-independent-card-rewards-domain-and-agent-supplied-rules.md` — domain and rule-source decisions
