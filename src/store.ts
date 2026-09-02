@@ -50,14 +50,41 @@ export class FileStore implements LedgerStore {
     this.filePath = path.join(config.dataDir, 'card-rewards.json');
     this.lockPath = path.join(config.dataDir, 'card-rewards.lock');
     let fd: number | undefined;
-    try {
-      fd = fs.openSync(this.lockPath, 'wx', 0o600);
-      fs.writeSync(fd, JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString() }));
-      this.lockFd = fd;
-    } catch {
-      if (fd !== undefined) { try { fs.closeSync(fd); } catch { /* preserve startup error */ } try { fs.unlinkSync(this.lockPath); } catch { /* preserve startup error */ } }
-      throw new StoreError('LOCK_EXISTS', 'another MCP process already owns this data directory');
-    }
+    const acquireLock = (): number => {
+      try {
+        fd = fs.openSync(this.lockPath, 'wx', 0o600);
+        fs.writeSync(fd, JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString() }));
+        return fd;
+      } catch {
+        if (fs.existsSync(this.lockPath)) {
+          try {
+            const lockContent = JSON.parse(fs.readFileSync(this.lockPath, 'utf8'));
+            if (typeof lockContent.pid === 'number') {
+              let isAlive = true;
+              try {
+                process.kill(lockContent.pid, 0);
+              } catch (e: unknown) {
+                if (e && typeof e === 'object' && 'code' in e && e.code === 'ESRCH') {
+                  isAlive = false;
+                }
+              }
+              if (!isAlive) {
+                try { fs.unlinkSync(this.lockPath); } catch {}
+                fd = fs.openSync(this.lockPath, 'wx', 0o600);
+                fs.writeSync(fd, JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString() }));
+                return fd;
+              }
+            }
+          } catch {}
+        }
+        if (fd !== undefined) {
+          try { fs.closeSync(fd); } catch {}
+          try { fs.unlinkSync(this.lockPath); } catch {}
+        }
+        throw new StoreError('LOCK_EXISTS', 'another MCP process already owns this data directory');
+      }
+    };
+    this.lockFd = acquireLock();
     try {
       this.state = this.load();
     } catch (error) {

@@ -109,6 +109,18 @@ describe("LedgerStore persistence seam and FileStore adapter", () => {
     }
   });
 
+  it("recovers a lock left by a process that no longer exists", () => {
+    const dir = mkdtempSync(join(tmpdir(), "card-rewards-stale-lock-"));
+    try {
+      writeFileSync(join(dir, "card-rewards.lock"), JSON.stringify({ pid: 2147483647, startedAt: "2026-09-02T00:00:00.000Z" }));
+      const store = new FileStore(config(dir));
+      expect(store.read().schemaVersion).toBe(1);
+      store.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("performs atomic replacement and leaves no temp files behind", () => {
     const dir = mkdtempSync(join(tmpdir(), "card-rewards-atomic-"));
     try {
