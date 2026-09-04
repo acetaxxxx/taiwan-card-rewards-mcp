@@ -11,7 +11,7 @@ const rule: OfferRuleVersion = {
 const tx: TransactionTuple = { cardId: 'c1', kind: 'purchase', mode: 'planned', occurredAt: '2026-08-20T00:00:00Z', amount: { amountMinor: 200000, currency: 'TWD' }, country: 'JP', channel: 'in_store', paymentMethod: 'mobile_wallet' };
 const context: EvaluationContext = {
   now: '2026-08-18T00:00:00Z',
-  capPools: [{ id: 'p1', metric: 'reward', period: 'calendar_month', limit: 100000, currency: 'TWD' }],
+  capPools: [{ id: 'p1', metric: 'reward', period: 'calendar_month', limit: 100000, currency: 'TWD', timezone: 'Asia/Taipei' }],
   usageByKey: { 'p1|p1:2026-08': { amountMinor: 50000, currency: 'TWD' }, 'p1:2026-08': { amountMinor: 50000, currency: 'TWD' } },
   sourceSnapshots: { s1: { id: 's1', url: 'https://example.invalid/offer', fetchedAt: '2026-08-01T00:00:00Z', contentHash: 'fixture', parserVersion: '1' } },
 };

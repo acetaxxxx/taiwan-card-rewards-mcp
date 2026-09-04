@@ -69,6 +69,7 @@ const foreignPool: CapPoolDefinition = {
   period: 'billing_cycle',
   limit: 30000,
   currency: 'TWD',
+  timezone: 'Asia/Taipei',
 };
 
 const calMonthPool: CapPoolDefinition = {
@@ -77,6 +78,7 @@ const calMonthPool: CapPoolDefinition = {
   period: 'calendar_month',
   limit: 50000,
   currency: 'TWD',
+  timezone: 'Asia/Taipei',
 };
 
 describe('Ticket 07: Billing cycles, currencies, and FX context', () => {
@@ -303,6 +305,7 @@ describe('Ticket 07: Billing cycles, currencies, and FX context', () => {
           period: 'billing_cycle',
           limit: 20000,
           currency: 'TWD',
+          timezone: 'Asia/Taipei',
         };
         service.upsertOffer(source, {
           ...calendarMonthRule,

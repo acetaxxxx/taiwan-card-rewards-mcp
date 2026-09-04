@@ -9,7 +9,7 @@ export const mcpInstructions = [
   'Use recommend, calculate_reward, or rank_cards for planned evaluation; planned calls do not consume caps.',
   'Use record_transaction with a stable idempotencyKey for actual purchases and linked refunds. Never send PAN, CVV, OTP, passwords, tokens, or user_id.',
   'Treat unknown, stale, and needs_review as fail-closed: ask for missing facts or confirmation; never guess or convert them to zero reward.',
-  'For foreign-currency transactions provide a current FX snapshot. Use remaining_caps to inspect actual usage and cap balances.',
+  'For foreign-currency transactions provide a current FX snapshot. When a period boundary needs timezone, ask the user and provide an explicit IANA timezone; the server never guesses a missing timezone. Use remaining_caps to inspect actual usage and cap balances.',
   'For benefits, use get_user_benefit_status to inspect candidates and upsert_user_benefit_status only after the user confirms a completed action; same-day writes are allowed but return warnings.',
 ].join(' ');
 
@@ -28,7 +28,7 @@ export const mcpTools: readonly McpToolContract[] = [
 
 export const failClosedErrors = {
   UNAUTHENTICATED: 'A trusted Aion user context is missing or invalid.',
-  INSUFFICIENT_FACTS: 'A required transaction condition is unknown; ask the user.',
+  INSUFFICIENT_FACTS: 'A required timezone or transaction condition is unknown; ask the user.',
   SOURCE_UNAVAILABLE: 'The source could not be fetched or parsed safely.',
   NEEDS_REVIEW: 'The rule is stale, conflicting, or not human-approved.',
   STATE_NOT_SUPPORTED: 'This operation is not supported by the current persistence mode.',

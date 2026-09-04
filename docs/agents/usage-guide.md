@@ -133,7 +133,7 @@ The MCP server exposes 8 base reward tools plus two generic benefit tools. Stand
 ### E. Billing Cycles, Currencies & FX
 - **Cap Period Kinds**:
   - `calendar_month`: Resets on the 1st of each calendar month in the card's timezone.
-  - `billing_cycle`: Computed from the card's `billingCycleDay` and `timezone` (defaults to `Asia/Taipei`).
+  - `billing_cycle`: Computed from the card or cap pool's explicit IANA `timezone`; missing timezone is fail-closed.
 - **Foreign Currency Spend**:
   - If transaction currency differs from rule settlement currency (e.g. JPY spend on TWD card), an `fx` object with `ratePpm`, `capturedAt`, and `maxAgeSeconds` is required.
   - Missing or stale FX snapshots fail closed (`unknown` or `stale`).

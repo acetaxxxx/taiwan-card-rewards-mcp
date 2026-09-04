@@ -13,12 +13,13 @@ import type {
   TransactionTuple,
 } from './types.js';
 
+
 function poolCaps(rule: OfferRuleVersion, context: EvaluationContext): readonly CapPeriod[] {
   if (!rule.capPoolRefs?.length) return [];
   return rule.capPoolRefs.map((id) => {
     const pool = context.capPools?.find((candidate) => candidate.id === id);
     if (!pool) return { kind: 'calendar_month', cap: { amountMinor: 0, currency: rule.settlementCurrency }, usageKey: `__missing_pool__${id}`, capPoolId: id, metric: 'reward' };
-    return { kind: pool.period === 'billing_cycle' ? 'billing_cycle' : pool.period === 'campaign' ? 'campaign' : 'calendar_month', cap: { amountMinor: pool.limit, currency: pool.currency ?? rule.settlementCurrency }, usageKey: pool.id, capPoolId: pool.id, metric: pool.metric };
+    return { kind: pool.period === 'billing_cycle' ? 'billing_cycle' : pool.period === 'campaign' ? 'campaign' : 'calendar_month', cap: { amountMinor: pool.limit, currency: pool.currency ?? rule.settlementCurrency }, usageKey: pool.id, capPoolId: pool.id, metric: pool.metric, timezone: pool.timezone };
   });
 }
 
@@ -63,7 +64,8 @@ function resolveFieldFact(field: string, tx: TransactionTuple, context: Evaluati
   if (field.startsWith('user.')) {
     const txTime = tx.occurredAt ? Date.parse(tx.occurredAt) : NaN;
     const nowTime = context?.now ? Date.parse(context.now) : NaN;
-    const checkTime = Number.isFinite(txTime) ? txTime : (Number.isFinite(nowTime) ? nowTime : Date.now());
+    const checkTime = Number.isFinite(txTime) ? txTime : nowTime;
+    if (!Number.isFinite(checkTime)) return { kind: 'missing', reason: 'missing evaluation timestamp' };
 
     if (context?.userFacts && field in context.userFacts) {
       return { kind: 'ok', value: context.userFacts[field] };
@@ -230,7 +232,8 @@ export function resolveCyclePeriodKey(
   cap: CapPeriod,
   occurredAtIso: string,
 ): string {
-  const tz = (card && 'timezone' in card && typeof card.timezone === 'string') ? card.timezone : 'Asia/Taipei';
+  const tz = cap.timezone ?? ((card && 'timezone' in card && typeof card.timezone === 'string') ? card.timezone : undefined);
+  if (!tz) throw new Error('timezone is required to resolve cap period');
   const { year, month, day } = getZonedDateParts(occurredAtIso, tz);
 
   if (cap.kind === 'calendar_month') {
@@ -265,6 +268,7 @@ export function evaluateOffer(
   tx: TransactionTuple,
   context: EvaluationContext,
 ): RewardBreakdown {
+  const evaluationNow = context.now ?? new Date().toISOString();
   const base = { status: 'no_match' as EvaluationStatus, cardId: tx.cardId, transaction: tx, unknownReasons: [] as string[] };
   const inputErrors = invalidActual(tx);
   if (inputErrors.length) return { ...base, status: 'unknown', unknownReasons: inputErrors };
@@ -281,7 +285,7 @@ export function evaluateOffer(
   if (rule.requires?.includes('user_confirmation') && context.userConfirmed !== true) trustReasons.push('user confirmation is required');
   if (trustReasons.length) return { ...base, status: 'needs_review', ruleId: rule.id, ruleVersion: rule.version, unknownReasons: trustReasons };
   const sourceExpiry = source.validTo ? Date.parse(source.validTo) : Number.POSITIVE_INFINITY;
-  const now = Date.parse(context.now);
+  const now = Date.parse(evaluationNow);
   if (!Number.isFinite(now) || (source.validTo !== undefined && !Number.isFinite(sourceExpiry))) {
     return { ...base, status: 'needs_review', ruleId: rule.id, ruleVersion: rule.version, unknownReasons: ['invalid source snapshot dates'] };
   }
@@ -319,7 +323,8 @@ export function evaluateOffer(
     }
   }
 
-  const settlementAmount = convertMinor(tx.amount, rule.settlementCurrency, tx);
+  const basis = rule.useSettlementAmount === true ? (tx.settlementAmount ?? tx.amount) : tx.amount;
+  const settlementAmount = convertMinor(basis, rule.settlementCurrency, tx);
   if (settlementAmount === undefined) {
     return { ...base, status: 'unknown', ruleId: rule.id, ruleVersion: rule.version, unknownReasons: ['missing FX snapshot for settlement currency'] };
   }
@@ -345,6 +350,7 @@ export function evaluateOffer(
   let capRemainingBefore: Money | undefined;
   let capRemainingAfter: Money | undefined;
   const caps = poolCaps(rule, context);
+  if (rule.capPoolRefs?.length && caps.some((cap) => !cap.timezone && !cap.usageKey.startsWith('__missing_pool__'))) return { ...base, status: 'needs_review', ruleId: rule.id, ruleVersion: rule.version, unknownReasons: ['cap pool timezone is required'] };
   const spendCaps = caps.filter((cap) => cap.metric === 'spend');
   let qualifyingAmount = settlementAmount;
   for (const cap of spendCaps) {
@@ -368,6 +374,7 @@ export function evaluateOffer(
     if (used >= cap.cap.amountMinor) return { ...base, status: 'no_match', ruleId: rule.id, ruleVersion: rule.version, unknownReasons: ['transaction count cap exhausted'] };
   }
   for (const cap of caps) {
+    if (cap.usageKey.startsWith('__missing_pool__')) return { ...base, status: 'unknown', ruleId: rule.id, ruleVersion: rule.version, unknownReasons: ['missing cap pool definition'] };
     if (cap.metric === 'spend' || cap.metric === 'transaction_count') continue;
     const periodKey = resolveCyclePeriodKey(undefined, cap, tx.occurredAt);
     const usage = context.usageByKey?.[`${cap.capPoolId ?? cap.usageKey}|${periodKey}`] ?? context.usageByKey?.[periodKey] ?? context.usageByKey?.[cap.usageKey];
@@ -389,6 +396,7 @@ export function evaluateOffer(
     cappedReward: money(cappedMinor),
     ...(capRemainingBefore ? { capRemainingBefore } : {}),
     ...(capRemainingAfter ? { capRemainingAfter } : {}),
+    ...(rule.componentKind ? { components: [{ kind: rule.componentKind, ruleId: rule.id, ruleVersion: rule.version, sourceSnapshotId: rule.sourceSnapshotId, reward: money(cappedMinor), unit: rule.reward.currency ?? rule.settlementCurrency, confidence: rule.stacking ?? 'confirmed', ...(source.url ? { sourceReference: source.url } : {}), observedAt: source.fetchedAt }] } : {}),
   };
 }
 
@@ -443,9 +451,11 @@ export function rankCards(
         if (exclusive.length > 1) return { ...exclusive[0]!, status: 'needs_review' as const, unknownReasons: ['multiple exclusive combination rules matched'] };
         if (exclusive.length === 1) return exclusive[0]!;
         const first = candidates[0]!;
+        const components = candidates.flatMap((entry) => entry.components ?? []);
+        const compatible = components.length === 0 || components.every((component) => component.unit === components[0]?.unit && component.reward?.currency === components[0]?.reward?.currency);
         const gross = candidates.reduce((sum, entry) => sum + (entry.grossReward?.amountMinor ?? 0), 0);
         const capped = candidates.reduce((sum, entry) => sum + (entry.cappedReward?.amountMinor ?? 0), 0);
-        return { ...first, grossReward: first.grossReward ? { ...first.grossReward, amountMinor: gross } : undefined, cappedReward: first.cappedReward ? { ...first.cappedReward, amountMinor: capped } : undefined };
+        return { ...first, ...(components.length ? { components } : {}), ...(compatible ? { grossReward: first.grossReward ? { ...first.grossReward, amountMinor: gross } : undefined, cappedReward: first.cappedReward ? { ...first.cappedReward, amountMinor: capped } : undefined } : {}) };
       }
       const uncertain = results.find((result) => result.status === 'unknown' || result.status === 'needs_review' || result.status === 'stale');
       return uncertain ?? { status: 'no_match' as const, cardId: card.id, transaction: { ...tx, cardId: card.id }, unknownReasons: [] };

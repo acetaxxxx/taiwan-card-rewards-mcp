@@ -158,7 +158,7 @@ export interface CapPoolDefinition {
    */
   limit: number;
   currency?: CurrencyCode; // Required when metric is 'reward' or 'spend'
-  timezone?: string; // IANA timezone, default "Asia/Taipei" for Taiwan card programs
+  timezone?: string; // Explicit IANA timezone supplied by the agent/UI when period boundaries matter
 }
 ```
 
@@ -291,7 +291,7 @@ Card evaluation results MUST categorize outcomes into:
 ## 5. Time, Timezone, and Transaction Lifecycle
 
 ### 5.1 Timezone Rules
-1. Timezone is resolved from the specific card or campaign rule definition, defaulting to `Asia/Taipei` (UTC+8) when omitted for Taiwan credit card programs.
+1. Period and benefit dates use the applicable stored or explicitly supplied IANA timezone. Missing relevant timezone is fail-closed; conflicting timezone values are rejected. Service read queries may use their internally supplied current UTC `now`; pure `calculate_reward`/`rank_cards` accept optional `context.now` and use current time internally when omitted.
 2. Daily plan switches evaluate the active plan at `occurredAt` by default. If a rule explicitly declares `settlementTiming: 'daily_settlement_selection'` backed by official provenance, the plan active at `23:59:59.999` in the rule's timezone is used. If timing semantics are ambiguous or unverified, the evaluator MUST fail closed with `needs_review`.
 
 ### 5.2 Current-State Model and Backfilled Purchases

@@ -6,7 +6,7 @@ import type { CardDescriptor, EvaluationContext, OfferRuleVersion, TransactionTu
 const card: CardDescriptor = { id: 'c1', issuer: 'Bank', productName: 'Card', timezone: 'Asia/Taipei' };
 const tx: TransactionTuple = { cardId: 'c1', kind: 'purchase', mode: 'planned', occurredAt: '2026-09-01T01:00:00Z', amount: { amountMinor: 10000, currency: 'TWD' } };
 const source = { id: 's1', url: 'https://bank.example/offer', fetchedAt: '2026-08-01T00:00:00Z', contentHash: 'h', parserVersion: '1', verified: true };
-const context: EvaluationContext = { now: '2026-09-01T02:00:00Z', sourceSnapshots: { s1: source }, capPools: [{ id: 'pool', name: 'Pool', metric: 'reward', period: 'calendar_month', limit: 500, currency: 'TWD' }], usageByKey: { 'pool|pool:2026-09': { amountMinor: 100, currency: 'TWD' } } };
+const context: EvaluationContext = { now: '2026-09-01T02:00:00Z', sourceSnapshots: { s1: source }, capPools: [{ id: 'pool', name: 'Pool', metric: 'reward', period: 'calendar_month', limit: 500, currency: 'TWD', timezone: 'Asia/Taipei' }], usageByKey: { 'pool|pool:2026-09': { amountMinor: 100, currency: 'TWD' } } };
 const rule = (id: string, refs = ['pool']): OfferRuleVersion => ({ id, cardId: 'c1', version: '1', sourceSnapshotId: 's1', status: 'active', validFrom: '2026-01-01T00:00:00Z', settlementCurrency: 'TWD', match: {}, reward: { kind: 'percentage', rateBps: 100 }, capPoolRefs: refs });
 
 describe('Schema v2 regression seams', () => {
@@ -17,9 +17,9 @@ describe('Schema v2 regression seams', () => {
   });
 
   it('enforces spend and transaction-count metrics as gates', () => {
-    const spendContext: EvaluationContext = { ...context, capPools: [{ id: 'spend', metric: 'spend', period: 'calendar_month', limit: 5000, currency: 'TWD' }], usageByKey: { 'spend|spend:2026-09': { amountMinor: 4000, currency: 'TWD' } } };
+    const spendContext: EvaluationContext = { ...context, capPools: [{ id: 'spend', metric: 'spend', period: 'calendar_month', limit: 5000, currency: 'TWD', timezone: 'Asia/Taipei' }], usageByKey: { 'spend|spend:2026-09': { amountMinor: 4000, currency: 'TWD' } } };
     expect(evaluateOffer({ ...rule('rs', ['spend']), reward: { kind: 'percentage', rateBps: 100 } }, tx, spendContext).cappedReward?.amountMinor).toBe(10);
-    const countContext: EvaluationContext = { ...context, capPools: [{ id: 'count', metric: 'transaction_count', period: 'calendar_month', limit: 1 }], usageByKey: { 'count|count:2026-09': { amountMinor: 1, currency: 'TWD' } } };
+    const countContext: EvaluationContext = { ...context, capPools: [{ id: 'count', metric: 'transaction_count', period: 'calendar_month', limit: 1, timezone: 'Asia/Taipei' }], usageByKey: { 'count|count:2026-09': { amountMinor: 1, currency: 'TWD' } } };
     expect(evaluateOffer(rule('rc', ['count']), tx, countContext).status).toBe('no_match');
   });
 

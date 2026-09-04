@@ -105,7 +105,7 @@ export class RewardService {
       const pool = pools.find((candidate) => candidate.id === id);
       if (!pool) throw new RewardServiceError('INVALID_OFFER', `rule references missing cap pool ${id}`);
       const kind = pool.period === 'billing_cycle' ? 'billing_cycle' : pool.period === 'campaign' ? 'campaign' : 'calendar_month';
-      return { kind, cap: { amountMinor: pool.limit, currency: pool.currency ?? rule.settlementCurrency }, usageKey: pool.id, capPoolId: pool.id, metric: pool.metric };
+      return { kind, cap: { amountMinor: pool.limit, currency: pool.currency ?? rule.settlementCurrency }, usageKey: pool.id, capPoolId: pool.id, metric: pool.metric, timezone: pool.timezone };
     });
   }
 
@@ -348,7 +348,8 @@ export class RewardService {
       const matchingRule = cardRules.find((r) => r.capPoolRefs?.includes(poolId));
       const currency = pool.currency ?? matchingRule?.settlementCurrency ?? 'TWD';
       const kind = pool.period === 'billing_cycle' ? 'billing_cycle' : pool.period === 'campaign' ? 'campaign' : 'calendar_month';
-      const capPeriod: CapPeriod = { kind, cap: { amountMinor: pool.limit, currency }, usageKey: pool.id, capPoolId: pool.id, metric: pool.metric };
+      if (!pool.timezone) throw new RewardServiceError('INSUFFICIENT_FACTS', `timezone is required for cap pool ${poolId}`);
+      const capPeriod: CapPeriod = { kind, cap: { amountMinor: pool.limit, currency }, usageKey: pool.id, capPoolId: pool.id, metric: pool.metric, timezone: pool.timezone };
       const periodKey = resolveCyclePeriodKey(card, capPeriod, asOf);
 
       let used = 0;

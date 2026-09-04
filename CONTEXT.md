@@ -127,6 +127,11 @@ The card-specific time boundary used to group transactions and reset eligible
 Reward Caps; it may be different from a calendar month.
 _Avoid_: cron reset, universal billing month
 
+**Timezone Authority**:
+The explicit IANA timezone supplied by the user or declared by authoritative
+card, offer, or cap context that governs local dates and period boundaries.
+_Avoid_: server timezone, guessed locale, silent default timezone
+
 **Currency Context**:
 The complete monetary context of a transaction, preserving original, settlement,
 reward, fee, and comparison currencies when they differ.
@@ -138,6 +143,34 @@ provider, card or issuer, and effective time for which it may be used.
 _Avoid_: live rate, timeless conversion
 
 ## Transactions and accounting
+
+**Payment Route**:
+The declared path by which a transaction reaches the merchant and the card
+issuer, such as direct card payment, a wallet, or a merchant application; it
+identifies the provider and route context without storing payment credentials.
+_Avoid_: payment token, credential, generic payment method
+
+**Settlement Amount**:
+The amount actually charged to the underlying Held Card after an applicable
+wallet balance, merchant-app credit, coupon, or points redemption; it is the
+issuer reward basis only when the applicable rule says so.
+_Avoid_: displayed price, pre-discount amount, guessed eligible spend
+
+**Reward Component**:
+One independently calculated native reward issued by a distinct merchant,
+payment-provider, or card-issuer layer, with its own rule, unit, source, and cap
+context.
+_Avoid_: blended percentage, universal reward, opaque total
+
+**Stacking Assessment**:
+The explicit assessment of whether Reward Components can be combined: confirmed,
+possible, or unknown.
+_Avoid_: automatic sum, absence-of-exclusion guarantee
+
+**Community Observation**:
+A third-party report or observed result used to discover a possible offer or
+stacking path; it is a candidate lead and not issuer-authoritative Offer Evidence.
+_Avoid_: official evidence, verified rule, guaranteed loophole
 
 **Transaction Intent**:
 A proposed or hypothetical spend used to evaluate a possible reward without
@@ -228,6 +261,17 @@ _Avoid_: caller promise, warning flag, best effort
 - A confirmed completedAt can affect an asOf projection but never silently rewrites a Recorded Purchase; corrections require confirmation and idempotency.
 - Unregistered or unknown campaigns are excluded from confirmed reward while remaining Action-Required candidates.
 - A Backfilled Purchase uses its original occurredAt, rule version, current benefit facts, timezone/cycle, and original-period cap pools. It never silently rewrites an existing Recorded Purchase.
+- A Recorded Purchase captures its Payment Route and Settlement Amount as
+  transaction-time facts; later changes to a wallet binding or merchant-app
+  selection cannot rewrite the historical route.
+- A Reward Component keeps its own native unit, source, rule version, and cap
+  consumption. Components may be merged for presentation only when their
+  Stacking Assessment supports it and their units are compatible.
+- A Possible Stacking Assessment is an opportunity estimate, not a confirmed
+  reward guarantee; under the accepted opportunity-stacking policy it may still
+  be formally recorded when its dated evidence is not expired or contradictory.
+  A Community Observation can support discovery but cannot replace provenance or
+  hide its uncertainty.
 
 - Offer Evidence is not an Offer Rule. A source-linked fact must be interpreted
   into a versioned declarative rule before it can affect a calculation.
@@ -237,6 +281,9 @@ _Avoid_: caller promise, warning flag, best effort
   change the Reward Ledger, and a Refund must remain linked to its source.
 - A Rule Version, Card Cycle, Currency Context, FX Snapshot, and Reward Valuation
   used by a Recorded Purchase remain traceable for later reconciliation.
+- A query that needs a local period boundary must use an explicit Timezone
+  Authority; the AI agent asks the user when the relevant timezone is missing,
+  and the calculator does not infer it from the server or environment locale.
 - Unknown Condition and Stale Evidence cannot silently become a match, a zero,
   or a confident Recommendation; the AI agent must refresh evidence or ask the
   user when the missing fact is user-owned.

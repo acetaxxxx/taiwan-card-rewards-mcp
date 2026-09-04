@@ -29,7 +29,7 @@ describe('purchase and refund reconciliation', () => {
   it('restores reward cap headroom after a partial refund', () => {
     const dir = mkdtempSync(join(tmpdir(), 'card-rewards-ledger-cap-'));
     const store = new FileStore({ dataDir: dir });
-    const pool: CapPoolDefinition = { id: 'monthly-reward', metric: 'reward', period: 'calendar_month', limit: 500, currency: 'TWD' };
+    const pool: CapPoolDefinition = { id: 'monthly-reward', metric: 'reward', period: 'calendar_month', limit: 500, currency: 'TWD', timezone: 'Asia/Taipei' };
     const cappedRule: OfferRuleVersion = { ...rule, capPoolRefs: [pool.id] };
     try {
       const service = new RewardService(store, undefined);

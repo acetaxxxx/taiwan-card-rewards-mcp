@@ -12,6 +12,7 @@ integration contract for `taiwan-card-rewards-mcp`.
 - [Codebase design](design/codebase-design.md)
 - [Domain and agent-supplied rule ADR](adr/0001-independent-card-rewards-domain-and-agent-supplied-rules.md)
 - [Official Taiwan credit-card research](research/taiwan-credit-cards-official-research.md)
+- [Wallet and merchant-app stacked rewards research](research/wallet-and-merchant-app-stacked-rewards.md)
 - [Reference study and product plan](specs/taiwan-card-rewards-mcp-reference-study.md)
 - [Repository and Aion integration contract](specs/card-rewards-mcp-repository.md)
 - [Skill/Agent binding plan](integration/CARD_REWARDS_SKILL_BINDING_PLAN.md)

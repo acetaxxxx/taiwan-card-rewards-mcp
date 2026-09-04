@@ -42,8 +42,8 @@ const context: EvaluationContext = {
   now: '2026-09-02T01:00:00Z',
   sourceSnapshots: { s: source },
   capPools: [
-    { id: 'reward', metric: 'reward', period: 'calendar_month', limit: 100, currency: 'TWD' },
-    { id: 'count', metric: 'transaction_count', period: 'calendar_month', limit: 1 },
+    { id: 'reward', metric: 'reward', period: 'calendar_month', limit: 100, currency: 'TWD', timezone: 'Asia/Taipei' },
+    { id: 'count', metric: 'transaction_count', period: 'calendar_month', limit: 1, timezone: 'Asia/Taipei' },
   ],
   usageByKey: {
     'reward|reward:2026-09': { amountMinor: 0, currency: 'TWD' },
@@ -52,14 +52,20 @@ const context: EvaluationContext = {
 };
 
 describe('Schema v2A: canonical cap pool registry and shared aggregation', () => {
+  it('requires an explicit pool timezone and honors non-Taipei boundaries', () => {
+    const missing = { ...context, capPools: [{ id: 'reward', metric: 'reward' as const, period: 'calendar_month' as const, limit: 100, currency: 'TWD' }, { id: 'count', metric: 'transaction_count' as const, period: 'calendar_month' as const, limit: 1, timezone: 'America/New_York' }] };
+    expect(evaluateOffer(base, tx, missing).status).toBe('needs_review');
+    const period = evaluateOffer(base, { ...tx, occurredAt: '2026-09-01T03:30:00Z' }, { ...context, capPools: context.capPools?.map((pool) => ({ ...pool, timezone: 'America/New_York' })) });
+    expect(period.status).toBe('unknown'); // usage key is intentionally Taipei-shaped; boundary must not silently match it.
+  });
   it('applies all gates from one rule referencing two pools', () => {
     expect(evaluateOffer(base, tx, context).cappedReward?.amountMinor).toBe(100);
   });
 
   it('uses the tightest remaining reward pool when multiple reward caps apply', () => {
     const pools: CapPoolDefinition[] = [
-      { id: 'tight', metric: 'reward', period: 'calendar_month', limit: 100, currency: 'TWD' },
-      { id: 'wide', metric: 'reward', period: 'calendar_month', limit: 1000, currency: 'TWD' },
+      { id: 'tight', metric: 'reward', period: 'calendar_month', limit: 100, currency: 'TWD', timezone: 'Asia/Taipei' },
+      { id: 'wide', metric: 'reward', period: 'calendar_month', limit: 1000, currency: 'TWD', timezone: 'Asia/Taipei' },
     ];
     const multiPoolRule = { ...base, capPoolRefs: ['tight', 'wide'] };
     const multiPoolContext: EvaluationContext = {
@@ -78,7 +84,7 @@ describe('Schema v2A: canonical cap pool registry and shared aggregation', () =>
   it('enforces spend and count gates deterministically', () => {
     const spendContext: EvaluationContext = {
       ...context,
-      capPools: [{ id: 'spend', metric: 'spend', period: 'calendar_month', limit: 5000, currency: 'TWD' }],
+      capPools: [{ id: 'spend', metric: 'spend', period: 'calendar_month', limit: 5000, currency: 'TWD', timezone: 'Asia/Taipei' }],
       usageByKey: { 'spend|spend:2026-09': { amountMinor: 4000, currency: 'TWD' } },
     };
     // Tx is 10000 minor, but qualifying spend is capped at remaining 1000 minor -> 1% = 10 minor
@@ -87,7 +93,7 @@ describe('Schema v2A: canonical cap pool registry and shared aggregation', () =>
 
     const countContext: EvaluationContext = {
       ...context,
-      capPools: [{ id: 'count', metric: 'transaction_count', period: 'calendar_month', limit: 1 }],
+      capPools: [{ id: 'count', metric: 'transaction_count', period: 'calendar_month', limit: 1, timezone: 'Asia/Taipei' }],
       usageByKey: { 'count|count:2026-09': { amountMinor: 1, currency: 'TWD' } },
     };
     const countResult = evaluateOffer({ ...base, capPoolRefs: ['count'] }, tx, countContext);
@@ -115,10 +121,10 @@ describe('Schema v2A: canonical cap pool registry and shared aggregation', () =>
     const store = new FileStore({ dataDir: dir });
     try {
       const service = new RewardService(store, undefined);
-      const pool: CapPoolDefinition = { id: 'p1', metric: 'reward', period: 'calendar_month', limit: 100, currency: 'TWD' };
+      const pool: CapPoolDefinition = { id: 'p1', metric: 'reward', period: 'calendar_month', limit: 100, currency: 'TWD', timezone: 'Asia/Taipei' };
       service.upsertOffer(source, { ...base, capPoolRefs: ['p1'] }, undefined, [pool]);
       // Mutating immutable pool with different limit must throw
-      const conflictingPool: CapPoolDefinition = { id: 'p1', metric: 'reward', period: 'calendar_month', limit: 200, currency: 'TWD' };
+      const conflictingPool: CapPoolDefinition = { id: 'p1', metric: 'reward', period: 'calendar_month', limit: 200, currency: 'TWD', timezone: 'Asia/Taipei' };
       expect(() => service.upsertOffer(source, { ...base, id: 'r2', capPoolRefs: ['p1'] }, undefined, [conflictingPool])).toThrow(/cannot modify immutable cap pool/);
     } finally {
       store.close();
@@ -130,8 +136,8 @@ describe('Schema v2A: canonical cap pool registry and shared aggregation', () =>
     const foreign = {
       ...context,
       capPools: [
-        { id: 'reward', metric: 'reward' as const, period: 'calendar_month' as const, limit: 100, currency: 'USD' },
-        { id: 'count', metric: 'transaction_count' as const, period: 'calendar_month' as const, limit: 1 },
+        { id: 'reward', metric: 'reward' as const, period: 'calendar_month' as const, limit: 100, currency: 'USD', timezone: 'Asia/Taipei' },
+        { id: 'count', metric: 'transaction_count' as const, period: 'calendar_month' as const, limit: 1, timezone: 'Asia/Taipei' },
       ],
     };
     expect(evaluateOffer(base, tx, foreign).status).toBe('unknown');
@@ -151,6 +157,7 @@ describe('Schema v2A: canonical cap pool registry and shared aggregation', () =>
         period: 'calendar_month',
         limit: 500, // 500 minor units = 5 TWD
         currency: 'TWD',
+        timezone: 'Asia/Taipei',
       };
 
       const ruleA: OfferRuleVersion = {

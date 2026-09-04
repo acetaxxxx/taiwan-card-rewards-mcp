@@ -2,6 +2,21 @@ export type Currency = string;
 export type EvaluationStatus = 'ok' | 'no_match' | 'unknown' | 'needs_review' | 'stale';
 export type TransactionKind = 'purchase' | 'refund';
 export type TransactionMode = 'planned' | 'actual';
+export type PaymentRouteKind = 'direct_card' | 'wallet' | 'merchant_app';
+export interface PaymentRoute { kind: PaymentRouteKind; providerId?: string | undefined; appId?: string | undefined; displayName?: string | undefined; }
+export type StackingConfidence = 'confirmed' | 'possible';
+export type RewardComponentKind = 'merchant_loyalty' | 'payment_provider' | 'card_issuer';
+export interface RewardComponent {
+  kind: RewardComponentKind;
+  ruleId: string;
+  ruleVersion: string;
+  sourceSnapshotId: string;
+  reward?: Money | undefined;
+  unit: string;
+  confidence: StackingConfidence;
+  sourceReference?: string | undefined;
+  observedAt?: string | undefined;
+}
 export type PredicateValue = string | number | boolean | readonly string[];
 export type PredicateLeafOperator = 'EQUALS' | 'MATCH_ALLOWLIST';
 export type PredicateGroupOperator = 'AND' | 'OR';
@@ -120,6 +135,7 @@ export interface CapPeriod {
   capPoolId?: string | undefined;
   capPoolRefs?: readonly string[] | undefined;
   metric?: 'spend' | 'reward' | 'transaction_count' | undefined;
+  timezone?: string | undefined;
 }
 export interface CapPoolDefinition {
   id: string;
@@ -144,6 +160,9 @@ export interface OfferRuleVersion {
   predicate?: Predicate | undefined;
   requires?: readonly CalculationTrustRequirement[] | undefined;
   reward: RewardSpec;
+  componentKind?: RewardComponentKind | undefined;
+  useSettlementAmount?: boolean | undefined;
+  stacking?: StackingConfidence | undefined;
   confirmation?: OfferConfirmation | undefined;
   combination?: RewardCombinationPolicy | undefined;
   /** Schema v2 canonical cap references. */
@@ -182,6 +201,8 @@ export interface TransactionTuple {
   fx?: FxSnapshot | undefined;
   refundOfId?: string | undefined;
   originalRewardMinor?: number | undefined;
+  route?: PaymentRoute | undefined;
+  settlementAmount?: Money | undefined;
 }
 
 export interface RewardBreakdown {
@@ -196,6 +217,7 @@ export interface RewardBreakdown {
   capRemainingBefore?: Money | undefined;
   capRemainingAfter?: Money | undefined;
   unknownReasons: string[];
+  components?: readonly RewardComponent[] | undefined;
 }
 
 export type CardSwitchAction = 'record' | 'adjust';
@@ -298,7 +320,7 @@ export interface UserBenefitStatus extends CardSwitchStatus {
 }
 
 export interface EvaluationContext {
-  now: string;
+  now?: string | undefined;
   usageByKey?: Readonly<Record<string, Money>> | undefined;
   sourceSnapshots?: Readonly<Record<string, OfferSourceSnapshot>> | undefined;
   userConfirmed?: boolean | undefined;

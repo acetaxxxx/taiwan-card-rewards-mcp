@@ -282,6 +282,7 @@ describe("MCP Contract and Agent Boundary", () => {
           period: "calendar_month",
           limit: 50000,
           currency: "TWD",
+          timezone: "Asia/Taipei",
         },
       ];
       const confirmationInput = {

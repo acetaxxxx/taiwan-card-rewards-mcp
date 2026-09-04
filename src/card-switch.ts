@@ -1,4 +1,5 @@
 import type { CardDescriptor, CardSwitchCampaign, CardSwitchInput, CardSwitchProjection, CardSwitchStatus } from './types.js';
+import { RewardServiceError } from './errors.js';
 
 export function localParts(utc: string, timezone: string): { date: string; timestamp: string } {
   const parts = new Intl.DateTimeFormat('en-CA', { timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23' }).formatToParts(new Date(utc));
@@ -20,7 +21,10 @@ function campaignMatchesCard(campaign: CardSwitchCampaign, card: CardDescriptor)
 }
 
 export function cardSwitchStatus(card: CardDescriptor, current: CardSwitchProjection | undefined, campaigns: readonly CardSwitchCampaign[], asOfUtc: string): CardSwitchStatus {
-  const local = localParts(asOfUtc, card.timezone ?? 'Asia/Taipei');
+  const timezone = card.timezone ?? current?.timezone;
+  if (!timezone) throw new RewardServiceError('INSUFFICIENT_FACTS', 'card timezone is required for benefit status');
+  let local: { date: string; timestamp: string };
+  try { local = localParts(asOfUtc, timezone); } catch { throw new RewardServiceError('INVALID_INPUT', 'card timezone is invalid'); }
   const availableCandidates: CardSwitchCampaign[] = [];
   const currentlyUnavailable: Array<{ campaign: CardSwitchCampaign; reason: string }> = [];
   for (const campaign of campaigns) {
