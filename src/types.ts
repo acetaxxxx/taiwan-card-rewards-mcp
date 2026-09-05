@@ -17,6 +17,30 @@ export interface RewardComponent {
   sourceReference?: string | undefined;
   observedAt?: string | undefined;
 }
+export type PaymentRouteLayer = 'merchant' | 'payment_provider' | 'card_issuer';
+export interface ComponentCapUsage {
+  poolId: string;
+  periodKey: string;
+  metric: 'reward' | 'spend' | 'transaction_count';
+  consumedAmount: number;
+}
+export interface RewardAmount {
+  value: number;
+  unitType: 'currency' | 'point' | 'mile' | string;
+  unitName: string;
+  currency?: Currency | undefined;
+}
+export interface RewardComponentRecord {
+  componentId: string;
+  transactionId: string;
+  ruleId: string;
+  ruleVersion: string;
+  route: PaymentRouteLayer;
+  provider?: string | undefined;
+  reward: RewardAmount;
+  capUsages: readonly ComponentCapUsage[];
+  appliedAtUtc: string;
+}
 export type PredicateValue = string | number | boolean | readonly string[];
 export type PredicateLeafOperator = 'EQUALS' | 'MATCH_ALLOWLIST';
 export type PredicateGroupOperator = 'AND' | 'OR';

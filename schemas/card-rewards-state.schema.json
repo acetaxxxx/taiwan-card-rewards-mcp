@@ -4,13 +4,14 @@
   "title": "Taiwan Card Rewards persisted state",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schemaVersion", "cards", "snapshots", "rules", "transactions", "capPools"],
+  "required": ["schemaVersion", "cards", "snapshots", "rules", "transactions", "capPools", "rewardComponents"],
   "properties": {
     "schemaVersion": { "const": 2 },
     "cards": { "type": "array", "items": { "$ref": "#/$defs/card" } },
     "snapshots": { "type": "array", "items": { "$ref": "#/$defs/snapshot" } },
     "rules": { "type": "array", "items": { "$ref": "#/$defs/rule" } },
     "transactions": { "type": "array", "items": { "$ref": "#/$defs/recordedTransaction" } },
+    "rewardComponents": { "type": "array", "items": { "$ref": "#/$defs/rewardComponentRecord" } },
     "capPools": { "type": "array", "items": { "type": "object", "additionalProperties": false, "required": ["id", "metric", "period", "limit"], "properties": { "id": { "$ref": "#/$defs/id" }, "name": { "type": "string" }, "metric": { "enum": ["spend", "reward", "transaction_count"] }, "period": { "enum": ["calendar_month", "billing_cycle", "quarter", "year", "campaign"] }, "limit": { "type": "integer", "minimum": 0 }, "currency": { "$ref": "#/$defs/currency" }, "timezone": { "type": "string" } } } }
   },
   "$defs": {
@@ -77,6 +78,17 @@
     "fx": { "type": "object", "additionalProperties": false, "required": ["id", "baseCurrency", "quoteCurrency", "ratePpm", "capturedAt"], "properties": { "id": { "$ref": "#/$defs/id" }, "baseCurrency": { "$ref": "#/$defs/currency" }, "quoteCurrency": { "$ref": "#/$defs/currency" }, "ratePpm": { "type": "number", "minimum": 1, "maximum": 1000000000000 }, "capturedAt": { "$ref": "#/$defs/dateTime" }, "maxAgeSeconds": { "type": "integer", "minimum": 1 } } },
     "transaction": { "type": "object", "additionalProperties": false, "required": ["cardId", "kind", "mode", "occurredAt", "amount"], "properties": { "idempotencyKey": { "type": "string" }, "cardId": { "$ref": "#/$defs/id" }, "kind": { "enum": ["purchase", "refund"] }, "mode": { "enum": ["planned", "actual"] }, "merchant": { "type": "string" }, "mcc": { "type": "string" }, "country": { "type": "string" }, "channel": { "type": "string" }, "paymentMethod": { "type": "string" }, "occurredAt": { "$ref": "#/$defs/dateTime" }, "amount": { "$ref": "#/$defs/money" }, "settlementAmount": { "$ref": "#/$defs/money" }, "route": { "type": "object", "additionalProperties": false, "required": ["kind"], "properties": { "kind": { "enum": ["direct_card", "wallet", "merchant_app"] }, "providerId": { "$ref": "#/$defs/id" }, "appId": { "$ref": "#/$defs/id" }, "displayName": { "type": "string" } } }, "fx": { "$ref": "#/$defs/fx" }, "refundOfId": { "$ref": "#/$defs/id" }, "originalRewardMinor": { "type": "integer", "minimum": 0 } } },
     "rewardBreakdown": { "type": "object", "additionalProperties": false, "required": ["status", "cardId", "transaction", "unknownReasons"], "properties": { "status": { "enum": ["ok", "no_match", "unknown", "needs_review", "stale"] }, "cardId": { "$ref": "#/$defs/id" }, "transaction": { "$ref": "#/$defs/transaction" }, "ruleId": { "$ref": "#/$defs/id" }, "ruleVersion": { "type": "string" }, "sourceSnapshotId": { "$ref": "#/$defs/id" }, "grossReward": { "$ref": "#/$defs/signedMoney" }, "cappedReward": { "$ref": "#/$defs/signedMoney" }, "capRemainingBefore": { "$ref": "#/$defs/money" }, "capRemainingAfter": { "$ref": "#/$defs/money" }, "unknownReasons": { "type": "array", "items": { "type": "string" } }, "components": { "type": "array", "items": { "type": "object", "additionalProperties": false, "required": ["kind", "ruleId", "ruleVersion", "sourceSnapshotId", "unit", "confidence"], "properties": { "kind": { "enum": ["merchant_loyalty", "payment_provider", "card_issuer"] }, "ruleId": { "$ref": "#/$defs/id" }, "ruleVersion": { "type": "string" }, "sourceSnapshotId": { "$ref": "#/$defs/id" }, "reward": { "$ref": "#/$defs/signedMoney" }, "unit": { "type": "string" }, "confidence": { "enum": ["confirmed", "possible"] }, "sourceReference": { "type": "string" }, "observedAt": { "$ref": "#/$defs/dateTime" } } } } } },
+    "rewardComponentRecord": {
+      "type": "object", "additionalProperties": false,
+      "required": ["componentId", "transactionId", "ruleId", "ruleVersion", "route", "reward", "capUsages", "appliedAtUtc"],
+      "properties": {
+        "componentId": { "type": "string", "minLength": 1 }, "transactionId": { "$ref": "#/$defs/id" }, "ruleId": { "$ref": "#/$defs/id" }, "ruleVersion": { "type": "string" },
+        "route": { "enum": ["merchant", "payment_provider", "card_issuer"] }, "provider": { "type": "string" },
+        "reward": { "type": "object", "additionalProperties": false, "required": ["value", "unitType", "unitName"], "properties": { "value": { "type": "integer" }, "unitType": { "type": "string" }, "unitName": { "type": "string" }, "currency": { "$ref": "#/$defs/currency" } } },
+        "capUsages": { "type": "array", "items": { "type": "object", "additionalProperties": false, "required": ["poolId", "periodKey", "metric", "consumedAmount"], "properties": { "poolId": { "$ref": "#/$defs/id" }, "periodKey": { "type": "string" }, "metric": { "enum": ["reward", "spend", "transaction_count"] }, "consumedAmount": { "type": "integer" } } } },
+        "appliedAtUtc": { "$ref": "#/$defs/dateTime" }
+      }
+    },
     "recordedTransaction": {
       "type": "object",
       "additionalProperties": false,

@@ -1,4 +1,4 @@
-import type { CardDescriptor, CardProduct, CapPeriod, CapPoolDefinition, CardSwitchCampaign, CardSwitchConfirmation, CardSwitchInput, CardSwitchEnrollment, CardSwitchProjection, EligibilityFact, EvaluationContext, FxSnapshot, HeldCard, Money, OfferConfirmation, OfferProvenance, OfferRuleVersion, OfferSourceSnapshot, Predicate, PredicateValue, RewardBreakdown, RewardSpec, RuleMatch, TransactionTuple, PaymentRouteKind, RewardComponentKind } from './types.js';
+import type { CardDescriptor, CardProduct, CapPeriod, CapPoolDefinition, CardSwitchCampaign, CardSwitchConfirmation, CardSwitchInput, CardSwitchEnrollment, CardSwitchProjection, EligibilityFact, EvaluationContext, FxSnapshot, HeldCard, Money, OfferConfirmation, OfferProvenance, OfferRuleVersion, OfferSourceSnapshot, Predicate, PredicateValue, RewardBreakdown, RewardSpec, RuleMatch, TransactionTuple, PaymentRouteKind, RewardComponentKind, RewardComponentRecord } from './types.js';
 import type { StoredState } from './store.js';
 import { RewardServiceError } from './errors.js';
 
@@ -481,7 +481,7 @@ export function validateCardSwitchProjection(value: unknown): CardSwitchProjecti
 
 export function validateStoredState(value: unknown): StoredState {
   const item = object(value, 'stored state');
-  keys(item, ['schemaVersion', 'cards', 'snapshots', 'rules', 'transactions', 'campaigns', 'switchEnrollments', 'cardSwitches', 'capPools'], 'stored state');
+  keys(item, ['schemaVersion', 'cards', 'snapshots', 'rules', 'transactions', 'campaigns', 'switchEnrollments', 'cardSwitches', 'capPools', 'rewardComponents'], 'stored state');
   if (item.schemaVersion !== 2) throw new RewardServiceError('INCOMPATIBLE_SCHEMA', 'schema v1 or another unsupported schema requires explicit migration or reset; data was not deleted');
   if (!Array.isArray(item.cards) || !Array.isArray(item.snapshots) || !Array.isArray(item.rules) || !Array.isArray(item.transactions)) throw new RewardServiceError('STORE_CORRUPT', 'state collections must be arrays');
   const transactions = item.transactions.map((value, index) => {
@@ -496,8 +496,26 @@ export function validateStoredState(value: unknown): StoredState {
   const switchEnrollments = item.switchEnrollments === undefined ? [] : (Array.isArray(item.switchEnrollments) ? item.switchEnrollments.map(validateCardSwitchEnrollment) : (() => { throw new RewardServiceError('STORE_CORRUPT', 'switchEnrollments must be an array'); })());
   const cardSwitches = item.cardSwitches === undefined ? [] : (Array.isArray(item.cardSwitches) ? item.cardSwitches.map(validateCardSwitchProjection) : (() => { throw new RewardServiceError('STORE_CORRUPT', 'cardSwitches must be an array'); })());
   const capPools = item.capPools === undefined ? [] : (Array.isArray(item.capPools) ? item.capPools.map(validateCapPool) : (() => { throw new RewardServiceError('STORE_CORRUPT', 'capPools must be an array'); })());
+  const rewardComponents = item.rewardComponents === undefined ? [] : (Array.isArray(item.rewardComponents) ? item.rewardComponents.map((value, index) => validateRewardComponentRecord(value, index)) : (() => { throw new RewardServiceError('STORE_CORRUPT', 'rewardComponents must be an array'); })());
   if (new Set(capPools.map((pool) => pool.id)).size !== capPools.length) throw new RewardServiceError('STORE_CORRUPT', 'duplicate cap pool id');
-  return { schemaVersion: 2, cards: item.cards.map(validateCard), snapshots: item.snapshots.map(validateSnapshot), rules: item.rules.map(validateRule), transactions, campaigns, switchEnrollments, cardSwitches, capPools };
+  return { schemaVersion: 2, cards: item.cards.map(validateCard), snapshots: item.snapshots.map(validateSnapshot), rules: item.rules.map(validateRule), transactions, campaigns, switchEnrollments, cardSwitches, capPools, rewardComponents };
+}
+
+function validateRewardComponentRecord(value: unknown, index: number): RewardComponentRecord {
+  const item = object(value, `stored state.rewardComponents[${index}]`);
+  keys(item, ['componentId', 'transactionId', 'ruleId', 'ruleVersion', 'route', 'provider', 'reward', 'capUsages', 'appliedAtUtc'], 'reward component');
+  const reward = object(item.reward, 'reward component reward');
+  keys(reward, ['value', 'unitType', 'unitName', 'currency'], 'reward component reward');
+  if (typeof reward.value !== 'number' || !Number.isSafeInteger(reward.value)) throw new RewardServiceError('STORE_CORRUPT', 'reward component value must be an integer');
+  const capUsages = Array.isArray(item.capUsages) ? item.capUsages.map((entry) => {
+    const cap = object(entry, 'reward component cap usage');
+    keys(cap, ['poolId', 'periodKey', 'metric', 'consumedAmount'], 'reward component cap usage');
+    if (typeof cap.consumedAmount !== 'number' || !Number.isSafeInteger(cap.consumedAmount)) throw new RewardServiceError('STORE_CORRUPT', 'cap usage amount must be an integer');
+    return { poolId: requiredString(cap.poolId, 'cap usage poolId', true), periodKey: requiredString(cap.periodKey, 'cap usage periodKey'), metric: requiredString(cap.metric, 'cap usage metric') as 'reward' | 'spend' | 'transaction_count', consumedAmount: cap.consumedAmount };
+  }) : (() => { throw new RewardServiceError('STORE_CORRUPT', 'reward component capUsages must be an array'); })();
+  const route = requiredString(item.route, 'reward component route');
+  if (!['merchant', 'payment_provider', 'card_issuer'].includes(route)) throw new RewardServiceError('STORE_CORRUPT', 'reward component route is invalid');
+  return { componentId: requiredString(item.componentId, 'componentId', true), transactionId: requiredString(item.transactionId, 'transactionId', true), ruleId: requiredString(item.ruleId, 'ruleId', true), ruleVersion: requiredString(item.ruleVersion, 'ruleVersion'), route: route as RewardComponentRecord['route'], ...(item.provider === undefined ? {} : { provider: requiredString(item.provider, 'provider') }), reward: { value: reward.value, unitType: requiredString(reward.unitType, 'unitType'), unitName: requiredString(reward.unitName, 'unitName'), ...(reward.currency === undefined ? {} : { currency: requiredString(reward.currency, 'reward currency', true).toUpperCase() }) }, capUsages, appliedAtUtc: iso(item.appliedAtUtc, 'appliedAtUtc') };
 }
 
 export function validateToolArgs(name: string, value: unknown): Record<string, unknown> {

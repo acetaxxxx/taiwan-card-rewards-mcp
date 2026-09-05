@@ -1,6 +1,6 @@
 import { type LedgerStore, type RecordedTransaction, type StoredState } from './store.js';
 import { convertMinor, evaluateOffer, rankCards, resolveCyclePeriodKey } from './evaluator.js';
-import type { CardDescriptor, CardSwitchInput, CardSwitchStatus, CapPeriod, CapPoolDefinition, EvaluationContext, Money, OfferConfirmation, OfferRuleVersion, OfferSourceSnapshot, RankingEntry, RewardBreakdown, TransactionTuple, UserBenefitInput, UserBenefitStatus } from './types.js';
+import type { CardDescriptor, CardSwitchInput, CardSwitchStatus, CapPeriod, CapPoolDefinition, EvaluationContext, Money, OfferConfirmation, OfferRuleVersion, OfferSourceSnapshot, RankingEntry, RewardBreakdown, RewardComponentRecord, TransactionTuple, UserBenefitInput, UserBenefitStatus } from './types.js';
 import type { StartupConfig } from './startup.js';
 import { RewardServiceError } from './errors.js';
 import { validateCard, validateCapPool, validateConfirmation, validateRule, validateSnapshot, validateTransaction } from './validation.js';
@@ -11,6 +11,7 @@ export { RewardServiceError } from './errors.js';
 export interface RemainingCap { ruleId: string; usageKey: string; remaining: Money; }
 
 function nowIso(): string { return new Date().toISOString(); }
+function componentId(transactionId: string, ruleId: string, version: string): string { return `${encodeURIComponent(transactionId)}:${encodeURIComponent(ruleId)}:${encodeURIComponent(version)}`; }
 
 export class RewardService {
   constructor(readonly store: LedgerStore, readonly metadataUser: string | undefined) {}
@@ -59,10 +60,10 @@ export class RewardService {
 
       for (const record of state.transactions) {
         if (record.transaction.mode !== 'actual') continue;
-        const contributingRule = state.rules.find((candidate) => candidate.id === record.reward.ruleId);
-        const contributingPoolRefs = contributingRule?.capPoolRefs ?? [];
-        if (!contributingPoolRefs.includes(pool.id)) continue;
-        const contributingCard = state.cards.find((c) => c.id === contributingRule?.cardId) ?? card;
+        const contributingRuleIds = record.reward.components?.map((component) => component.ruleId) ?? (record.reward.ruleId ? [record.reward.ruleId] : []);
+        const contributingRules = contributingRuleIds.map((id) => state.rules.find((candidate) => candidate.id === id)).filter((candidate): candidate is OfferRuleVersion => Boolean(candidate));
+        if (!contributingRules.some((candidate) => candidate.capPoolRefs?.includes(pool.id))) continue;
+        const contributingCard = state.cards.find((c) => c.id === contributingRules[0]?.cardId) ?? card;
         if (resolveCyclePeriodKey(contributingCard, capPeriod, record.transaction.occurredAt) !== period) continue;
         let amount: number | undefined;
         if (pool.metric === 'transaction_count') {
@@ -70,7 +71,8 @@ export class RewardService {
         } else if (pool.metric === 'spend') {
           amount = convertMinor(record.transaction.amount, currency, record.transaction);
         } else {
-          amount = record.reward.cappedReward ? convertMinor(record.reward.cappedReward, currency, record.transaction) : 0;
+          const componentRewards = record.reward.components?.filter((component) => contributingRules.some((candidate) => candidate.id === component.ruleId && candidate.capPoolRefs?.includes(pool.id))).map((component) => component.reward).filter((reward): reward is Money => Boolean(reward)) ?? [];
+          amount = componentRewards.length ? componentRewards.reduce((sum, reward) => sum + (convertMinor(reward, currency, record.transaction) ?? 0), 0) : (record.reward.cappedReward ? convertMinor(record.reward.cappedReward, currency, record.transaction) : 0);
         }
         if (amount === undefined) {
           bucket.invalid = true;
@@ -294,6 +296,7 @@ export class RewardService {
     if (!transaction.idempotencyKey) throw new RewardServiceError('IDEMPOTENCY_REQUIRED', 'actual transactions require idempotencyKey');
     const requestedTransaction = transaction;
     const state = this.store.read();
+    let originalRecord: RecordedTransaction | undefined;
     const duplicate = state.transactions.find((record) => record.transaction.idempotencyKey === transaction.idempotencyKey);
     if (duplicate) {
       if (JSON.stringify(duplicate.transaction) !== JSON.stringify(transaction)) throw new RewardServiceError('IDEMPOTENCY_CONFLICT', 'idempotencyKey already belongs to a different transaction');
@@ -303,6 +306,7 @@ export class RewardService {
       if (!transaction.refundOfId) throw new RewardServiceError('INVALID_REFUND', 'refund requires refundOfId');
       const original = state.transactions.find((record) => record.transaction.idempotencyKey === transaction.refundOfId);
       if (!original) throw new RewardServiceError('INVALID_REFUND', 'refundOfId does not reference a recorded transaction');
+      originalRecord = original;
       if (original.transaction.cardId !== transaction.cardId) throw new RewardServiceError('INVALID_REFUND', 'refund must reference a transaction for the same card');
       if (original.transaction.kind !== 'purchase') throw new RewardServiceError('INVALID_REFUND', 'refund must reference a purchase');
       const originalAmount = original.transaction.amount.amountMinor;
@@ -330,8 +334,39 @@ export class RewardService {
       const reason = reward?.unknownReasons?.join('; ') || 'no usable offer rule';
       throw new RewardServiceError(code, reason);
     }
+    const appliedAtUtc = nowIso();
+    const originalComponents = transaction.kind === 'refund' && transaction.refundOfId
+      ? state.rewardComponents.filter((component) => component.transactionId === transaction.refundOfId)
+      : [];
+    const sourceComponents = reward.components?.length ? reward.components : (reward.ruleId && reward.ruleVersion && reward.sourceSnapshotId ? [{ kind: 'card_issuer' as const, ruleId: reward.ruleId, ruleVersion: reward.ruleVersion, sourceSnapshotId: reward.sourceSnapshotId, reward: reward.cappedReward, unit: reward.cappedReward?.currency ?? 'TWD', confidence: 'confirmed' as const }] : []);
+    const componentRecords: RewardComponentRecord[] = originalComponents.length
+      ? originalComponents.map((component) => {
+        const originalAmount = originalRecord?.transaction.amount.amountMinor ?? transaction.amount.amountMinor;
+        const previousRefundAmount = state.transactions.filter((record) => record.transaction.kind === 'refund' && record.transaction.refundOfId === transaction.refundOfId).reduce((sum, record) => sum + record.transaction.amount.amountMinor, 0);
+        const previousReversed = state.rewardComponents.filter((record) => record.transactionId !== transaction.refundOfId && record.ruleId === component.ruleId && state.transactions.some((txRecord) => txRecord.transaction.idempotencyKey === record.transactionId && txRecord.transaction.refundOfId === transaction.refundOfId)).reduce((sum, record) => sum + Math.abs(record.reward.value), 0);
+        const isFinal = previousRefundAmount + transaction.amount.amountMinor >= originalAmount;
+        const reversed = isFinal ? Math.max(0, component.reward.value - previousReversed) : Math.floor((component.reward.value * transaction.amount.amountMinor) / originalAmount);
+        const capUsages = component.capUsages.map((usage) => {
+          const prior = state.rewardComponents.filter((record) => record.transactionId !== transaction.refundOfId && record.ruleId === component.ruleId && state.transactions.some((txRecord) => txRecord.transaction.idempotencyKey === record.transactionId && txRecord.transaction.refundOfId === transaction.refundOfId)).flatMap((record) => record.capUsages).filter((entry) => entry.poolId === usage.poolId && entry.periodKey === usage.periodKey).reduce((sum, entry) => sum + Math.abs(entry.consumedAmount), 0);
+          const restored = isFinal ? Math.max(0, usage.consumedAmount - prior) : Math.floor((usage.consumedAmount * transaction.amount.amountMinor) / originalAmount);
+          return { ...usage, consumedAmount: -restored };
+        });
+        return { ...component, componentId: componentId(requestedTransaction.idempotencyKey!, component.ruleId, component.ruleVersion), transactionId: requestedTransaction.idempotencyKey!, reward: { ...component.reward, value: -reversed }, capUsages, appliedAtUtc };
+      })
+      : sourceComponents.map((component) => {
+        const appliedRule = state.rules.find((candidate) => candidate.id === component.ruleId);
+        const capUsages = (appliedRule?.capPoolRefs ?? []).flatMap((poolId) => {
+          const pool = state.capPools.find((candidate) => candidate.id === poolId);
+          if (!pool) return [];
+          const kind = pool.period === 'billing_cycle' ? 'billing_cycle' : pool.period === 'campaign' ? 'campaign' : 'calendar_month';
+          const periodKey = resolveCyclePeriodKey(card, { kind, cap: { amountMinor: pool.limit, currency: pool.currency ?? appliedRule?.settlementCurrency ?? transaction.amount.currency }, usageKey: pool.id, capPoolId: pool.id, metric: pool.metric, timezone: pool.timezone }, transaction.occurredAt);
+          const consumedAmount = pool.metric === 'reward' ? (component.reward?.amountMinor ?? 0) : pool.metric === 'transaction_count' ? 1 : transaction.amount.amountMinor;
+          return [{ poolId, periodKey, metric: pool.metric, consumedAmount }];
+        });
+        return { componentId: componentId(requestedTransaction.idempotencyKey!, component.ruleId, component.ruleVersion), transactionId: requestedTransaction.idempotencyKey!, ruleId: component.ruleId, ruleVersion: component.ruleVersion, route: component.kind === 'merchant_loyalty' ? 'merchant' : component.kind === 'payment_provider' ? 'payment_provider' : 'card_issuer', ...(component.kind === 'payment_provider' ? { provider: requestedTransaction.route?.providerId } : {}), reward: { value: component.reward?.amountMinor ?? 0, unitType: 'currency', unitName: component.unit, ...(component.reward?.currency ? { currency: component.reward.currency } : {}) }, capUsages, appliedAtUtc };
+      });
     const record: RecordedTransaction = { transaction: requestedTransaction, reward: { ...reward, transaction: requestedTransaction } };
-    this.store.update((next) => { next.transactions.push(record); });
+    this.store.update((next) => { next.transactions.push(record); next.rewardComponents.push(...componentRecords); });
     return record.reward;
   }
 
@@ -355,9 +390,10 @@ export class RewardService {
       let used = 0;
       for (const record of state.transactions) {
         if (record.transaction.mode !== 'actual') continue;
-        const txRule = state.rules.find((r) => r.id === record.reward.ruleId);
-        if (!txRule?.capPoolRefs?.includes(poolId)) continue;
-        const txCard = state.cards.find((c) => c.id === txRule.cardId) ?? card;
+        const txRuleIds = record.reward.components?.map((component) => component.ruleId) ?? (record.reward.ruleId ? [record.reward.ruleId] : []);
+        const txRules = txRuleIds.map((id) => state.rules.find((r) => r.id === id)).filter((r): r is OfferRuleVersion => Boolean(r));
+        if (!txRules.some((r) => r.capPoolRefs?.includes(poolId))) continue;
+        const txCard = state.cards.find((c) => c.id === txRules[0]?.cardId) ?? card;
         if (resolveCyclePeriodKey(txCard, capPeriod, record.transaction.occurredAt) !== periodKey) continue;
         if (pool.metric === 'transaction_count') {
           used += record.transaction.kind === 'refund' ? -1 : 1;
@@ -367,11 +403,9 @@ export class RewardService {
             used += record.transaction.kind === 'refund' ? -amount : amount;
           }
         } else {
-          const reward = record.reward.cappedReward;
-          const amount = reward ? convertMinor(reward, currency, record.transaction) : 0;
-          if (amount !== undefined) {
-            used += record.transaction.kind === 'refund' ? -Math.abs(amount) : amount;
-          }
+          const componentRewards = record.reward.components?.filter((component) => txRules.some((r) => r.id === component.ruleId && r.capPoolRefs?.includes(poolId))).map((component) => component.reward).filter((reward): reward is Money => Boolean(reward)) ?? [];
+          const reward = componentRewards.length ? componentRewards.reduce((sum, item) => sum + (convertMinor(item, currency, record.transaction) ?? 0), 0) : (record.reward.cappedReward ? convertMinor(record.reward.cappedReward, currency, record.transaction) : 0);
+          if (reward !== undefined) used += record.transaction.kind === 'refund' ? -Math.abs(reward) : reward;
         }
       }
 
