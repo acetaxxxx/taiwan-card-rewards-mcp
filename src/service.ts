@@ -166,6 +166,7 @@ export class RewardService {
       usageByKey,
       sourceSnapshots: Object.fromEntries(state.snapshots.map((snapshot) => [snapshot.id, snapshot])),
       capPools: state.capPools,
+      paymentRoutes: this.listPaymentRoutes(),
     };
   }
 

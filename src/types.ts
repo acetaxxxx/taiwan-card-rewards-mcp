@@ -4,19 +4,19 @@ export type EvaluationStatus = 'ok' | 'no_match' | 'unknown' | 'needs_review' | 
 export type TransactionKind = 'purchase' | 'refund';
 export type TransactionMode = 'planned' | 'actual';
 export type PaymentRouteKind = 'direct_card' | 'wallet' | 'merchant_app';
-export type ConversionOwner = 'merchant' | 'wallet' | 'payment_provider' | 'card_network' | 'issuer' | 'unknown';
+export type ConversionOwner = 'merchant' | 'wallet' | 'payment_provider' | 'card_network' | 'issuer' | 'bank' | 'acquirer' | 'unknown';
 export type ConversionTiming = 'transaction' | 'clearing' | 'settlement' | 'posting';
 export interface PaymentRoute { kind: PaymentRouteKind; providerId?: string | undefined; appId?: string | undefined; displayName?: string | undefined; }
 export interface PaymentRouteContext {
-  merchantId?: string; walletProviderId?: string; paymentMethod?: string; intermediateProviderId?: string; cardNetwork?: string; issuer?: string; fundingSource?: string;
+  merchantId?: string; acceptanceProviderId?: string; consumerAppId?: string; walletProviderId?: string; interoperabilitySchemeId?: string; paymentMethod?: string; intermediateProviderId?: string; cardNetwork?: string; issuer?: string; fundingSource?: string; fundingSubtype?: 'linked_bank_account' | 'wallet_balance' | 'foreign_currency_account';
   transactionCurrency: Currency; settlementCurrency?: Currency; billingCurrency?: Currency; conversionOwner?: ConversionOwner; rateType?: FxRateType; conversionTiming?: ConversionTiming;
   foreignTransactionFee?: Money; markup?: Money; serviceFee?: Money; dcc?: boolean;
 }
-export type PaymentRouteLayerKind = 'merchant_loyalty' | 'payment_provider' | 'wallet' | 'intermediate_provider' | 'card_network' | 'card_issuer';
-export interface PaymentRouteLayer { kind: PaymentRouteLayerKind; providerId?: string; appId?: string; paymentMethod?: string; displayName?: string; }
+export type PaymentRouteLayerKind = 'merchant_loyalty' | 'merchant_acceptance' | 'consumer_app' | 'payment_provider' | 'wallet' | 'interoperability_scheme' | 'intermediate_provider' | 'card_network' | 'card_issuer';
+export interface PaymentRouteLayer { kind: PaymentRouteLayerKind; providerId?: string; appId?: string; paymentMethod?: string; displayName?: string; evidenceIds?: readonly string[]; }
 export type FundingInstrument =
   | { kind: 'credit_card'; cardId?: string }
-  | { kind: 'account'; subtype: 'linked_bank_account' | 'wallet_balance' }
+  | { kind: 'account'; subtype: 'linked_bank_account' | 'wallet_balance' | 'foreign_currency_account' }
   | { kind: 'cash' };
 export interface PaymentRouteRecord {
   id: string;
@@ -32,6 +32,7 @@ export interface PaymentRouteRecord {
   authority?: EvidenceAuthority;
   confidence?: 'high' | 'medium' | 'low';
   confirmation?: { confirmedAt: string; confirmedBy: string };
+  evidenceIds?: readonly string[];
   idempotencyKey: string;
   ownerUser?: string;
 }
@@ -252,6 +253,8 @@ export interface OfferRuleVersion {
   combination?: RewardCombinationPolicy | undefined;
   /** Schema v2 canonical cap references. */
   capPoolRefs?: readonly string[] | undefined;
+  /** Optional exact PaymentRoute binding; absent means the legacy generic rule. */
+  routeId?: string | undefined;
 }
 
 export interface FxSnapshot {
@@ -486,6 +489,7 @@ export interface EvaluationContext {
   userFacts?: Readonly<Record<string, PredicateValue>> | undefined;
   capPools?: readonly CapPoolDefinition[] | undefined;
   benefitStatuses?: readonly UserBenefitStatus[] | undefined;
+  paymentRoutes?: readonly PaymentRouteRecord[] | undefined;
 }
 
 export interface RankingEntry extends RewardBreakdown {

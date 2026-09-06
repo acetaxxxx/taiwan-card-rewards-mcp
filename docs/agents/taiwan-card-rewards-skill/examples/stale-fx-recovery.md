@@ -31,11 +31,13 @@ Agent 呼叫 `recommendation_preflight`：
 
 ---
 
-## Step 2: Agent Workspace 查詢官方即時匯率
+## Step 2: Agent Workspace 查詢該 route 的官方匯率
 
-Agent 於 Workspace 查詢台灣銀行即時牌告日圓現鈔/即期匯率：
+Agent 先依 route 的 `conversionOwner` 與 `rateType` 查詢對應的官方匯率頁、App 顯示或條款快照。例如若該路徑明確指定銀行即期賣出價，才可記錄：
 - 1 JPY = 0.2150 TWD
 - 量化為 PPM：$0.2150 \times 1,000,000 = `215000` PPM。
+
+若路徑是錢包換匯、信用卡儲值或 DCC，不能拿銀行牌告或卡組織匯率代替；Agent 必須先詢問／查證換匯主體與時間。匯率、費用與 DCC markup 都不能以 1.5% 或其他固定值預設。
 
 ---
 
@@ -56,10 +58,10 @@ Agent 於 Workspace 查詢台灣銀行即時牌告日圓現鈔/即期匯率：
 }
 ```
 
-**MCP 回傳結果**：`{ "ready": true, "requiredActions": [] }`
+**MCP 回傳結果**：只有當 route、FX snapshot 與費用／回饋證據均符合有效期時才可 `ready: true`；否則維持 `ready: false` 並回傳可操作的 `requiredActions`。
 
 ---
 
 ## Step 4: 執行 `recommend`
 
-MCP 計算折合台幣約 NT$ 3,225，扣除 1.5% 海外交易手續費（NT$ 48）後，精確計算富邦 J 卡日韓實體加碼（3%）與聯邦吉鶴卡日幣專屬回饋。
+MCP 只能依已查證的 route fee 與卡片條款計算折合台幣、費用與回饋；若沒有該卡／通道當期費率證據，不得自行扣除 1.5%，也不得宣稱一般海外消費回饋適用於錢包信用卡儲值。

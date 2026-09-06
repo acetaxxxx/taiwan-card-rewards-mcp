@@ -36,18 +36,20 @@ Agent 呼叫 `recommendation_preflight`：
 
 Agent 詢問：「請問您是：
 1. 使用 Apple Pay / 實體卡感應刷台灣信用卡？
-2. 或是使用台灣電子支付錢包（如街口/全支付）掃碼扣款（扣銀行帳戶或信用卡）？」
+2. 或是使用台灣電子支付錢包（如街口/全支付/台新 Pay+）掃碼扣款？
+3. 若是錢包，底層是銀行帳戶、錢包餘額、直接信用卡授權，還是信用卡先儲值錢包再付款？
+4. 店家顯示的是 PayPay／TWQR／其他受理網路？是否選了 DCC？」
 
 使用者：「我用 Apple Pay 刷富邦 J 卡（JCB）」。
 
 ---
 
-## Step 3: Agent 查核最新官方牌告匯率並轉換為 PPM
+## Step 3: Agent 查核「該 route」的官方匯率並轉換為 PPM
 
-Agent 查詢台灣銀行牌告現鈔賣出/即期匯率：
+Agent 必須依 route 的 conversion owner 查核對應官方來源，例如卡組織／發卡行、街口匯率頁或台新 Pay+ FAQ；不可因為交易在日本就直接套用台灣銀行牌告：
 - 1 JPY = 0.2152 TWD
 - 量化為 PPM：$0.2152 \times 1,000,000 = `215200` PPM。
-- 國外交易手續費：1.5% = `15000` PPM。
+- 國外交易手續費不預設為 1.5%；只有取得該卡／通道當期官方費率後才填 `foreignTransactionFee`。
 
 ---
 
@@ -62,7 +64,8 @@ Agent 查詢台灣銀行牌告現鈔賣出/即期匯率：
     "amount": { "amountMinor": 2000000, "currency": "JPY" },
     "merchant": "Bic Camera",
     "country": "JP",
-    "channel": "apple_pay",
+    "channel": "in_store",
+    "paymentMethod": "apple_pay",
     "fx": {
       "id": "fx_jpy_twd_bot_20260906",
       "baseCurrency": "JPY",
@@ -77,6 +80,8 @@ Agent 查詢台灣銀行牌告現鈔賣出/即期匯率：
       "transactionCurrency": "JPY",
       "settlementCurrency": "TWD",
       "billingCurrency": "TWD",
+      "acceptanceProviderId": "paypay_qr",
+      "consumerAppId": "apple_pay",
       "cardNetwork": "JCB",
       "issuer": "台北富邦銀行",
       "fundingSource": "credit_card",
@@ -96,6 +101,18 @@ Agent 查詢台灣銀行牌告現鈔賣出/即期匯率：
 
 MCP 計算：
 - 折合新台幣：NT$ 4,304 (20,000 JPY * 0.2152)
-- 1.5% 國外交易手續費：NT$ 65
+- 國外交易手續費：只有在 Fx/fee evidence 已確認時才列出，否則回傳 `needs_review`
 - 富邦 J 卡日韓實體加碼 3%：獲得 129 點 LINE POINTS
-- 扣除手續費後淨回饋：約 1.5%（淨收益 64 元等值點數）
+- 扣除已確認費用後的淨回饋；不可使用未查證的 1.5% 假設。
+
+## 另一條合法 route：PayPay QR → 台新 Pay+ → 台新信用卡
+
+這不是「Taiwan Pay 裡再套台新 Pay+」。Agent 應依台新 Pay+ 官方 FAQ 登錄：
+
+- `merchant_acceptance`: `paypay_qr`
+- `consumer_app`: `taishin_pay_plus`
+- `funding`: `credit_card`, `cardId: <registered-taishin-card>`（或 `account/linked_bank_account`）
+- `routeContext.conversionOwner`: `bank` / `payment_provider`，以當期 FAQ 與 App 顯示為準
+- `routeContext.rateType`: `cash_selling`（只有來源實際如此時才填）
+
+如果使用街口 PayPay 並選信用卡，官方 FAQ 的語意是 `credit_card_topup → wallet_balance_debit`；Agent 必須另查發卡行對 `JKO-Credit Card Top-up` 的回饋條款，不能把它當成 PayPay direct card transaction。

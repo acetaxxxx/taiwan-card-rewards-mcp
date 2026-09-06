@@ -29,4 +29,24 @@ describe('first-class payment route onboarding', () => {
     expect(() => service.upsertPaymentRoute({ ...input, apiToken: 'secret' })).toThrow();
     expect(service.upsertPaymentRoute({ ...input, status: 'candidate', confirmation: undefined }).layers[0]?.providerId).toBe('unknown-provider');
   });
+
+  it('records acceptance, app, interoperability, and account-funding facts without provider enums', () => {
+    const service = new RewardService(new MemoryStore(), 'u1');
+    const route = service.upsertPaymentRoute({
+      status: 'active',
+      idempotencyKey: 'paypay-taishin-account',
+      layers: [
+        { kind: 'merchant_acceptance', providerId: 'paypay_qr', evidenceIds: ['ev-paypay'] },
+        { kind: 'consumer_app', appId: 'taishin_pay_plus', evidenceIds: ['ev-taishin'] },
+        { kind: 'interoperability_scheme', providerId: 'hivex', evidenceIds: ['ev-hivex'] },
+      ],
+      funding: { kind: 'account', subtype: 'foreign_currency_account' },
+      evidenceIds: ['ev-paypay', 'ev-taishin'],
+      observedAt: '2026-09-05T00:00:00Z',
+      confirmation: { confirmedAt: '2026-09-05T00:00:00Z', confirmedBy: 'user' },
+    });
+    expect(route.layers.map((layer) => layer.kind)).toEqual(['merchant_acceptance', 'consumer_app', 'interoperability_scheme']);
+    expect(route.funding).toEqual({ kind: 'account', subtype: 'foreign_currency_account' });
+    expect(route.evidenceIds).toEqual(['ev-paypay', 'ev-taishin']);
+  });
 });

@@ -242,48 +242,52 @@
 ### 1.9 `list_payment_routes`
 - **用途**：分頁查詢使用者已登記的支付路徑。
 - **呼叫範例**：
-\`json
+```json
 {
   "limit": 10,
   "page": 1,
   "projection": "summary"
 }
-\`
+```
 
 ### 2.4 `upsert_payment_route` (支付路徑拓撲與扣款設定)
 - **用途**：登記或更新一筆支付路徑拓撲與扣款工具（無敏感金融資料）。
+- **操作守則**：Agent 必須先 `list_payment_routes` 去重，再用官方證據建立 `candidate`；只有使用者明確確認後才可寫入 `active`。PayPay、街口、台新 Pay+ 等都只是開放識別碼，不應新增品牌專用工具。
 - **呼叫範例**：
-\`json
+```json
 {
   "route": {
-    "id": "route_linepay_fubon_j",
-    "status": "active",
+    "id": "route_paypay_taishin_payplus_card",
+    "status": "candidate",
     "layers": [
       {
-        "kind": "payment_provider",
-        "providerId": "line_pay",
-        "paymentMethod": "line_pay_barcode",
-        "displayName": "LINE Pay 條碼支付"
+        "kind": "merchant_acceptance",
+        "providerId": "paypay_qr",
+        "evidenceIds": ["ev_paypay_acceptance"]
+      },
+      {
+        "kind": "consumer_app",
+        "appId": "taishin_pay_plus",
+        "evidenceIds": ["ev_taishin_payplus"]
       },
       {
         "kind": "card_issuer",
-        "providerId": "fubon",
-        "displayName": "台北富邦銀行"
+        "providerId": "taishin",
+        "evidenceIds": ["ev_taishin_funding"]
       }
     ],
     "funding": {
       "kind": "credit_card",
-      "cardId": "fubon_j"
+      "cardId": "taishin_card_alias"
     },
+    "evidenceIds": ["ev_paypay_acceptance", "ev_taishin_payplus", "ev_taishin_funding"],
     "observedAt": "2026-09-06T12:00:00Z",
-    "confirmation": {
-      "confirmedAt": "2026-09-06T12:00:00Z",
-      "confirmedBy": "user_explicit_setup"
-    },
-    "idempotencyKey": "route_setup_linepay_fubon_j_20260906"
+    "idempotencyKey": "route_setup_paypay_taishin_payplus_20260906"
   }
 }
-\`
+```
+
+`candidate` 路徑不能直接產生回饋；Agent 應先補齊證據並向使用者確認 funding／費用／匯率，再以相同 idempotency key 更新為 `active`。若官方資料顯示是「信用卡儲值 → wallet balance debit」，就照實記錄兩段式語意，不能標成 direct card rail。
 
 ### 2.3 `record_transaction` (實際刷卡與退款)
 - **實際消費記帳**：

@@ -51,8 +51,8 @@
 - **輸入參數**：`route: PaymentRouteDescriptor`
   - `id`: `string` (選填，路徑唯一 ID)
   - `status`: `"candidate" | "active" | "stale" | "conflict" | "needs_review"` (選填)
-  - `layers`: `PaymentRouteLayer[]` (必填，依序包含 `merchant_loyalty`, `payment_provider`, `wallet`, `intermediate_provider`, `card_network`, `card_issuer`)
-  - `funding`: `PaymentFunding` (必填，`kind: "credit_card" | "account" | "cash"`, `cardId?`, `subtype?: "linked_bank_account" | "wallet_balance"`)
+  - `layers`: `PaymentRouteLayer[]` (必填；可依官方證據使用 `merchant_acceptance`, `consumer_app`, `interoperability_scheme`, `payment_provider`, `intermediate_provider`, `card_network`, `card_issuer`，每層可附 `evidenceIds[]`)
+  - `funding`: `PaymentFunding` (必填，`kind: "credit_card" | "account" | "cash"`, `cardId?`, `subtype?: "linked_bank_account" | "wallet_balance" | "foreign_currency_account"`)
   - `sourceUrl`: `string` (選填，官方來源網址)
   - `sourceSnapshotId`: `string` (選填)
   - `contentHash`: `string` (選填)
@@ -62,6 +62,7 @@
   - `authority`: `string` (選填)
   - `confidence`: `"high" | "medium" | "low"` (選填)
   - `confirmation`: `{ confirmedAt: string, confirmedBy: string }` (選填，使用者確認紀錄)
+  - `evidenceIds`: `string[]` (選填，證明 route/funding/FX/fee 的已提交 evidence)
   - `idempotencyKey`: `string` (必填，唯一防重鍵)
 - **安全防線**：嚴禁傳入任何卡號 (PAN)、CVV、OTP 或密碼，違者觸發 `SENSITIVE_FIELD_FORBIDDEN`。
 
