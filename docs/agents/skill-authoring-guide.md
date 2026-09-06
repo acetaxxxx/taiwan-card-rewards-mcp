@@ -25,7 +25,7 @@ user question; no action requires the skill to calculate or persist ledger truth
 
 ## 2. Pin and validate the MCP connection
 
-Use the published immutable package version `0.8.0` (or a later reviewed release) in deployment configuration. Never
+Use the published immutable package version `0.9.0` (or a later reviewed release) in deployment configuration. Never
 use `latest`, a moving tag, an unbounded range, or a model-provided command
 path. Updates are deliberate: review the release notes, update the pinned
 version, run the host's handshake/tool smoke check, then deploy.
@@ -33,7 +33,7 @@ version, run the host's handshake/tool smoke check, then deploy.
 At startup, validate the MCP handshake and tool list before business calls:
 
 1. Confirm the expected protocol and server identity.
-2. Confirm all 12 public tools exist with the expected nested input schemas;
+2. Confirm all 13 public tools exist, including `recommendation_preflight`, with the expected nested input schemas;
    check required fields, enums/bounds, and `additionalProperties: false` at
    every object level, not only the top-level tool object.
 3. Confirm the process is bound by the trusted host to the intended user scope.

@@ -1,5 +1,6 @@
-import type { CardDescriptor, CardProduct, CapPeriod, CapPoolDefinition, CardSwitchCampaign, CardSwitchConfirmation, CardSwitchInput, CardSwitchEnrollment, CardSwitchProjection, EligibilityFact, EvaluationContext, FxSnapshot, HeldCard, MerchantIdentity, MerchantProvenance, Money, OfferConfirmation, OfferProvenance, OfferRuleVersion, OfferSourceSnapshot, Predicate, PredicateValue, RewardBreakdown, RewardSpec, RuleMatch, TransactionTuple, PaymentRouteKind, RewardComponentKind, RewardComponentRecord } from './types.js';
+import type { CardDescriptor, CardProduct, CapPeriod, CapPoolDefinition, CardSwitchCampaign, CardSwitchConfirmation, CardSwitchInput, CardSwitchEnrollment, CardSwitchProjection, EligibilityFact, EvaluationContext, FxSnapshot, HeldCard, MerchantIdentity, MerchantProvenance, Money, OfferConfirmation, OfferProvenance, OfferRuleVersion, OfferSourceSnapshot, Predicate, PredicateValue, RewardBreakdown, RewardSpec, RuleMatch, TransactionTuple, PaymentRouteKind, RewardComponentKind, RewardComponentRecord, PaymentRouteContext } from './types.js';
 import type { StoredState } from './store.js';
+import type { EvidenceRecord, FactCandidate } from './types.js';
 import { RewardServiceError } from './errors.js';
 
 const ID = /^[A-Za-z0-9][A-Za-z0-9_:-]{0,127}$/;
@@ -316,7 +317,7 @@ export function validateCapPool(value: unknown): CapPoolDefinition {
 
 export function validateTransaction(value: unknown): TransactionTuple {
   const item = object(value, 'transaction');
-  keys(item, ['idempotencyKey', 'cardId', 'kind', 'mode', 'merchant', 'mcc', 'country', 'channel', 'paymentMethod', 'occurredAt', 'amount', 'fx', 'refundOfId', 'originalRewardMinor', 'route', 'settlementAmount'], 'transaction');
+  keys(item, ['idempotencyKey', 'cardId', 'kind', 'mode', 'merchant', 'mcc', 'country', 'channel', 'paymentMethod', 'occurredAt', 'amount', 'fx', 'refundOfId', 'originalRewardMinor', 'route', 'settlementAmount', 'routeContext'], 'transaction');
   const kind = requiredString(item.kind, 'transaction.kind');
   const mode = requiredString(item.mode, 'transaction.mode');
   if (!['purchase', 'refund'].includes(kind) || !['planned', 'actual'].includes(mode)) throw new RewardServiceError('INVALID_INPUT', 'transaction kind or mode is invalid');
@@ -349,7 +350,22 @@ export function validateTransaction(value: unknown): TransactionTuple {
   let route: TransactionTuple['route'];
   if (item.route !== undefined) { const routeItem = object(item.route, 'transaction.route'); keys(routeItem, ['kind', 'providerId', 'appId', 'displayName'], 'transaction.route'); const routeKind = requiredString(routeItem.kind, 'transaction.route.kind'); if (!['direct_card', 'wallet', 'merchant_app'].includes(routeKind)) throw new RewardServiceError('INVALID_INPUT', 'transaction.route.kind is invalid'); route = { kind: routeKind as PaymentRouteKind, ...(optionalString(routeItem.providerId, 'transaction.route.providerId', true) ? { providerId: optionalString(routeItem.providerId, 'transaction.route.providerId', true) } : {}), ...(optionalString(routeItem.appId, 'transaction.route.appId', true) ? { appId: optionalString(routeItem.appId, 'transaction.route.appId', true) } : {}), ...(optionalString(routeItem.displayName, 'transaction.route.displayName') ? { displayName: optionalString(routeItem.displayName, 'transaction.route.displayName') } : {}) }; }
   const settlementAmount = item.settlementAmount === undefined ? undefined : validateMoney(item.settlementAmount, 'transaction.settlementAmount');
-  return { cardId: requiredString(item.cardId, 'transaction.cardId', true), kind: kind as TransactionTuple['kind'], mode: mode as TransactionTuple['mode'], occurredAt, amount: validateMoney(item.amount, 'transaction.amount'), ...(optional('idempotencyKey') ? { idempotencyKey: optional('idempotencyKey') } : {}), ...(optional('merchant') ? { merchant: optional('merchant') } : {}), ...(optional('mcc') ? { mcc: optional('mcc') } : {}), ...(optional('country', true) ? { country: optional('country', true) } : {}), ...(optional('channel') ? { channel: optional('channel') } : {}), ...(optional('paymentMethod') ? { paymentMethod: optional('paymentMethod') } : {}), ...(fx ? { fx } : {}), ...(optional('refundOfId', true) ? { refundOfId: optional('refundOfId', true) } : {}), ...(originalRewardMinor === undefined ? {} : { originalRewardMinor }), ...(route ? { route } : {}), ...(settlementAmount ? { settlementAmount } : {}) };
+  const routeContext = item.routeContext === undefined ? undefined : validatePaymentRouteContext(item.routeContext);
+  return { cardId: requiredString(item.cardId, 'transaction.cardId', true), kind: kind as TransactionTuple['kind'], mode: mode as TransactionTuple['mode'], occurredAt, amount: validateMoney(item.amount, 'transaction.amount'), ...(optional('idempotencyKey') ? { idempotencyKey: optional('idempotencyKey') } : {}), ...(optional('merchant') ? { merchant: optional('merchant') } : {}), ...(optional('mcc') ? { mcc: optional('mcc') } : {}), ...(optional('country', true) ? { country: optional('country', true) } : {}), ...(optional('channel') ? { channel: optional('channel') } : {}), ...(optional('paymentMethod') ? { paymentMethod: optional('paymentMethod') } : {}), ...(fx ? { fx } : {}), ...(optional('refundOfId', true) ? { refundOfId: optional('refundOfId', true) } : {}), ...(originalRewardMinor === undefined ? {} : { originalRewardMinor }), ...(route ? { route } : {}), ...(settlementAmount ? { settlementAmount } : {}), ...(routeContext ? { routeContext } : {}) };
+}
+
+function validatePaymentRouteContext(value: unknown): PaymentRouteContext {
+  const item = object(value, 'transaction.routeContext');
+  keys(item, ['merchantId', 'walletProviderId', 'paymentMethod', 'intermediateProviderId', 'cardNetwork', 'issuer', 'fundingSource', 'transactionCurrency', 'settlementCurrency', 'billingCurrency', 'conversionOwner', 'rateType', 'conversionTiming', 'foreignTransactionFee', 'markup', 'serviceFee', 'dcc'], 'transaction.routeContext');
+  const requiredCurrency = requiredString(item.transactionCurrency, 'transaction.routeContext.transactionCurrency', true).toUpperCase();
+  const owner = item.conversionOwner === undefined ? undefined : requiredString(item.conversionOwner, 'transaction.routeContext.conversionOwner');
+  if (owner !== undefined && !['merchant', 'wallet', 'payment_provider', 'card_network', 'issuer', 'unknown'].includes(owner)) throw new RewardServiceError('INVALID_INPUT', 'transaction.routeContext.conversionOwner is invalid');
+  const timing = item.conversionTiming === undefined ? undefined : requiredString(item.conversionTiming, 'transaction.routeContext.conversionTiming');
+  if (timing !== undefined && !['transaction', 'clearing', 'settlement', 'posting'].includes(timing)) throw new RewardServiceError('INVALID_INPUT', 'transaction.routeContext.conversionTiming is invalid');
+  const rateType = item.rateType === undefined ? undefined : requiredString(item.rateType, 'transaction.routeContext.rateType');
+  if (rateType !== undefined && !['cash_selling', 'spot_selling', 'mid_market', 'card_scheme'].includes(rateType)) throw new RewardServiceError('INVALID_INPUT', 'transaction.routeContext.rateType is invalid');
+  const optionalStringField = (name: string) => item[name] === undefined ? {} : { [name]: requiredString(item[name], `transaction.routeContext.${name}`) };
+  return { transactionCurrency: requiredCurrency, ...optionalStringField('merchantId'), ...optionalStringField('walletProviderId'), ...optionalStringField('paymentMethod'), ...optionalStringField('intermediateProviderId'), ...optionalStringField('cardNetwork'), ...optionalStringField('issuer'), ...optionalStringField('fundingSource'), ...(item.settlementCurrency === undefined ? {} : { settlementCurrency: requiredString(item.settlementCurrency, 'transaction.routeContext.settlementCurrency', true).toUpperCase() }), ...(item.billingCurrency === undefined ? {} : { billingCurrency: requiredString(item.billingCurrency, 'transaction.routeContext.billingCurrency', true).toUpperCase() }), ...(owner === undefined ? {} : { conversionOwner: owner as Exclude<PaymentRouteContext['conversionOwner'], undefined> }), ...(rateType === undefined ? {} : { rateType: rateType as Exclude<PaymentRouteContext['rateType'], undefined> }), ...(timing === undefined ? {} : { conversionTiming: timing as Exclude<PaymentRouteContext['conversionTiming'], undefined> }), ...(item.foreignTransactionFee === undefined ? {} : { foreignTransactionFee: validateMoney(item.foreignTransactionFee, 'transaction.routeContext.foreignTransactionFee') }), ...(item.markup === undefined ? {} : { markup: validateMoney(item.markup, 'transaction.routeContext.markup') }), ...(item.serviceFee === undefined ? {} : { serviceFee: validateMoney(item.serviceFee, 'transaction.routeContext.serviceFee') }), ...(item.dcc === undefined ? {} : { dcc: typeof item.dcc === 'boolean' ? item.dcc : (() => { throw new RewardServiceError('INVALID_INPUT', 'transaction.routeContext.dcc must be boolean'); })() }) };
 }
 
 /**
@@ -520,7 +536,7 @@ export function validateCardSwitchProjection(value: unknown): CardSwitchProjecti
 
 export function validateStoredState(value: unknown): StoredState {
   const item = object(value, 'stored state');
-  keys(item, ['schemaVersion', 'cards', 'snapshots', 'rules', 'transactions', 'campaigns', 'switchEnrollments', 'cardSwitches', 'capPools', 'rewardComponents', 'merchants'], 'stored state');
+  keys(item, ['schemaVersion', 'cards', 'snapshots', 'rules', 'transactions', 'campaigns', 'switchEnrollments', 'cardSwitches', 'capPools', 'rewardComponents', 'merchants', 'evidence', 'factCandidates'], 'stored state');
   if (item.schemaVersion !== 2) throw new RewardServiceError('INCOMPATIBLE_SCHEMA', 'schema v1 or another unsupported schema requires explicit migration or reset; data was not deleted');
   if (!Array.isArray(item.cards) || !Array.isArray(item.snapshots) || !Array.isArray(item.rules) || !Array.isArray(item.transactions)) throw new RewardServiceError('STORE_CORRUPT', 'state collections must be arrays');
   const transactions = item.transactions.map((value, index) => {
@@ -537,8 +553,29 @@ export function validateStoredState(value: unknown): StoredState {
   const capPools = item.capPools === undefined ? [] : (Array.isArray(item.capPools) ? item.capPools.map(validateCapPool) : (() => { throw new RewardServiceError('STORE_CORRUPT', 'capPools must be an array'); })());
   const rewardComponents = item.rewardComponents === undefined ? [] : (Array.isArray(item.rewardComponents) ? item.rewardComponents.map((value, index) => validateRewardComponentRecord(value, index)) : (() => { throw new RewardServiceError('STORE_CORRUPT', 'rewardComponents must be an array'); })());
   const merchants = item.merchants === undefined ? [] : (Array.isArray(item.merchants) ? item.merchants.map(validateMerchant) : (() => { throw new RewardServiceError('STORE_CORRUPT', 'merchants must be an array'); })());
+  const evidence = item.evidence === undefined ? [] : (Array.isArray(item.evidence) ? item.evidence.map(validateEvidence) : (() => { throw new RewardServiceError('STORE_CORRUPT', 'evidence must be an array'); })());
+  const factCandidates = item.factCandidates === undefined ? [] : (Array.isArray(item.factCandidates) ? item.factCandidates.map(validateFactCandidate) : (() => { throw new RewardServiceError('STORE_CORRUPT', 'factCandidates must be an array'); })());
   if (new Set(capPools.map((pool) => pool.id)).size !== capPools.length) throw new RewardServiceError('STORE_CORRUPT', 'duplicate cap pool id');
-  return { schemaVersion: 2, cards: item.cards.map(validateCard), snapshots: item.snapshots.map(validateSnapshot), rules: item.rules.map(validateRule), transactions, campaigns, switchEnrollments, cardSwitches, capPools, rewardComponents, merchants };
+  return { schemaVersion: 2, cards: item.cards.map(validateCard), snapshots: item.snapshots.map(validateSnapshot), rules: item.rules.map(validateRule), transactions, campaigns, switchEnrollments, cardSwitches, capPools, rewardComponents, merchants, evidence, factCandidates };
+}
+
+export function validateEvidence(value: unknown): EvidenceRecord {
+  const item = object(value, 'evidence');
+  keys(item, ['id', 'requirementId', 'sourceIdentity', 'sourceType', 'authority', 'claim', 'observedAt', 'validFrom', 'validTo', 'refreshAfter', 'confidence', 'contentHash', 'reviewState', 'sourceUrl'], 'evidence');
+  const claim = object(item.claim, 'evidence claim');
+  for (const value of Object.values(claim)) if (!['string', 'number', 'boolean'].includes(typeof value)) throw new RewardServiceError('INVALID_INPUT', 'evidence claim values must be scalar');
+  const sourceType = requiredString(item.sourceType, 'evidence sourceType');
+  const authority = requiredString(item.authority, 'evidence authority');
+  const confidence = requiredString(item.confidence, 'evidence confidence');
+  const reviewState = requiredString(item.reviewState, 'evidence reviewState');
+  if (!['official', 'trusted_secondary', 'community', 'user_provided'].includes(sourceType) || !['issuer', 'network', 'wallet', 'merchant', 'secondary', 'community', 'user'].includes(authority) || !['high', 'medium', 'low'].includes(confidence) || !['accepted', 'candidate', 'conflict', 'rejected'].includes(reviewState)) throw new RewardServiceError('INVALID_INPUT', 'evidence enum is invalid');
+  return { id: requiredString(item.id, 'evidence id', true), requirementId: requiredString(item.requirementId, 'evidence requirementId'), sourceIdentity: requiredString(item.sourceIdentity, 'evidence sourceIdentity'), sourceType: sourceType as EvidenceRecord['sourceType'], authority: authority as EvidenceRecord['authority'], claim: claim as EvidenceRecord['claim'], observedAt: iso(item.observedAt, 'evidence observedAt'), ...(item.validFrom === undefined ? {} : { validFrom: iso(item.validFrom, 'evidence validFrom') }), ...(item.validTo === undefined ? {} : { validTo: iso(item.validTo, 'evidence validTo') }), ...(item.refreshAfter === undefined ? {} : { refreshAfter: iso(item.refreshAfter, 'evidence refreshAfter') }), confidence: confidence as EvidenceRecord['confidence'], contentHash: requiredString(item.contentHash, 'evidence contentHash'), reviewState: reviewState as EvidenceRecord['reviewState'], ...(item.sourceUrl === undefined ? {} : { sourceUrl: requiredString(item.sourceUrl, 'evidence sourceUrl') }) };
+}
+
+export function validateFactCandidate(value: unknown): FactCandidate {
+  const item = object(value, 'fact candidate');
+  keys(item, ['id', 'requirementId', 'fact', 'evidenceId', 'reviewState'], 'fact candidate');
+  return { id: requiredString(item.id, 'fact candidate id', true), requirementId: requiredString(item.requirementId, 'fact candidate requirementId'), fact: object(item.fact, 'fact candidate fact') as FactCandidate['fact'], evidenceId: requiredString(item.evidenceId, 'fact candidate evidenceId', true), reviewState: requiredString(item.reviewState, 'fact candidate reviewState') as FactCandidate['reviewState'] };
 }
 
 function validateRewardComponentRecord(value: unknown, index: number): RewardComponentRecord {
@@ -560,7 +597,7 @@ function validateRewardComponentRecord(value: unknown, index: number): RewardCom
 
 export function validateToolArgs(name: string, value: unknown): Record<string, unknown> {
   const args = object(value, 'tool arguments');
-  const allowed: Record<string, string[]> = { register_card: ['card'], list_cards: ['limit', 'page', 'projection'], upsert_offer: ['snapshot', 'rule', 'confirmation', 'capPools'], recommend: ['transaction', 'cardIds', 'merchant', 'context', 'limit', 'page', 'projection'], record_transaction: ['transaction'], remaining_caps: ['cardId', 'asOf', 'limit', 'page', 'projection'], calculate_reward: ['rule', 'transaction', 'context'], rank_cards: ['cards', 'rules', 'transaction', 'context'], get_user_benefit_status: ['kind', 'cardId', 'asOfUtc', 'projection'], upsert_user_benefit_status: ['input'], resolve_merchant: ['rawQuery', 'country', 'market', 'mcc', 'channel'], search_active_offers: ['rawQuery', 'cardId', 'canonicalMerchantId', 'country', 'market', 'mcc', 'channel', 'asOf', 'limit', 'page', 'projection'] };
+  const allowed: Record<string, string[]> = { register_card: ['card'], list_cards: ['limit', 'page', 'projection'], upsert_offer: ['snapshot', 'rule', 'confirmation', 'capPools'], recommend: ['transaction', 'cardIds', 'merchant', 'context', 'limit', 'page', 'projection'], recommendation_preflight: ['transaction', 'context'], record_transaction: ['transaction'], remaining_caps: ['cardId', 'asOf', 'limit', 'page', 'projection'], calculate_reward: ['rule', 'transaction', 'context'], rank_cards: ['cards', 'rules', 'transaction', 'context'], get_user_benefit_status: ['kind', 'cardId', 'asOfUtc', 'projection'], upsert_user_benefit_status: ['input'], resolve_merchant: ['rawQuery', 'country', 'market', 'mcc', 'channel'], search_active_offers: ['rawQuery', 'cardId', 'canonicalMerchantId', 'country', 'market', 'mcc', 'channel', 'asOf', 'limit', 'page', 'projection'] };
   if (!allowed[name]) throw new RewardServiceError('TOOL_NOT_FOUND', `unknown tool: ${name}`);
   keys(args, allowed[name], `tool ${name}`);
   return args;

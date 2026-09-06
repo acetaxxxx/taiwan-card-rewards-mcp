@@ -7,6 +7,10 @@ integration contract for `taiwan-card-rewards-mcp`.
 
 - [AI Agent usage guide](agents/usage-guide.md)
 - [Agent skill-authoring guide](agents/skill-authoring-guide.md)
+- [Canonical Taiwan Card Rewards Skill Bundle](agents/taiwan-card-rewards-skill/SKILL.md)
+- [使用者安裝與 Skill 分發 SOP](agents/user-installation-and-skill-distribution-sop.md)
+- [Agent Research Skill 與 Pre-flight SOP (v0.9.0)](agents/agent-research-skill-and-preflight-sop.md)
+- [Card-rewards skill template](agents/card-rewards-skill-template.md)
 - [Card Rewards Schema v2 specification](specs/card-rewards-schema-v2-specification.md)
 - [Multi-component reward ledger specification (v0.6.0)](specs/multi-component-ledger-and-cap-attribution-specification.md)
 - [Market-aware MerchantIdentity 與有效優惠搜尋規格（待 Review）](specs/market-aware-merchant-identity-and-valid-offer-search-specification.md)
@@ -17,7 +21,6 @@ integration contract for `taiwan-card-rewards-mcp`.
 - [Recommendation 可配置筆數與 Page 分頁規格](specs/recommendation-pagination-and-configurable-limit-specification.md)
 - [Agent Workspace 與 MCP Durable State 所有權規格](specs/agent-workspace-and-mcp-durable-state-ownership-specification.md)
 - [Agent FX 與商家 Canonical Fact Recovery Workflow 規格](specs/agent-canonical-fact-recovery-workflow-specification.md)
-- [Card-rewards skill template](agents/card-rewards-skill-template.md)
 - [Codebase design](design/codebase-design.md)
 - [Domain and agent-supplied rule ADR](adr/0001-independent-card-rewards-domain-and-agent-supplied-rules.md)
 - [Multi-component reward ledger ADR](adr/0006-multi-component-reward-ledger-and-cap-attribution.md)

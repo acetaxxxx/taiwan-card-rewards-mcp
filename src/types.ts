@@ -4,7 +4,14 @@ export type EvaluationStatus = 'ok' | 'no_match' | 'unknown' | 'needs_review' | 
 export type TransactionKind = 'purchase' | 'refund';
 export type TransactionMode = 'planned' | 'actual';
 export type PaymentRouteKind = 'direct_card' | 'wallet' | 'merchant_app';
+export type ConversionOwner = 'merchant' | 'wallet' | 'payment_provider' | 'card_network' | 'issuer' | 'unknown';
+export type ConversionTiming = 'transaction' | 'clearing' | 'settlement' | 'posting';
 export interface PaymentRoute { kind: PaymentRouteKind; providerId?: string | undefined; appId?: string | undefined; displayName?: string | undefined; }
+export interface PaymentRouteContext {
+  merchantId?: string; walletProviderId?: string; paymentMethod?: string; intermediateProviderId?: string; cardNetwork?: string; issuer?: string; fundingSource?: string;
+  transactionCurrency: Currency; settlementCurrency?: Currency; billingCurrency?: Currency; conversionOwner?: ConversionOwner; rateType?: FxRateType; conversionTiming?: ConversionTiming;
+  foreignTransactionFee?: Money; markup?: Money; serviceFee?: Money; dcc?: boolean;
+}
 export type StackingConfidence = 'confirmed' | 'possible';
 export type RewardComponentKind = 'merchant_loyalty' | 'payment_provider' | 'card_issuer';
 export interface RewardComponent {
@@ -268,6 +275,7 @@ export interface TransactionTuple {
   originalRewardMinor?: number | undefined;
   route?: PaymentRoute | undefined;
   settlementAmount?: Money | undefined;
+  routeContext?: PaymentRouteContext | undefined;
 }
 
 export interface RewardBreakdown {
@@ -287,10 +295,61 @@ export interface RewardBreakdown {
 }
 
 export interface Diagnostic {
-  code: 'missing_required_fact' | 'fx_missing' | 'fx_stale' | 'fx_pair_mismatch' | 'fx_scope_mismatch' | 'fx_conflict' | 'merchant_ambiguous' | 'source_untrusted' | 'stale_rule' | 'invalid_input' | 'needs_review';
+  code: 'missing_required_fact' | 'fx_missing' | 'fx_stale' | 'fx_pair_mismatch' | 'fx_scope_mismatch' | 'fx_conflict' | 'merchant_ambiguous' | 'merchant_not_found' | 'no_active_offer' | 'source_untrusted' | 'stale_rule' | 'invalid_input' | 'needs_review';
   path: string;
   requiredFacts: readonly string[];
   retryAction: string;
+}
+
+export type PreflightRequirementStatus = 'available' | 'missing' | 'stale' | 'conflict' | 'invalid' | 'needs_review';
+export interface RecommendationRequirement {
+  id: string;
+  category: string;
+  path: string;
+  status: PreflightRequirementStatus;
+  scope?: Readonly<Record<string, string>>;
+  retryAction?: string;
+}
+export interface RecommendationRequiredAction {
+  action: 'resolve_merchant' | 'ask_user' | 'refresh_external_data' | 'submit_evidence' | 'review_offer';
+  path: string;
+  requiredFacts: readonly string[];
+}
+export interface RecommendationPreflight {
+  ready: boolean;
+  knownFacts: readonly string[];
+  requirements: readonly RecommendationRequirement[];
+  requiredActions: readonly RecommendationRequiredAction[];
+  diagnostics: readonly Diagnostic[];
+  evaluatedAt: string;
+  dataVersion: string;
+}
+
+export type EvidenceSourceType = 'official' | 'trusted_secondary' | 'community' | 'user_provided';
+export type EvidenceAuthority = 'issuer' | 'network' | 'wallet' | 'merchant' | 'secondary' | 'community' | 'user';
+export type EvidenceReviewState = 'accepted' | 'candidate' | 'conflict' | 'rejected';
+export interface EvidenceRecord {
+  id: string;
+  requirementId: string;
+  sourceIdentity: string;
+  sourceType: EvidenceSourceType;
+  authority: EvidenceAuthority;
+  claim: Readonly<Record<string, string | number | boolean>>;
+  observedAt: string;
+  validFrom?: string | undefined;
+  validTo?: string | undefined;
+  refreshAfter?: string | undefined;
+  confidence: 'high' | 'medium' | 'low';
+  contentHash: string;
+  reviewState: EvidenceReviewState;
+  sourceUrl?: string | undefined;
+}
+export interface FactCandidate {
+  id: string;
+  requirementId: string;
+  fact: Readonly<Record<string, string | number | boolean>>;
+  evidenceId: string;
+  reviewState: EvidenceReviewState;
 }
 
 export type CardSwitchAction = 'record' | 'adjust';

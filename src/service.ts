@@ -1,10 +1,10 @@
 import * as crypto from 'node:crypto';
 import { type LedgerStore, type RecordedTransaction, type StoredState } from './store.js';
 import { convertMinor, evaluateOffer, rankCards, resolveCyclePeriodKey } from './evaluator.js';
-import type { CardDescriptor, CardSwitchInput, CardSwitchProjection, CardSwitchStatus, CapPeriod, CapPoolDefinition, EvaluationContext, MerchantIdentity, MerchantResolution, Money, OfferConfirmation, OfferRuleVersion, OfferSourceSnapshot, RankingEntry, RewardBreakdown, RewardComponentRecord, TransactionTuple, UserBenefitInput, UserBenefitStatus } from './types.js';
+import type { CardDescriptor, CardSwitchInput, CardSwitchProjection, CardSwitchStatus, CapPeriod, CapPoolDefinition, EvaluationContext, MerchantIdentity, MerchantResolution, Money, OfferConfirmation, OfferRuleVersion, OfferSourceSnapshot, RankingEntry, RewardBreakdown, RewardComponentRecord, TransactionTuple, UserBenefitInput, UserBenefitStatus, RecommendationPreflight, RecommendationRequiredAction, RecommendationRequirement, Diagnostic, EvidenceRecord } from './types.js';
 import type { StartupConfig } from './startup.js';
 import { RewardServiceError } from './errors.js';
-import { validateCard, validateCapPool, validateConfirmation, validateMerchant, validateRecommendationTransaction, validateRule, validateSnapshot, validateTransaction } from './validation.js';
+import { validateCard, validateCapPool, validateConfirmation, validateMerchant, validateRecommendationTransaction, validateRule, validateSnapshot, validateTransaction, validateEvidence, validateFactCandidate } from './validation.js';
 import { cardSwitchStatus, projectionFromInput } from './card-switch.js';
 
 export { RewardServiceError } from './errors.js';
@@ -22,12 +22,44 @@ function merchantId(): string {
   for (let i = 0; i < 16; i += 1) encoded += ULID_ALPHABET[bytes[i % bytes.length]! % 32];
   return `mch_${encoded}`;
 }
+function ownedId(prefix: 'ev' | 'fact'): string {
+  let time = Date.now();
+  let encoded = '';
+  for (let i = 0; i < 10; i += 1) { encoded = ULID_ALPHABET[time % 32] + encoded; time = Math.floor(time / 32); }
+  const bytes = crypto.randomBytes(10);
+  for (let i = 0; i < 16; i += 1) encoded += ULID_ALPHABET[bytes[i % bytes.length]! % 32];
+  return `${prefix}_${encoded}`;
+}
 function normalizedMerchantKey(value: string): string {
   return value.normalize('NFKC').toLocaleLowerCase('und').replace(/[\p{P}\p{S}]+/gu, ' ').replace(/\s+/gu, ' ').trim();
 }
 
 export class RewardService {
   constructor(readonly store: LedgerStore, readonly metadataUser: string | undefined) {}
+
+  submitEvidence(input: unknown): EvidenceRecord {
+    const parsed = validateEvidence(input);
+    const state = this.store.read();
+    const existing = state.evidence.filter((candidate) => candidate.requirementId === parsed.requirementId && candidate.reviewState === 'accepted');
+    if (existing.some((candidate) => JSON.stringify(candidate.claim) !== JSON.stringify(parsed.claim))) throw new RewardServiceError('NEEDS_REVIEW', `conflict for evidence requirement ${parsed.requirementId}`);
+    const retry = existing.find((candidate) => JSON.stringify(candidate.claim) === JSON.stringify(parsed.claim) && candidate.sourceIdentity === parsed.sourceIdentity);
+    if (retry) return retry;
+    const evidence = { ...parsed, id: ownedId('ev') };
+    this.store.update((next) => { next.evidence.push(evidence); });
+    return evidence;
+  }
+
+  listEvidence(): readonly EvidenceRecord[] { return this.store.read().evidence; }
+
+  submitFactCandidate(input: unknown) {
+    const parsed = validateFactCandidate(input);
+    const state = this.store.read();
+    const retry = state.factCandidates.find((candidate) => candidate.requirementId === parsed.requirementId && candidate.evidenceId === parsed.evidenceId && JSON.stringify(candidate.fact) === JSON.stringify(parsed.fact));
+    if (retry) return retry;
+    const candidate = { ...parsed, id: ownedId('fact') };
+    this.store.update((next) => { next.factCandidates.push(candidate); });
+    return candidate;
+  }
 
   private visibleTransactions(state: StoredState): RecordedTransaction[] {
     return state.transactions.filter((record) => record.ownerUser === this.metadataUser || (record.ownerUser === undefined && this.metadataUser === undefined));
@@ -385,10 +417,101 @@ export class RewardService {
     return result.rule;
   }
 
+  preflightRecommendation(transaction: unknown, options: { context?: EvaluationContext } = {}): RecommendationPreflight {
+    const state = this.store.read();
+    let parsed: TransactionTuple;
+    try {
+      parsed = validateRecommendationTransaction(transaction);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'invalid recommendation transaction';
+      const dataVersion = crypto.createHash('sha256').update(JSON.stringify(state)).digest('hex').slice(0, 16);
+      return { ready: false, knownFacts: [], requirements: [{ id: 'transaction', category: 'transaction', path: 'transaction', status: 'invalid', retryAction: 'fix_payload' }], requiredActions: [{ action: 'ask_user', path: 'transaction', requiredFacts: [message] }], diagnostics: [{ code: 'invalid_input', path: 'transaction', requiredFacts: [message], retryAction: 'fix_payload' }], evaluatedAt: options.context?.now ?? nowIso(), dataVersion };
+    }
+    const evaluatedAt = options.context?.now ?? parsed.occurredAt;
+    const requirements: RecommendationRequirement[] = [];
+    const requiredActions: RecommendationRequiredAction[] = [];
+    const diagnostics: Diagnostic[] = [];
+    const knownFacts = ['transaction:amount', 'transaction:occurredAt'];
+    let resolvedMerchantId: string | undefined;
+    const card = parsed.cardId ? state.cards.find((candidate) => candidate.id === parsed.cardId) : undefined;
+    if (card) knownFacts.push(`card:${card.id}`);
+    else if (parsed.cardId) {
+      requirements.push({ id: 'card', category: 'card', path: 'transaction.cardId', status: 'missing', retryAction: 'register_card' });
+      diagnostics.push({ code: 'missing_required_fact', path: 'transaction.cardId', requiredFacts: ['transaction.cardId'], retryAction: 'register_card' });
+      requiredActions.push({ action: 'ask_user', path: 'transaction.cardId', requiredFacts: ['transaction.cardId'] });
+    }
+    const rules = state.rules.filter((rule) => rule.status === 'active' && (!card || rule.cardId === card.id));
+    const merchantSpecific = rules.some((rule) => Boolean(rule.match.merchants?.length));
+    if (parsed.merchant && merchantSpecific) {
+      const resolution = this.resolveMerchant(parsed.merchant, { ...(parsed.country ? { country: parsed.country } : {}) });
+      if (resolution.resolutionStatus !== 'confirmed') {
+        requirements.push({ id: 'merchant', category: 'merchant_identity', path: 'transaction.merchant', status: resolution.resolutionStatus === 'ambiguous' ? 'needs_review' : 'missing', retryAction: 'resolve_merchant' });
+        diagnostics.push({ code: 'merchant_ambiguous', path: 'transaction.merchant', requiredFacts: ['transaction.market'], retryAction: 'resolve_merchant' });
+        requiredActions.push({ action: 'resolve_merchant', path: 'transaction.merchant', requiredFacts: ['transaction.market'] });
+      } else { resolvedMerchantId = resolution.merchant!.canonicalId; knownFacts.push(`merchant:${resolvedMerchantId}`); }
+    }
+    if (!rules.length && card) {
+      requirements.push({ id: 'offer', category: 'offer_rule', path: 'rules', status: 'needs_review', retryAction: 'review_offer' });
+      diagnostics.push({ code: 'needs_review', path: 'rules', requiredFacts: ['verified active offer rule'], retryAction: 'review_offer' });
+      requiredActions.push({ action: 'review_offer', path: 'rules', requiredFacts: ['verified active offer rule'] });
+    }
+    if (resolvedMerchantId && !rules.some((rule) => rule.match.merchants?.includes(resolvedMerchantId!))) {
+      diagnostics.push({ code: 'no_active_offer', path: 'transaction.merchant', requiredFacts: [], retryAction: 'continue_with_base_rule' });
+    }
+    for (const rule of rules) {
+      const snapshot = state.snapshots.find((candidate) => candidate.id === rule.sourceSnapshotId);
+      if (!snapshot?.verified) {
+        requirements.push({ id: `source:${rule.id}`, category: 'offer_source', path: `rules.${rule.id}.sourceSnapshotId`, status: 'needs_review', retryAction: 'review_offer' });
+        diagnostics.push({ code: 'source_untrusted', path: `rules.${rule.id}.sourceSnapshotId`, requiredFacts: ['verified offer source'], retryAction: 'review_offer' });
+        requiredActions.push({ action: 'review_offer', path: `rules.${rule.id}`, requiredFacts: ['verified offer source'] });
+      }
+      if (Date.parse(rule.validFrom) > Date.parse(evaluatedAt) || (rule.validTo !== undefined && Date.parse(rule.validTo) < Date.parse(evaluatedAt))) {
+        requirements.push({ id: `rule:${rule.id}`, category: 'offer_rule', path: `rules.${rule.id}`, status: 'stale', retryAction: 'refresh_external_data' });
+        diagnostics.push({ code: 'stale_rule', path: `rules.${rule.id}`, requiredFacts: ['current offer rule'], retryAction: 'refresh_external_data' });
+        requiredActions.push({ action: 'refresh_external_data', path: `rules.${rule.id}`, requiredFacts: ['current offer rule'] });
+      }
+    }
+    for (const evidence of state.evidence) {
+      const relevant = evidence.requirementId.startsWith('fx') || evidence.requirementId.includes(parsed.cardId ?? '') || evidence.requirementId.includes(parsed.merchant ?? '');
+      if (!relevant) continue;
+      if (evidence.reviewState === 'conflict') {
+        requirements.push({ id: `evidence:${evidence.id}`, category: 'external_data', path: `evidence.${evidence.id}`, status: 'conflict', retryAction: 'submit_evidence' });
+        diagnostics.push({ code: evidence.requirementId.startsWith('fx') ? 'fx_conflict' : 'needs_review', path: `evidence.${evidence.id}`, requiredFacts: ['resolved evidence'], retryAction: 'submit_evidence' });
+        requiredActions.push({ action: 'submit_evidence', path: `evidence.${evidence.id}`, requiredFacts: ['resolved evidence'] });
+      } else if (evidence.refreshAfter !== undefined && Date.parse(evidence.refreshAfter) <= Date.parse(evaluatedAt)) {
+        requirements.push({ id: `evidence:${evidence.id}`, category: 'external_data', path: `evidence.${evidence.id}`, status: 'stale', retryAction: 'refresh_external_data' });
+        diagnostics.push({ code: evidence.requirementId.startsWith('fx') ? 'fx_stale' : 'stale_rule', path: `evidence.${evidence.id}`, requiredFacts: ['fresh external evidence'], retryAction: 'refresh_external_data' });
+        requiredActions.push({ action: 'refresh_external_data', path: `evidence.${evidence.id}`, requiredFacts: ['fresh external evidence'] });
+      }
+    }
+    const foreignRule = rules.some((rule) => rule.settlementCurrency !== parsed.amount.currency);
+    if (foreignRule && parsed.routeContext && !parsed.routeContext.conversionOwner) {
+      requirements.push({ id: 'route', category: 'payment_route', path: 'transaction.routeContext.conversionOwner', status: 'missing', retryAction: 'ask_user' });
+      diagnostics.push({ code: 'missing_required_fact', path: 'transaction.routeContext.conversionOwner', requiredFacts: ['transaction.routeContext.conversionOwner'], retryAction: 'ask_user' });
+      requiredActions.push({ action: 'ask_user', path: 'transaction.routeContext.conversionOwner', requiredFacts: ['transaction.routeContext.conversionOwner'] });
+    }
+    if (foreignRule && !parsed.fx) {
+      requirements.push({ id: 'fx', category: 'fx_rate', path: 'transaction.fx', status: 'missing', retryAction: 'query_approved_fx_source' });
+      diagnostics.push({ code: 'fx_missing', path: 'transaction.fx', requiredFacts: ['transaction.fx'], retryAction: 'query_approved_fx_source' });
+      requiredActions.push({ action: 'refresh_external_data', path: 'transaction.fx', requiredFacts: ['transaction.fx'] });
+    } else if (foreignRule && parsed.fx && parsed.fx.baseCurrency !== parsed.amount.currency) {
+      requirements.push({ id: 'fx', category: 'fx_rate', path: 'transaction.fx.baseCurrency', status: 'invalid', retryAction: 'rebuild_snapshot' });
+      diagnostics.push({ code: 'fx_pair_mismatch', path: 'transaction.fx.baseCurrency', requiredFacts: [`base currency ${parsed.amount.currency}`], retryAction: 'rebuild_snapshot' });
+      requiredActions.push({ action: 'refresh_external_data', path: 'transaction.fx', requiredFacts: [`base currency ${parsed.amount.currency}`] });
+    }
+    const dataVersion = crypto.createHash('sha256').update(JSON.stringify(state)).digest('hex').slice(0, 16);
+    const blocking = diagnostics.some((diagnostic) => diagnostic.code !== 'no_active_offer');
+    return { ready: !blocking, knownFacts, requirements, requiredActions, diagnostics, evaluatedAt, dataVersion };
+  }
+
   recommend(transaction: unknown, limit = 10, options: { cardIds?: readonly string[]; context?: EvaluationContext } = {}): RankingEntry[] {
-    const parsedTransaction = validateRecommendationTransaction(transaction);
+    let parsedTransaction = validateRecommendationTransaction(transaction);
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > 20) throw new RewardServiceError('INVALID_INPUT', 'limit must be a safe integer from 1 to 20');
     const state = this.store.read();
+    if (parsedTransaction.merchant) {
+      const resolution = this.resolveMerchant(parsedTransaction.merchant, { ...(parsedTransaction.country ? { country: parsedTransaction.country } : {}) });
+      if (resolution.resolutionStatus === 'confirmed' && resolution.merchant) parsedTransaction = { ...parsedTransaction, merchant: resolution.merchant.canonicalId };
+    }
     const cards = options.cardIds === undefined ? state.cards : state.cards.filter((card) => options.cardIds!.includes(card.id));
     const context = options.context ?? this.context(state, nowIso(), parsedTransaction);
     return rankCards(cards, state.rules, parsedTransaction, context, limit);

@@ -43,7 +43,7 @@ npx --yes github:acetaxxxx/taiwan-card-rewards-mcp#main \
 Pin a release tag for repeatable use:
 
 ```bash
-npx --yes github:acetaxxxx/taiwan-card-rewards-mcp#v0.8.0 \
+npx --yes github:acetaxxxx/taiwan-card-rewards-mcp#v0.9.0 \
   --data-dir /absolute/tenant-directory
 ```
 
@@ -67,7 +67,7 @@ node dist/cli.js --data-dir <absolute-path> [--user <user-id>]
 
 ## 3. The MCP Tool Surface
 
-The MCP server exposes reward tools plus bounded merchant resolution and generic
+The MCP server exposes reward tools plus bounded merchant resolution, recommendation preflight, and generic
 benefit tools. Standalone `confirm_offer` is not part of the surface; candidate
 activation is folded directly into `upsert_offer`.
 
@@ -79,6 +79,7 @@ activation is folded directly into `upsert_offer`.
 | `list_cards` | Read-only | List all registered cards in the user's store. | `STORE_UNAVAILABLE` |
 | `upsert_offer` | Mutating | Ingest an official or candidate source snapshot and versioned rule; activates candidate if valid confirmation is supplied. | `INVALID_OFFER`, `INVALID_CONFIRMATION`, `STORE_UNAVAILABLE` |
 | `recommend` | Read-only | Recommend a bounded page of cards (default 10) evaluated against registered cards and actual ledger usage without mutating usage; the Agent selects what to present. | `INSUFFICIENT_FACTS`, `NEEDS_REVIEW`, `STALE` |
+| `recommendation_preflight` | Read-only | Check typed transaction, merchant, offer, payment-route, FX, freshness, and conflict prerequisites without mutation or network access. | `INVALID_INPUT`, `INSUFFICIENT_FACTS`, `NEEDS_REVIEW`, `STALE` |
 | `search_active_offers` | Read-only | Search current active offers and return bounded canonical merchant/offer records; it never applies a reward. | `MISSING_REQUIRED_FACT`, `NOT_FOUND`, `STALE` |
 | `resolve_merchant` | Read-only | Validate an Agent-provided canonical merchant ID/name and return bounded merchant facts; it never interprets aliases or applies a reward. | `MERCHANT_AMBIGUOUS`, `MISSING_REQUIRED_FACT`, `NOT_FOUND` |
 | `record_transaction` | Mutating | Record an actual purchase (with `idempotencyKey`) or linked refund, updating durable cap usage. | `IDEMPOTENCY_CONFLICT`, `INVALID_REFUND`, `INSUFFICIENT_FACTS`, `NEEDS_REVIEW` |

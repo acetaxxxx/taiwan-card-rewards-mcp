@@ -111,7 +111,7 @@ describe("MCP Contract and Agent Boundary", () => {
     expect(upsertOffer.properties.capPools.type).toBe("array");
     expect(upsertOffer.properties.capPools.items.type).toBe("object");
   });
-  it("exposes all twelve approved MCP tools with valid schemas in tools/list", async () => {
+  it("exposes all thirteen approved MCP tools with valid schemas in tools/list", async () => {
     const dir = mkdtempSync(join(tmpdir(), "mcp-contract-list-"));
     const client = new McpProcessClient(dir);
     try {
@@ -120,14 +120,14 @@ describe("MCP Contract and Agent Boundary", () => {
       expect(initRes.result).toBeDefined();
       expect(initRes.result.protocolVersion).toBe("2024-11-05");
       expect(initRes.result.serverInfo.name).toBe("taiwan-card-rewards-mcp");
-      expect(initRes.result.serverInfo.version).toBe("0.8.0");
+      expect(initRes.result.serverInfo.version).toBe("0.9.0");
       expect(initRes.result.instructions).toContain("single-user durable ledger");
       expect(initRes.result.instructions).toContain("fail-closed");
 
       // 2. tools/list
       const listRes = await client.send({ id: 2, method: "tools/list" });
       expect(listRes.result).toBeDefined();
-      expect(listRes.result.tools).toHaveLength(12);
+      expect(listRes.result.tools).toHaveLength(13);
 
       const toolNames = listRes.result.tools.map((t: any) => t.name).sort();
       const expectedNames = [
@@ -135,6 +135,7 @@ describe("MCP Contract and Agent Boundary", () => {
         "list_cards",
         "rank_cards",
         "recommend",
+        "recommendation_preflight",
         "record_transaction",
         "register_card",
         "remaining_caps",
@@ -145,7 +146,7 @@ describe("MCP Contract and Agent Boundary", () => {
         "upsert_offer",
       ].sort();
       expect(toolNames).toEqual(expectedNames);
-      expect(mcpTools).toHaveLength(12);
+      expect(mcpTools).toHaveLength(13);
 
       // Verify schema properties of all tools
       for (const tool of listRes.result.tools) {

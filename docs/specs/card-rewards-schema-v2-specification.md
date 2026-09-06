@@ -320,9 +320,9 @@ The system MUST return explicit non-confident statuses when conditions are unres
 
 ---
 
-## 7. Public MCP Tool Surface (12-Tool Contract)
+## 7. Public MCP Tool Surface (13-Tool Contract)
 
-Schema v2 defines exactly **12 tools** on the public MCP surface. Outbound network fetching is handled externally by the host/agent, not by the MCP server. Merchant catalog registration remains a controlled service/catalog-ingestion operation and is not an additional public MCP tool.
+Schema v2 defines exactly **13 tools** on the public MCP surface, including the read-only `recommendation_preflight` prerequisite checker. Outbound network fetching is handled externally by the host/agent, not by the MCP server. Merchant catalog registration remains a controlled service/catalog-ingestion operation and is not an additional public MCP tool.
 
 | # | Tool Name | Read-Only | Description |
 |---|---|:---:|---|
@@ -332,12 +332,13 @@ Schema v2 defines exactly **12 tools** on the public MCP surface. Outbound netwo
 | 4 | `list_cards` | Yes | Lists registered Held Cards for the tenant. |
 | 5 | `upsert_offer` | No | Ingests snapshot and versioned rule; atomically confirms and activates candidate rules if `confirmation` is supplied. |
 | 6 | `recommend` | Yes | Uncertainty-aware bounded card recommendation (default 10 results; Agent may select five) using stored active rules, benefit statuses, and ledger caps. |
-| 7 | `record_transaction` | No | Durably records actual purchase or refund with idempotency and multi-pool cap updates. |
-| 8 | `remaining_caps` | Yes | Queries real-time remaining cap balances across all active cap pools for a card. |
-| 9 | `get_user_benefit_status` | Yes | Queries user's active benefit state (`card_switch`, `campaign_registration`). |
-| 10 | `upsert_user_benefit_status` | No | Records or updates user's confirmed benefit state for a plan selection or campaign enrollment. |
-| 11 | `resolve_merchant` | Yes | Resolves an exact canonical merchant ID or official alias with bounded deterministic candidates; it never writes aliases or applies a reward. |
-| 12 | `search_active_offers` | Yes | Searches active, verified, in-window offers with bounded 1-based pagination; it never activates rules. |
+| 7 | `recommendation_preflight` | Yes | Read-only prerequisite, freshness, evidence, payment-route, and FX check with actionable diagnostics. |
+| 8 | `record_transaction` | No | Durably records actual purchase or refund with idempotency and multi-pool cap updates. |
+| 9 | `remaining_caps` | Yes | Queries real-time remaining cap balances across all active cap pools for a card. |
+| 10 | `get_user_benefit_status` | Yes | Queries user's active benefit state (`card_switch`, `campaign_registration`). |
+| 11 | `upsert_user_benefit_status` | No | Records or updates user's confirmed benefit state for a plan selection or campaign enrollment. |
+| 12 | `resolve_merchant` | Yes | Resolves an exact canonical merchant ID or official alias with bounded deterministic candidates; it never writes aliases or applies a reward. |
+| 13 | `search_active_offers` | Yes | Searches active, verified, in-window offers with bounded 1-based pagination; it never activates rules. |
 
 ---
 
@@ -387,7 +388,7 @@ Schema v2 is a breaking format change:
 
 ## 10. Target Specification & Implementation Status
 
-This document defines the **target normative specification** for Schema v2. Package/server version 0.8.0 implements the canonical top-level cap-pool registry, shared multi-metric aggregation, current benefit projections, fail-closed combination resolution, complete nested public schemas, and the twelve-tool MCP surface described above.
+This document defines the **target normative specification** for Schema v2. Package/server version 0.9.0 implements the canonical top-level cap-pool registry, shared multi-metric aggregation, current benefit projections, fail-closed combination resolution, complete nested public schemas, typed evidence/payment-route context, and the thirteen-tool MCP surface described above.
 
 The persisted/runtime compatibility shape has a few deliberate differences from the illustrative v2 interfaces in Sections 3 and 4:
 1. Runtime rules use `combination.mode` and `prerequisiteRuleIds`; the normative `type` and singular `prerequisiteRuleId` names describe the same policy concepts.
