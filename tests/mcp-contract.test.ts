@@ -84,6 +84,29 @@ class McpProcessClient {
 }
 
 describe("MCP Contract and Agent Boundary", () => {
+  it("publishes closed nested schemas for every public tool", () => {
+    const walk = (schema: any): void => {
+      if (!schema || typeof schema !== "object") return;
+      if (schema.type === "object") {
+        expect(schema.additionalProperties).toBe(false);
+        for (const child of Object.values(schema.properties ?? {})) walk(child);
+      }
+      if (schema.type === "array") walk(schema.items);
+    };
+    for (const tool of mcpTools) walk(tool.inputSchema);
+  });
+  it("publishes the public contract distinctions that validators enforce", () => {
+    const recommend = mcpTools.find((tool) => tool.name === "recommend")!.inputSchema as any;
+    expect(recommend.properties.transaction.required).not.toContain("cardId");
+    expect(recommend.properties.cardIds.items.type).toBe("string");
+    expect(recommend.properties.merchant.additionalProperties).toBe(false);
+
+    const calculate = mcpTools.find((tool) => tool.name === "calculate_reward")!.inputSchema as any;
+    expect(calculate.properties.transaction.properties.fx.required).toEqual(expect.arrayContaining(["provider", "rateType"]));
+
+    const search = mcpTools.find((tool) => tool.name === "search_active_offers")!.inputSchema as any;
+    expect(search.properties).toEqual(expect.objectContaining({ canonicalMerchantId: expect.any(Object), market: expect.any(Object), mcc: expect.any(Object) }));
+  });
   it("exposes all twelve approved MCP tools with valid schemas in tools/list", async () => {
     const dir = mkdtempSync(join(tmpdir(), "mcp-contract-list-"));
     const client = new McpProcessClient(dir);
@@ -93,7 +116,7 @@ describe("MCP Contract and Agent Boundary", () => {
       expect(initRes.result).toBeDefined();
       expect(initRes.result.protocolVersion).toBe("2024-11-05");
       expect(initRes.result.serverInfo.name).toBe("taiwan-card-rewards-mcp");
-      expect(initRes.result.serverInfo.version).toBe("0.7.0");
+      expect(initRes.result.serverInfo.version).toBe("0.8.0");
       expect(initRes.result.instructions).toContain("single-user durable ledger");
       expect(initRes.result.instructions).toContain("fail-closed");
 

@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { describe, expect, it } from 'vitest';
-import { evaluateOffer, FileStore, RewardService } from '../src/index.js';
+import { evaluateOffer, FileStore, RewardService, validateTransaction } from '../src/index.js';
 import type {
   CardDescriptor,
   EvaluationContext,
@@ -27,6 +27,8 @@ const fxFreshUsd: FxSnapshot = {
   quoteCurrency: 'TWD',
   ratePpm: 32_000_000, // 1 USD = 32.000000 TWD
   capturedAt: '2026-08-19T00:00:00Z',
+  provider: 'approved-provider',
+  rateType: 'card_scheme',
 };
 
 const fxStaleUsd: FxSnapshot = {
@@ -35,6 +37,8 @@ const fxStaleUsd: FxSnapshot = {
   quoteCurrency: 'TWD',
   ratePpm: 32_000_000,
   capturedAt: '2026-08-01T00:00:00Z', // 19 days before 2026-08-20, exceeds 7 days
+  provider: 'approved-provider',
+  rateType: 'card_scheme',
 };
 
 const foreignCardRule: OfferRuleVersion = {
@@ -83,6 +87,25 @@ const calMonthPool: CapPoolDefinition = {
 
 describe('Ticket 07: Billing cycles, currencies, and FX context', () => {
   describe('Pure evaluator FX conversion and staleness', () => {
+    it('requires provider and rateType provenance for supplied FX snapshots', () => {
+      expect(() => validateTransaction({
+        cardId: 'card-travel',
+        kind: 'purchase',
+        mode: 'planned',
+        occurredAt: '2026-08-20T10:00:00Z',
+        amount: { amountMinor: 10000, currency: 'USD' },
+        fx: { ...fxFreshUsd, provider: undefined },
+      })).toThrow(/transaction\.fx\.provider/);
+      expect(() => validateTransaction({
+        cardId: 'card-travel',
+        kind: 'purchase',
+        mode: 'planned',
+        occurredAt: '2026-08-20T10:00:00Z',
+        amount: { amountMinor: 10000, currency: 'USD' },
+        fx: { ...fxFreshUsd, rateType: undefined },
+      })).toThrow(/transaction\.fx\.rateType/);
+    });
+
     it('converts foreign currency using fresh FX snapshot and calculates reward in settlement currency', () => {
       const tx: TransactionTuple = {
         cardId: 'card-travel',

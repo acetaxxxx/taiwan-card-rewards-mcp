@@ -319,7 +319,7 @@ export function evaluateOffer(
   if (tx.amount.currency !== rule.settlementCurrency) {
     if (!tx.fx || tx.fx.baseCurrency !== tx.amount.currency || tx.fx.quoteCurrency !== rule.settlementCurrency) {
       const code = tx.fx ? 'fx_pair_mismatch' : 'fx_missing';
-      return { ...base, status: 'unknown', ruleId: rule.id, ruleVersion: rule.version, unknownReasons: [code === 'fx_pair_mismatch' ? 'FX currency pair does not match settlement currency' : 'missing FX snapshot for settlement currency'], diagnostics: [diagnostic(code, 'transaction.fx', ['transaction.fx.baseCurrency', 'transaction.fx.quoteCurrency', 'transaction.fx.ratePpm', 'transaction.fx.capturedAt'], code === 'fx_pair_mismatch' ? 'rebuild_fx_snapshot_for_pair' : 'query_approved_fx_source')] };
+      return { ...base, status: 'unknown', ruleId: rule.id, ruleVersion: rule.version, unknownReasons: [code === 'fx_pair_mismatch' ? 'FX currency pair does not match settlement currency' : 'missing FX snapshot for settlement currency'], diagnostics: [diagnostic(code, 'transaction.fx', ['transaction.fx.baseCurrency', 'transaction.fx.quoteCurrency', 'transaction.fx.ratePpm', 'transaction.fx.capturedAt', 'transaction.fx.provider', 'transaction.fx.rateType'], code === 'fx_pair_mismatch' ? 'rebuild_fx_snapshot_for_pair' : 'query_approved_fx_source')] };
     }
     const txTime = Date.parse(tx.occurredAt);
     const fxTime = Date.parse(tx.fx.capturedAt);
@@ -332,7 +332,7 @@ export function evaluateOffer(
   const basis = rule.useSettlementAmount === true ? (tx.settlementAmount ?? tx.amount) : tx.amount;
   const settlementAmount = convertMinor(basis, rule.settlementCurrency, tx);
   if (settlementAmount === undefined) {
-    return { ...base, status: 'unknown', ruleId: rule.id, ruleVersion: rule.version, unknownReasons: ['missing FX snapshot for settlement currency'], diagnostics: [diagnostic('fx_missing', 'transaction.fx', ['transaction.fx.ratePpm'], 'query_approved_fx_source')] };
+    return { ...base, status: 'unknown', ruleId: rule.id, ruleVersion: rule.version, unknownReasons: ['missing FX snapshot for settlement currency'], diagnostics: [diagnostic('fx_missing', 'transaction.fx', ['transaction.fx.ratePpm', 'transaction.fx.provider', 'transaction.fx.rateType'], 'query_approved_fx_source')] };
   }
   let grossMinor: number;
   if (tx.kind === 'refund') grossMinor = -(tx.originalRewardMinor ?? 0);

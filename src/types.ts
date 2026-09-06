@@ -1,4 +1,5 @@
 export type Currency = string;
+export type FxRateType = 'cash_selling' | 'spot_selling' | 'mid_market' | 'card_scheme';
 export type EvaluationStatus = 'ok' | 'no_match' | 'unknown' | 'needs_review' | 'stale';
 export type TransactionKind = 'purchase' | 'refund';
 export type TransactionMode = 'planned' | 'actual';
@@ -231,6 +232,16 @@ export interface FxSnapshot {
   ratePpm: number;
   capturedAt: string;
   maxAgeSeconds?: number | undefined;
+  /** Primary source/provider identity supplied by the Agent or host. */
+  provider: string;
+  /** Quotation convention used by the source. */
+  rateType: FxRateType;
+  /** Optional source URL and immutable content fingerprint for auditability. */
+  sourceUrl?: string | undefined;
+  contentHash?: string | undefined;
+  /** Optional scope restrictions for card-specific or issuer-specific quotes. */
+  cardIdScope?: string | undefined;
+  issuerScope?: string | undefined;
 }
 
 export interface CycleWindow {

@@ -112,10 +112,10 @@ export interface FxSnapshot {
   maxAgeSeconds?: number | undefined;
 
   /** Primary source provider name (e.g. "bank_of_taiwan", "esun_bank", "visa_scheme") */
-  provider?: string | undefined;
+  provider: string;
 
   /** Source quotation type */
-  rateType?: FxRateType | undefined;
+  rateType: FxRateType;
 
   /** Direct primary source reference or URL */
   sourceUrl?: string | undefined;

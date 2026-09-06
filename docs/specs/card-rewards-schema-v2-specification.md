@@ -24,7 +24,7 @@ This specification operationalizes the architecture and domain decisions recorde
 - Generic benefit status lifecycle (`card_switch` and `campaign_registration`).
 - Explicit combination policies (`additive`, `replace`, `best_of`, `exclusive`, `prerequisite`).
 - Native reward units, currency contexts, and rounding/step calculations.
-- Public MCP 10-tool surface (8 base reward tools + 2 benefit status tools) and JSON-RPC contracts.
+- Public MCP 12-tool surface (including bounded merchant resolution and active-offer search) and JSON-RPC contracts.
 - Tenant-scoped persistence, idempotency, backfilled transactions, and migration boundaries.
 
 ### 1.4 Non-Goals
@@ -320,9 +320,9 @@ The system MUST return explicit non-confident statuses when conditions are unres
 
 ---
 
-## 7. Public MCP Tool Surface (10-Tool Contract)
+## 7. Public MCP Tool Surface (12-Tool Contract)
 
-Schema v2 defines exactly **10 tools** on the public MCP surface. Outbound network fetching is handled externally by the host/agent, not by the MCP server.
+Schema v2 defines exactly **12 tools** on the public MCP surface. Outbound network fetching is handled externally by the host/agent, not by the MCP server. Merchant catalog registration remains a controlled service/catalog-ingestion operation and is not an additional public MCP tool.
 
 | # | Tool Name | Read-Only | Description |
 |---|---|:---:|---|
@@ -336,6 +336,8 @@ Schema v2 defines exactly **10 tools** on the public MCP surface. Outbound netwo
 | 8 | `remaining_caps` | Yes | Queries real-time remaining cap balances across all active cap pools for a card. |
 | 9 | `get_user_benefit_status` | Yes | Queries user's active benefit state (`card_switch`, `campaign_registration`). |
 | 10 | `upsert_user_benefit_status` | No | Records or updates user's confirmed benefit state for a plan selection or campaign enrollment. |
+| 11 | `resolve_merchant` | Yes | Resolves an exact canonical merchant ID or official alias with bounded deterministic candidates; it never writes aliases or applies a reward. |
+| 12 | `search_active_offers` | Yes | Searches active, verified, in-window offers with bounded 1-based pagination; it never activates rules. |
 
 ---
 
@@ -385,7 +387,7 @@ Schema v2 is a breaking format change:
 
 ## 10. Target Specification & Implementation Status
 
-This document defines the **target normative specification** for Schema v2. Package/server version 0.7.0 implements the canonical top-level cap-pool registry, shared multi-metric aggregation, current benefit projections, fail-closed combination resolution, and the twelve-tool MCP surface described above.
+This document defines the **target normative specification** for Schema v2. Package/server version 0.8.0 implements the canonical top-level cap-pool registry, shared multi-metric aggregation, current benefit projections, fail-closed combination resolution, complete nested public schemas, and the twelve-tool MCP surface described above.
 
 The persisted/runtime compatibility shape has a few deliberate differences from the illustrative v2 interfaces in Sections 3 and 4:
 1. Runtime rules use `combination.mode` and `prerequisiteRuleIds`; the normative `type` and singular `prerequisiteRuleId` names describe the same policy concepts.

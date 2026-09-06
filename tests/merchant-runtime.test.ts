@@ -26,13 +26,16 @@ describe('MerchantIdentity and active-offer discovery runtime', () => {
   it('returns only active, verified, in-window offers with stable bounded pages', () => {
     const store = new MemoryStore();
     const service = new RewardService(store, 'u1');
-    const merchant = service.registerMerchant({ canonicalNameZhHant: '全聯', canonicalNameLocale: 'zh-Hant-TW', status: 'candidate', provenance: { version: '1', updatedAt: '2026-08-01T00:00:00Z' } });
+    const merchant = service.registerMerchant({ canonicalNameZhHant: '全聯', canonicalNameLocale: 'zh-Hant-TW', status: 'candidate', operatingMarkets: ['TW'], provenance: { version: '1', updatedAt: '2026-08-01T00:00:00Z' } });
     service.confirmMerchant(merchant.canonicalId);
     service.registerCard({ id: 'c1', issuer: 'Bank', productName: 'Card' });
-    service.upsertOffer({ id: 's1', url: 'https://bank.example/o', fetchedAt: '2026-08-01T00:00:00Z', contentHash: 'h', parserVersion: '1', verified: true, validTo: '2026-12-31T23:59:59Z' }, { id: 'r1', cardId: 'c1', version: '1', sourceSnapshotId: 's1', status: 'active', validFrom: '2026-01-01T00:00:00Z', validTo: '2026-12-31T23:59:59Z', settlementCurrency: 'TWD', match: { merchants: [merchant.canonicalId] }, reward: { kind: 'percentage', rateBps: 100 } });
+    service.upsertOffer({ id: 's1', url: 'https://bank.example/o', fetchedAt: '2026-08-01T00:00:00Z', contentHash: 'h', parserVersion: '1', verified: true, validTo: '2026-12-31T23:59:59Z' }, { id: 'r1', cardId: 'c1', version: '1', sourceSnapshotId: 's1', status: 'active', validFrom: '2026-01-01T00:00:00Z', validTo: '2026-12-31T23:59:59Z', settlementCurrency: 'TWD', match: { merchants: [merchant.canonicalId], mccs: ['5411'] }, reward: { kind: 'percentage', rateBps: 100 } });
     const found = service.searchActiveOffers({ rawQuery: '全聯', limit: 1, page: 1, asOf: '2026-08-20T00:00:00Z' });
     expect(found.offers.map((rule) => rule.id)).toEqual(['r1']);
     expect(found.pageInfo).toMatchObject({ page: 1, limit: 1, total: 1, totalPages: 1, hasMore: false });
+    expect(service.searchActiveOffers({ canonicalMerchantId: merchant.canonicalId, market: 'TW', mcc: '5411', asOf: '2026-08-20T00:00:00Z' }).offers).toHaveLength(1);
+    expect(service.searchActiveOffers({ canonicalMerchantId: merchant.canonicalId, market: 'JP', asOf: '2026-08-20T00:00:00Z' }).offers).toHaveLength(0);
+    expect(service.searchActiveOffers({ canonicalMerchantId: merchant.canonicalId, mcc: '5812', asOf: '2026-08-20T00:00:00Z' }).offers).toHaveLength(0);
     expect(service.searchActiveOffers({ rawQuery: '全聯', asOf: '2027-01-01T00:00:00Z' }).offers).toHaveLength(0);
   });
 

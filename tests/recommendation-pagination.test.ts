@@ -31,4 +31,19 @@ describe('bounded recommendation pagination', () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  it('allows planned recommendations to omit cardId because ranking supplies candidates', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'card-rewards-recommendation-unbound-'));
+    const store = new FileStore({ dataDir: dir });
+    try {
+      const service = new RewardService(store, undefined);
+      service.registerCard({ id: 'card-one', issuer: 'Bank', productName: 'Card One' });
+      service.upsertOffer(source, { id: 'rule-card-one', cardId: 'card-one', version: '1', sourceSnapshotId: source.id, status: 'active', validFrom: '2026-01-01T00:00:00Z', settlementCurrency: 'TWD', match: {}, reward: { kind: 'percentage', rateBps: 100 } });
+      const rows = service.recommend({ kind: 'purchase', mode: 'planned', occurredAt: '2026-09-05T00:00:00Z', amount: { amountMinor: 10000, currency: 'TWD' } });
+      expect(rows[0]?.cardId).toBe('card-one');
+    } finally {
+      store.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });

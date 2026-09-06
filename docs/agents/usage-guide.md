@@ -43,7 +43,7 @@ npx --yes github:acetaxxxx/taiwan-card-rewards-mcp#main \
 Pin a release tag for repeatable use:
 
 ```bash
-npx --yes github:acetaxxxx/taiwan-card-rewards-mcp#v0.4.0 \
+npx --yes github:acetaxxxx/taiwan-card-rewards-mcp#v0.8.0 \
   --data-dir /absolute/tenant-directory
 ```
 
@@ -78,7 +78,6 @@ activation is folded directly into `upsert_offer`.
 | `register_card` | Mutating | Register or update a card product descriptor (`id`, `issuer`, `productName`, `network`, `country`). | `INVALID_CARD`, `STORE_UNAVAILABLE` |
 | `list_cards` | Read-only | List all registered cards in the user's store. | `STORE_UNAVAILABLE` |
 | `upsert_offer` | Mutating | Ingest an official or candidate source snapshot and versioned rule; activates candidate if valid confirmation is supplied. | `INVALID_OFFER`, `INVALID_CONFIRMATION`, `STORE_UNAVAILABLE` |
-| `register_merchant` | Controlled mutating | Propose or register a canonical Traditional-Chinese merchant identity from approved provenance; the Agent cannot auto-activate a new identity. | `MERCHANT_ID_COLLISION`, `SOURCE_UNTRUSTED`, `NEEDS_REVIEW` |
 | `recommend` | Read-only | Recommend a bounded page of cards (default 10) evaluated against registered cards and actual ledger usage without mutating usage; the Agent selects what to present. | `INSUFFICIENT_FACTS`, `NEEDS_REVIEW`, `STALE` |
 | `search_active_offers` | Read-only | Search current active offers and return bounded canonical merchant/offer records; it never applies a reward. | `MISSING_REQUIRED_FACT`, `NOT_FOUND`, `STALE` |
 | `resolve_merchant` | Read-only | Validate an Agent-provided canonical merchant ID/name and return bounded merchant facts; it never interprets aliases or applies a reward. | `MERCHANT_AMBIGUOUS`, `MISSING_REQUIRED_FACT`, `NOT_FOUND` |
@@ -118,19 +117,18 @@ activation is folded directly into `upsert_offer`.
      ```
 
 3. **Merchant Identity Resolution**:
-   - The Agent does not load the full merchant catalog. It interprets the raw
-     label, nickname, or abbreviation and sends a candidate canonical ID/name
-     plus market facts to `recommend`; the tool performs merchant pre-flight
-     validation automatically.
+   - The Agent does not load the full merchant catalog. It sends the raw label
+     and known market facts to `resolve_merchant`; matching is exact/NFKC-only
+     and bounded, never fuzzy or embedding-based.
    - If the user asks which merchants currently have offers, call
      `search_active_offers` and use its canonical IDs/names. If the candidate is
      ambiguous or missing facts, call `resolve_merchant` for validation and ask
      the user to choose when needed.
-   - After a candidate is confirmed, call `recommend` again. The MCP validates
-     the merchant and selects active rules; the Agent never selects `ruleId`.
-   - A new merchant identity must go through the controlled `register_merchant`
-     catalog flow with a fixed Traditional-Chinese canonical name and provenance;
-     normal recommendation calls never create identities.
+   - After a candidate is confirmed, call `recommend` with the resolved
+     transaction facts. The Agent never selects `ruleId`.
+   - New merchant identity registration is a controlled catalog-ingestion
+     operation, not a public MCP tool; normal recommendation and resolution
+     calls never create identities.
 
 ### C. Planned Spend Recommendations vs Actual Purchases
 - **Planned Evaluation (Simulation / Intent)**:
@@ -155,7 +153,7 @@ activation is folded directly into `upsert_offer`.
   - `calendar_month`: Resets on the 1st of each calendar month in the card's timezone.
   - `billing_cycle`: Computed from the card or cap pool's explicit IANA `timezone`; missing timezone is fail-closed.
 - **Foreign Currency Spend**:
-  - If transaction currency differs from rule settlement currency (e.g. JPY spend on TWD card), an `fx` object with `ratePpm`, `capturedAt`, and `maxAgeSeconds` is required.
+- If transaction currency differs from rule settlement currency (e.g. JPY spend on TWD card), an `fx` object with `ratePpm`, `capturedAt`, and `maxAgeSeconds` is required. Include `provider` and `rateType` when available, plus `sourceUrl`/`contentHash` for auditability.
   - Missing or stale FX snapshots fail closed (`unknown` or `stale`).
 
 ---

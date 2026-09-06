@@ -25,7 +25,7 @@ user question; no action requires the skill to calculate or persist ledger truth
 
 ## 2. Pin and validate the MCP connection
 
-Use a published immutable package version in deployment configuration. Never
+Use the published immutable package version `0.8.0` (or a later reviewed release) in deployment configuration. Never
 use `latest`, a moving tag, an unbounded range, or a model-provided command
 path. Updates are deliberate: review the release notes, update the pinned
 version, run the host's handshake/tool smoke check, then deploy.
@@ -33,7 +33,9 @@ version, run the host's handshake/tool smoke check, then deploy.
 At startup, validate the MCP handshake and tool list before business calls:
 
 1. Confirm the expected protocol and server identity.
-2. Confirm every required tool exists with the expected input shape.
+2. Confirm all 12 public tools exist with the expected nested input schemas;
+   check required fields, enums/bounds, and `additionalProperties: false` at
+   every object level, not only the top-level tool object.
 3. Confirm the process is bound by the trusted host to the intended user scope.
 4. Treat a missing, malformed, or unexpected handshake as unavailable.
 
@@ -42,7 +44,8 @@ operator to repair the connection. Do not generate fallback calculation code,
 silently use a different data store, or turn an MCP error into a recommendation.
 
 Completion criterion: the skill can stop safely at handshake failure and can
-prove that each write call uses a validated schema.
+prove that every tool call uses the same nested contract as validator and
+dispatch, while each write call also uses an explicit confirmation boundary.
 
 ## 3. Research and ingest offers in layers
 
@@ -129,7 +132,8 @@ every mutation has an affirmative user confirmation immediately before it.
 
 ## 6. Final review checklist
 
-- MCP package/version is pinned and handshake/tool schemas are checked.
+- MCP package/version is pinned to a reviewed release and the handshake checks
+  the complete 12-tool manifest and every nested tool schema.
 - MCP errors stop the flow; no fallback calculator, anonymous scope, or default
   data store is introduced.
 - Official sources are preferred and third-party material remains candidate

@@ -4,7 +4,7 @@ import { convertMinor, evaluateOffer, rankCards, resolveCyclePeriodKey } from '.
 import type { CardDescriptor, CardSwitchInput, CardSwitchProjection, CardSwitchStatus, CapPeriod, CapPoolDefinition, EvaluationContext, MerchantIdentity, MerchantResolution, Money, OfferConfirmation, OfferRuleVersion, OfferSourceSnapshot, RankingEntry, RewardBreakdown, RewardComponentRecord, TransactionTuple, UserBenefitInput, UserBenefitStatus } from './types.js';
 import type { StartupConfig } from './startup.js';
 import { RewardServiceError } from './errors.js';
-import { validateCard, validateCapPool, validateConfirmation, validateMerchant, validateRule, validateSnapshot, validateTransaction } from './validation.js';
+import { validateCard, validateCapPool, validateConfirmation, validateMerchant, validateRecommendationTransaction, validateRule, validateSnapshot, validateTransaction } from './validation.js';
 import { cardSwitchStatus, projectionFromInput } from './card-switch.js';
 
 export { RewardServiceError } from './errors.js';
@@ -190,6 +190,7 @@ export class RewardService {
     const matches = exactId ? [exactId] : active.filter((merchant) => [merchant.canonicalNameZhHant, ...(merchant.officialAliases ?? [])].some((name) => normalizedMerchantKey(name) === normalizedMerchantKey(rawQuery)));
     const compatible = matches.filter((merchant) => {
       if (facts.country && merchant.operatingMarkets?.length && !merchant.operatingMarkets.includes(facts.country.toUpperCase())) return false;
+      if (facts.market && merchant.operatingMarkets?.length && !merchant.operatingMarkets.includes(facts.market.toUpperCase())) return false;
       if (facts.mcc && merchant.mccs?.length && !merchant.mccs.includes(facts.mcc)) return false;
       if (facts.channel && merchant.channels?.length && !merchant.channels.includes(facts.channel as 'in_store' | 'online')) return false;
       return true;
@@ -201,20 +202,26 @@ export class RewardService {
     return { resolutionStatus: 'unresolved', boundedCandidates: [], requiredFacts: ['transaction.merchant'], catalogVersion };
   }
 
-  searchActiveOffers(input: { rawQuery?: string; cardId?: string; country?: string; channel?: string; asOf?: string; limit?: number; page?: number } = {}): { offers: readonly OfferRuleVersion[]; pageInfo: { page: number; limit: number; total: number; totalPages: number; hasMore: boolean } } {
+  searchActiveOffers(input: { rawQuery?: string; cardId?: string; canonicalMerchantId?: string; country?: string; market?: string; mcc?: string; channel?: string; asOf?: string; limit?: number; page?: number } = {}): { offers: readonly OfferRuleVersion[]; pageInfo: { page: number; limit: number; total: number; totalPages: number; hasMore: boolean } } {
     const limit = input.limit ?? 10;
     const page = input.page ?? 1;
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > 20 || !Number.isSafeInteger(page) || page < 1) throw new RewardServiceError('INVALID_INPUT', 'limit must be 1..20 and page must be a positive integer');
     const asOf = input.asOf ?? nowIso();
     const state = this.store.read();
+    const marketMerchantIds = input.market
+      ? new Set(state.merchants.filter((merchant) => merchant.operatingMarkets?.includes(input.market!.toUpperCase())).map((merchant) => merchant.canonicalId))
+      : undefined;
     const offers = state.rules.filter((rule) => {
       if (rule.status !== 'active' || (input.cardId && rule.cardId !== input.cardId)) return false;
       const source = state.snapshots.find((snapshot) => snapshot.id === rule.sourceSnapshotId);
       if (!source?.verified || Date.parse(rule.validFrom) > Date.parse(asOf) || (rule.validTo && Date.parse(rule.validTo) < Date.parse(asOf))) return false;
       if (input.channel && rule.match.channels?.length && !rule.match.channels.includes(input.channel)) return false;
       if (input.country && rule.match.countries?.length && !rule.match.countries.includes(input.country)) return false;
+      if (input.mcc && rule.match.mccs?.length && !rule.match.mccs.includes(input.mcc)) return false;
+      if (input.canonicalMerchantId && !rule.match.merchants?.includes(input.canonicalMerchantId)) return false;
+      if (marketMerchantIds && rule.match.merchants?.length && !rule.match.merchants.some((merchantId) => marketMerchantIds.has(merchantId))) return false;
       if (!input.rawQuery) return true;
-      const resolved = this.resolveMerchant(input.rawQuery, { ...(input.country === undefined ? {} : { country: input.country }), ...(input.channel === undefined ? {} : { channel: input.channel }) });
+      const resolved = this.resolveMerchant(input.rawQuery, { ...(input.country === undefined ? {} : { country: input.country }), ...(input.market === undefined ? {} : { market: input.market }), ...(input.mcc === undefined ? {} : { mcc: input.mcc }), ...(input.channel === undefined ? {} : { channel: input.channel }) });
       return resolved.resolutionStatus === 'confirmed' && rule.match.merchants?.includes(resolved.merchant!.canonicalId);
     }).sort((a, b) => a.id.localeCompare(b.id));
     const start = (page - 1) * limit;
@@ -378,11 +385,13 @@ export class RewardService {
     return result.rule;
   }
 
-  recommend(transaction: TransactionTuple, limit = 10): RankingEntry[] {
-    transaction = validateTransaction(transaction);
+  recommend(transaction: unknown, limit = 10, options: { cardIds?: readonly string[]; context?: EvaluationContext } = {}): RankingEntry[] {
+    const parsedTransaction = validateRecommendationTransaction(transaction);
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > 20) throw new RewardServiceError('INVALID_INPUT', 'limit must be a safe integer from 1 to 20');
     const state = this.store.read();
-    return rankCards(state.cards, state.rules, transaction, this.context(state, nowIso(), transaction), limit);
+    const cards = options.cardIds === undefined ? state.cards : state.cards.filter((card) => options.cardIds!.includes(card.id));
+    const context = options.context ?? this.context(state, nowIso(), parsedTransaction);
+    return rankCards(cards, state.rules, parsedTransaction, context, limit);
   }
 
   recordTransaction(transaction: TransactionTuple): RewardBreakdown {

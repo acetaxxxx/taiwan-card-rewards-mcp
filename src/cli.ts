@@ -6,7 +6,7 @@ import { RewardService } from './service.js';
 import { RewardServiceError } from './errors.js';
 import { mcpInstructions, mcpTools } from './mcp-contract.js';
 import { evaluateOffer, rankCards } from './evaluator.js';
-import { validateUserBenefitInput, validateContext, validateToolArgs, validateTransaction, validateCard, validateCapPool, validateConfirmation, validateRule, validateSnapshot } from './validation.js';
+import { validateUserBenefitInput, validateContext, validateToolArgs, validateRecommendationTransaction, validateTransaction, validateCard, validateCapPool, validateConfirmation, validateRule, validateSnapshot } from './validation.js';
 import { projectPage, ProjectionTooLargeError } from './projections.js';
 import type { CardDescriptor, RankingEntry } from './types.js';
 
@@ -24,6 +24,28 @@ function rejectSensitiveFields(value: unknown): void {
   }
 }
 
+function parseRecommendationInput(args: Record<string, unknown>): { transaction: ReturnType<typeof validateRecommendationTransaction>; options: { cardIds?: readonly string[]; context?: ReturnType<typeof validateContext> } } {
+  let transaction = validateRecommendationTransaction(args.transaction);
+  if (args.merchant !== undefined) {
+    if (!args.merchant || typeof args.merchant !== 'object' || Array.isArray(args.merchant)) throw new RewardServiceError('INVALID_INPUT', 'merchant must be an object');
+    const merchant = args.merchant as Record<string, unknown>;
+    for (const key of Object.keys(merchant)) if (!['canonicalId', 'canonicalNameZhHant', 'rawStatement', 'market', 'country'].includes(key)) throw new RewardServiceError('UNKNOWN_FIELD', `recommend.merchant contains unsupported field: ${key}`);
+    for (const key of ['canonicalId', 'canonicalNameZhHant', 'rawStatement', 'market', 'country']) if (merchant[key] !== undefined && (typeof merchant[key] !== 'string' || !merchant[key].trim())) throw new RewardServiceError('INVALID_INPUT', `recommend.merchant.${key} must be a non-empty string`);
+    if (transaction.merchant === undefined && typeof merchant.rawStatement === 'string') transaction = { ...transaction, merchant: merchant.rawStatement };
+    if (transaction.country === undefined && typeof merchant.country === 'string') transaction = { ...transaction, country: merchant.country };
+  }
+  let cardIds: string[] | undefined;
+  if (args.cardIds !== undefined) {
+    if (!Array.isArray(args.cardIds) || args.cardIds.length > 128) throw new RewardServiceError('INVALID_INPUT', 'recommend.cardIds must be an array with at most 128 items');
+    cardIds = args.cardIds.map((value, index) => {
+      if (typeof value !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9_:-]{0,127}$/.test(value)) throw new RewardServiceError('INVALID_INPUT', `recommend.cardIds[${index}] is invalid`);
+      return value;
+    });
+  }
+  const context = args.context === undefined ? undefined : validateContext(args.context);
+  return { transaction, options: { ...(cardIds === undefined ? {} : { cardIds }), ...(context === undefined ? {} : { context }) } };
+}
+
 async function main(): Promise<void> {
   const config = parseStartupArgs(process.argv.slice(2));
   const store: LedgerStore = new FileStore(config);
@@ -39,7 +61,7 @@ async function main(): Promise<void> {
     try { request = JSON.parse(line) as JsonRpc; } catch { failure(null, -32700, 'Parse error'); continue; }
     if (request.method === 'notifications/initialized' || request.method?.startsWith('notifications/')) continue;
     try {
-      if (request.method === 'initialize') reply(request.id, { protocolVersion: '2024-11-05', capabilities: { tools: {} }, serverInfo: { name: 'taiwan-card-rewards-mcp', version: '0.7.0' }, instructions: mcpInstructions });
+      if (request.method === 'initialize') reply(request.id, { protocolVersion: '2024-11-05', capabilities: { tools: {} }, serverInfo: { name: 'taiwan-card-rewards-mcp', version: '0.8.0' }, instructions: mcpInstructions });
       else if (request.method === 'tools/list') reply(request.id, { tools: mcpTools.map((tool) => ({ name: tool.name, description: tool.description, inputSchema: tool.inputSchema })) });
       else if (request.method === 'tools/call') reply(request.id, toolResult(await callTool(service, request.params ?? {})));
       else failure(request.id, -32601, `Method not found: ${request.method ?? ''}`);
@@ -72,7 +94,7 @@ async function callTool(service: RewardService, params: Record<string, unknown>)
     case 'register_card': return service.registerCard(validateCard(args.card));
     case 'list_cards': { const rows = service.listCards(); return (args.limit !== undefined || args.page !== undefined || args.projection !== undefined) ? paged(rows, typeof args.projection === 'string' ? args.projection : undefined, typeof args.page === 'number' ? args.page : undefined, typeof args.limit === 'number' ? args.limit : undefined, (item) => String((item as CardDescriptor).id)) : rows; }
     case 'upsert_offer': return service.upsertOffer(validateSnapshot(args.snapshot), validateRule(args.rule), args.confirmation !== undefined ? validateConfirmation(args.confirmation) : undefined, args.capPools === undefined ? undefined : (Array.isArray(args.capPools) ? args.capPools.map(validateCapPool) : []));
-    case 'recommend': { const rows = service.recommend(validateTransaction(args.transaction), typeof args.limit === 'number' ? args.limit : 10); return args.page !== undefined ? paged(rows, undefined, typeof args.page === 'number' ? args.page : undefined, typeof args.limit === 'number' ? args.limit : undefined, (item) => String((item as RankingEntry).cardId)) : rows; }
+    case 'recommend': { const recommendation = parseRecommendationInput(args); const rows = service.recommend(recommendation.transaction, typeof args.limit === 'number' ? args.limit : 10, recommendation.options); return args.page !== undefined ? paged(rows, undefined, typeof args.page === 'number' ? args.page : undefined, typeof args.limit === 'number' ? args.limit : undefined, (item) => String((item as RankingEntry).cardId)) : rows; }
     case 'record_transaction': return service.recordTransaction(validateTransaction(args.transaction));
     case 'remaining_caps': { const rows = service.remainingCaps(String(args.cardId), typeof args.asOf === 'string' ? args.asOf : undefined); return (args.limit !== undefined || args.page !== undefined || args.projection !== undefined) ? paged(rows, typeof args.projection === 'string' ? args.projection : undefined, typeof args.page === 'number' ? args.page : undefined, typeof args.limit === 'number' ? args.limit : undefined, (item) => String((item as { usageKey: string }).usageKey)) : rows; }
     case 'get_user_benefit_status': {
@@ -85,7 +107,7 @@ async function callTool(service: RewardService, params: Record<string, unknown>)
       if (typeof args.rawQuery !== 'string') throw new RewardServiceError('INVALID_INPUT', 'rawQuery is required');
       return service.resolveMerchant(args.rawQuery, { ...(typeof args.country === 'string' ? { country: args.country } : {}), ...(typeof args.market === 'string' ? { market: args.market } : {}), ...(typeof args.mcc === 'string' ? { mcc: args.mcc } : {}), ...(typeof args.channel === 'string' ? { channel: args.channel } : {}) });
     }
-    case 'search_active_offers': return service.searchActiveOffers({ ...(typeof args.rawQuery === 'string' ? { rawQuery: args.rawQuery } : {}), ...(typeof args.cardId === 'string' ? { cardId: args.cardId } : {}), ...(typeof args.country === 'string' ? { country: args.country } : {}), ...(typeof args.channel === 'string' ? { channel: args.channel } : {}), ...(typeof args.asOf === 'string' ? { asOf: args.asOf } : {}), ...(typeof args.limit === 'number' ? { limit: args.limit } : {}), ...(typeof args.page === 'number' ? { page: args.page } : {}) });
+    case 'search_active_offers': return service.searchActiveOffers({ ...(typeof args.rawQuery === 'string' ? { rawQuery: args.rawQuery } : {}), ...(typeof args.cardId === 'string' ? { cardId: args.cardId } : {}), ...(typeof args.canonicalMerchantId === 'string' ? { canonicalMerchantId: args.canonicalMerchantId } : {}), ...(typeof args.country === 'string' ? { country: args.country } : {}), ...(typeof args.market === 'string' ? { market: args.market } : {}), ...(typeof args.mcc === 'string' ? { mcc: args.mcc } : {}), ...(typeof args.channel === 'string' ? { channel: args.channel } : {}), ...(typeof args.asOf === 'string' ? { asOf: args.asOf } : {}), ...(typeof args.limit === 'number' ? { limit: args.limit } : {}), ...(typeof args.page === 'number' ? { page: args.page } : {}) });
     case 'calculate_reward': return evaluateOffer(validateRule(args.rule), validateTransaction(args.transaction), validateContext(args.context));
     case 'rank_cards': {
       if (!Array.isArray(args.cards) || !Array.isArray(args.rules)) throw new RewardServiceError('INVALID_INPUT', 'cards and rules must be arrays');

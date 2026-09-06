@@ -139,6 +139,7 @@ interface ActiveOfferSearchInput {
   canonicalMerchantId?: string;
   market?: string;
   country?: string;
+  mcc?: string;
   channel?: "in_store" | "online";
   limit?: number;                        // default 10
   page?: number;                         // 1-based; default 1
