@@ -106,6 +106,10 @@ describe("MCP Contract and Agent Boundary", () => {
 
     const search = mcpTools.find((tool) => tool.name === "search_active_offers")!.inputSchema as any;
     expect(search.properties).toEqual(expect.objectContaining({ canonicalMerchantId: expect.any(Object), market: expect.any(Object), mcc: expect.any(Object) }));
+
+    const upsertOffer = mcpTools.find((tool) => tool.name === "upsert_offer")!.inputSchema as any;
+    expect(upsertOffer.properties.capPools.type).toBe("array");
+    expect(upsertOffer.properties.capPools.items.type).toBe("object");
   });
   it("exposes all twelve approved MCP tools with valid schemas in tools/list", async () => {
     const dir = mkdtempSync(join(tmpdir(), "mcp-contract-list-"));
