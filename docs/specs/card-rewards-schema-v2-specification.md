@@ -331,7 +331,7 @@ Schema v2 defines exactly **10 tools** on the public MCP surface. Outbound netwo
 | 3 | `register_card` | No | Registers or updates a user's Held Card descriptor and billing cycle. |
 | 4 | `list_cards` | Yes | Lists registered Held Cards for the tenant. |
 | 5 | `upsert_offer` | No | Ingests snapshot and versioned rule; atomically confirms and activates candidate rules if `confirmation` is supplied. |
-| 6 | `recommend` | Yes | Uncertainty-aware Top-5 card recommendation using stored active rules, benefit statuses, and ledger caps. |
+| 6 | `recommend` | Yes | Uncertainty-aware bounded card recommendation (default 10 results; Agent may select five) using stored active rules, benefit statuses, and ledger caps. |
 | 7 | `record_transaction` | No | Durably records actual purchase or refund with idempotency and multi-pool cap updates. |
 | 8 | `remaining_caps` | Yes | Queries real-time remaining cap balances across all active cap pools for a card. |
 | 9 | `get_user_benefit_status` | Yes | Queries user's active benefit state (`card_switch`, `campaign_registration`). |

@@ -9,9 +9,14 @@ import type {
   Predicate,
   RankingEntry,
   CapPoolDefinition,
+  Diagnostic,
   RewardBreakdown,
   TransactionTuple,
 } from './types.js';
+
+function diagnostic(code: Diagnostic['code'], path: string, requiredFacts: readonly string[], retryAction: string): Diagnostic {
+  return { code, path, requiredFacts, retryAction };
+}
 
 
 function poolCaps(rule: OfferRuleVersion, context: EvaluationContext): readonly CapPeriod[] {
@@ -274,12 +279,12 @@ export function evaluateOffer(
   if (inputErrors.length) return { ...base, status: 'unknown', unknownReasons: inputErrors };
   if (rule.cardId !== tx.cardId) return base;
   if (rule.status !== 'active') {
-    return { ...base, status: rule.status === 'stale' ? 'stale' : 'needs_review', ruleId: rule.id, unknownReasons: [`rule status is ${rule.status}`] };
+    return { ...base, status: rule.status === 'stale' ? 'stale' : 'needs_review', ruleId: rule.id, unknownReasons: [`rule status is ${rule.status}`], diagnostics: [diagnostic(rule.status === 'stale' ? 'stale_rule' : 'needs_review', 'rule.status', ['rule confirmation'], 'refresh_or_confirm_offer')] };
   }
   const trustReasons: string[] = [];
   const source = context.sourceSnapshots?.[rule.sourceSnapshotId];
   if (!source) {
-    return { ...base, status: 'unknown', ruleId: rule.id, ruleVersion: rule.version, unknownReasons: ['missing offer source snapshot'] };
+    return { ...base, status: 'unknown', ruleId: rule.id, ruleVersion: rule.version, unknownReasons: ['missing offer source snapshot'], diagnostics: [diagnostic('source_untrusted', 'rule.sourceSnapshotId', ['source snapshot'], 'provide_verified_source_snapshot')] };
   }
   if (rule.requires?.includes('source_verified') && source.verified !== true) trustReasons.push('source is not verified');
   if (rule.requires?.includes('user_confirmation') && context.userConfirmed !== true) trustReasons.push('user confirmation is required');
@@ -313,20 +318,21 @@ export function evaluateOffer(
 
   if (tx.amount.currency !== rule.settlementCurrency) {
     if (!tx.fx || tx.fx.baseCurrency !== tx.amount.currency || tx.fx.quoteCurrency !== rule.settlementCurrency) {
-      return { ...base, status: 'unknown', ruleId: rule.id, ruleVersion: rule.version, unknownReasons: ['missing FX snapshot for settlement currency'] };
+      const code = tx.fx ? 'fx_pair_mismatch' : 'fx_missing';
+      return { ...base, status: 'unknown', ruleId: rule.id, ruleVersion: rule.version, unknownReasons: [code === 'fx_pair_mismatch' ? 'FX currency pair does not match settlement currency' : 'missing FX snapshot for settlement currency'], diagnostics: [diagnostic(code, 'transaction.fx', ['transaction.fx.baseCurrency', 'transaction.fx.quoteCurrency', 'transaction.fx.ratePpm', 'transaction.fx.capturedAt'], code === 'fx_pair_mismatch' ? 'rebuild_fx_snapshot_for_pair' : 'query_approved_fx_source')] };
     }
     const txTime = Date.parse(tx.occurredAt);
     const fxTime = Date.parse(tx.fx.capturedAt);
     const maxAgeMs = (tx.fx.maxAgeSeconds ?? 7 * 24 * 3600) * 1000;
     if (Number.isFinite(txTime) && Number.isFinite(fxTime) && Math.abs(txTime - fxTime) > maxAgeMs) {
-      return { ...base, status: 'stale', ruleId: rule.id, ruleVersion: rule.version, unknownReasons: ['FX snapshot is stale'] };
+      return { ...base, status: 'stale', ruleId: rule.id, ruleVersion: rule.version, unknownReasons: ['FX snapshot is stale'], diagnostics: [diagnostic('fx_stale', 'transaction.fx.capturedAt', ['transaction.fx.capturedAt'], 'refresh_fx_snapshot')] };
     }
   }
 
   const basis = rule.useSettlementAmount === true ? (tx.settlementAmount ?? tx.amount) : tx.amount;
   const settlementAmount = convertMinor(basis, rule.settlementCurrency, tx);
   if (settlementAmount === undefined) {
-    return { ...base, status: 'unknown', ruleId: rule.id, ruleVersion: rule.version, unknownReasons: ['missing FX snapshot for settlement currency'] };
+    return { ...base, status: 'unknown', ruleId: rule.id, ruleVersion: rule.version, unknownReasons: ['missing FX snapshot for settlement currency'], diagnostics: [diagnostic('fx_missing', 'transaction.fx', ['transaction.fx.ratePpm'], 'query_approved_fx_source')] };
   }
   let grossMinor: number;
   if (tx.kind === 'refund') grossMinor = -(tx.originalRewardMinor ?? 0);
@@ -468,6 +474,10 @@ export function rankCards(
       const bCapped = 'cappedReward' in b ? b.cappedReward?.amountMinor : undefined;
       const rewardDifference = (bCapped ?? -1) - (aCapped ?? -1);
       if (rewardDifference !== 0) return rewardDifference;
+      const aGross = 'grossReward' in a ? a.grossReward?.amountMinor : undefined;
+      const bGross = 'grossReward' in b ? b.grossReward?.amountMinor : undefined;
+      const grossDifference = (bGross ?? -1) - (aGross ?? -1);
+      if (grossDifference !== 0) return grossDifference;
       return a.cardId < b.cardId ? -1 : a.cardId > b.cardId ? 1 : 0;
     })
     .slice(0, limit);

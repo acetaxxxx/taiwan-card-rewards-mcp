@@ -103,6 +103,36 @@ export interface OfferProvenance {
   contentFingerprint: string;
 }
 
+export interface MerchantProvenance {
+  sourceSnapshotId?: string | undefined;
+  sourceUrl?: string | undefined;
+  version: string;
+  updatedAt: string;
+  notes?: string | undefined;
+}
+
+export interface MerchantIdentity {
+  canonicalId: string;
+  canonicalNameZhHant: string;
+  canonicalNameLocale: 'zh-Hant-TW';
+  officialAliases?: readonly string[] | undefined;
+  operatingMarkets?: readonly string[] | undefined;
+  mccs?: readonly string[] | undefined;
+  channels?: readonly ('in_store' | 'online')[] | undefined;
+  status: 'candidate' | 'active' | 'deprecated';
+  supersededBy?: string | undefined;
+  provenance: MerchantProvenance;
+}
+
+export type MerchantResolutionStatus = 'confirmed' | 'ambiguous' | 'unresolved' | 'needs_facts';
+export interface MerchantResolution {
+  resolutionStatus: MerchantResolutionStatus;
+  merchant?: MerchantIdentity | undefined;
+  boundedCandidates: readonly MerchantIdentity[];
+  requiredFacts?: readonly string[] | undefined;
+  catalogVersion: string;
+}
+
 export interface OfferConfirmation {
   confirmedAt: string;
   confirmedBy: string;
@@ -241,7 +271,15 @@ export interface RewardBreakdown {
   capRemainingBefore?: Money | undefined;
   capRemainingAfter?: Money | undefined;
   unknownReasons: string[];
+  diagnostics?: readonly Diagnostic[] | undefined;
   components?: readonly RewardComponent[] | undefined;
+}
+
+export interface Diagnostic {
+  code: 'missing_required_fact' | 'fx_missing' | 'fx_stale' | 'fx_pair_mismatch' | 'fx_scope_mismatch' | 'fx_conflict' | 'merchant_ambiguous' | 'source_untrusted' | 'stale_rule' | 'invalid_input' | 'needs_review';
+  path: string;
+  requiredFacts: readonly string[];
+  retryAction: string;
 }
 
 export type CardSwitchAction = 'record' | 'adjust';
@@ -275,6 +313,7 @@ export interface CardSwitchEnrollment {
 
 export interface CardSwitchProjection {
   kind?: UserBenefitKind | undefined;
+  ownerUser?: string | undefined;
   cardId: string;
   timezone: string;
   switchedAtUtc: string;

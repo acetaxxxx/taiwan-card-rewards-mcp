@@ -1,9 +1,10 @@
+import * as crypto from 'node:crypto';
 import { type LedgerStore, type RecordedTransaction, type StoredState } from './store.js';
 import { convertMinor, evaluateOffer, rankCards, resolveCyclePeriodKey } from './evaluator.js';
-import type { CardDescriptor, CardSwitchInput, CardSwitchStatus, CapPeriod, CapPoolDefinition, EvaluationContext, Money, OfferConfirmation, OfferRuleVersion, OfferSourceSnapshot, RankingEntry, RewardBreakdown, RewardComponentRecord, TransactionTuple, UserBenefitInput, UserBenefitStatus } from './types.js';
+import type { CardDescriptor, CardSwitchInput, CardSwitchProjection, CardSwitchStatus, CapPeriod, CapPoolDefinition, EvaluationContext, MerchantIdentity, MerchantResolution, Money, OfferConfirmation, OfferRuleVersion, OfferSourceSnapshot, RankingEntry, RewardBreakdown, RewardComponentRecord, TransactionTuple, UserBenefitInput, UserBenefitStatus } from './types.js';
 import type { StartupConfig } from './startup.js';
 import { RewardServiceError } from './errors.js';
-import { validateCard, validateCapPool, validateConfirmation, validateRule, validateSnapshot, validateTransaction } from './validation.js';
+import { validateCard, validateCapPool, validateConfirmation, validateMerchant, validateRule, validateSnapshot, validateTransaction } from './validation.js';
 import { cardSwitchStatus, projectionFromInput } from './card-switch.js';
 
 export { RewardServiceError } from './errors.js';
@@ -12,9 +13,29 @@ export interface RemainingCap { ruleId: string; usageKey: string; remaining: Mon
 
 function nowIso(): string { return new Date().toISOString(); }
 function componentId(transactionId: string, ruleId: string, version: string): string { return `${encodeURIComponent(transactionId)}:${encodeURIComponent(ruleId)}:${encodeURIComponent(version)}`; }
+const ULID_ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
+function merchantId(): string {
+  let time = Date.now();
+  let encoded = '';
+  for (let i = 0; i < 10; i += 1) { encoded = ULID_ALPHABET[time % 32] + encoded; time = Math.floor(time / 32); }
+  const bytes = crypto.randomBytes(10);
+  for (let i = 0; i < 16; i += 1) encoded += ULID_ALPHABET[bytes[i % bytes.length]! % 32];
+  return `mch_${encoded}`;
+}
+function normalizedMerchantKey(value: string): string {
+  return value.normalize('NFKC').toLocaleLowerCase('und').replace(/[\p{P}\p{S}]+/gu, ' ').replace(/\s+/gu, ' ').trim();
+}
 
 export class RewardService {
   constructor(readonly store: LedgerStore, readonly metadataUser: string | undefined) {}
+
+  private visibleTransactions(state: StoredState): RecordedTransaction[] {
+    return state.transactions.filter((record) => record.ownerUser === this.metadataUser || (record.ownerUser === undefined && this.metadataUser === undefined));
+  }
+
+  private visibleSwitches(state: StoredState): CardSwitchProjection[] {
+    return state.cardSwitches.filter((projection) => projection.ownerUser === this.metadataUser || (projection.ownerUser === undefined && this.metadataUser === undefined));
+  }
 
   private context(state: StoredState, now = nowIso(), forTransaction?: TransactionTuple): EvaluationContext {
     const usageByKey: Record<string, Money> = {};
@@ -58,7 +79,7 @@ export class RewardService {
       const currency = pool.currency ?? capPeriod.cap.currency ?? 'TWD';
       const bucket = { amountMinor: 0, currency, invalid: false };
 
-      for (const record of state.transactions) {
+      for (const record of this.visibleTransactions(state)) {
         if (record.transaction.mode !== 'actual') continue;
         const contributingRuleIds = record.reward.components?.map((component) => component.ruleId) ?? (record.reward.ruleId ? [record.reward.ruleId] : []);
         const contributingRules = contributingRuleIds.map((id) => state.rules.find((candidate) => candidate.id === id)).filter((candidate): candidate is OfferRuleVersion => Boolean(candidate));
@@ -126,11 +147,85 @@ export class RewardService {
 
   listCards(): CardDescriptor[] { return this.store.read().cards; }
 
+  registerMerchant(input: Omit<MerchantIdentity, 'canonicalId'> & { canonicalId?: string }): MerchantIdentity {
+    const candidate = validateMerchant({ ...input, canonicalId: merchantId(), status: 'candidate' });
+    let result = candidate;
+    this.store.update((state) => {
+      const duplicate = state.merchants.find((merchant) => normalizedMerchantKey(merchant.canonicalNameZhHant) === normalizedMerchantKey(candidate.canonicalNameZhHant) && JSON.stringify(merchant.operatingMarkets ?? []) === JSON.stringify(candidate.operatingMarkets ?? []));
+      if (duplicate) { result = duplicate; return; }
+      state.merchants.push(candidate);
+    });
+    return result;
+  }
+
+  confirmMerchant(canonicalId: string): MerchantIdentity {
+    let result!: MerchantIdentity;
+    this.store.update((state) => {
+      const index = state.merchants.findIndex((merchant) => merchant.canonicalId === canonicalId);
+      if (index < 0) throw new RewardServiceError('MERCHANT_NOT_FOUND', `merchant ${canonicalId} not found`);
+      const merchant = state.merchants[index]!;
+      if (merchant.status === 'deprecated') throw new RewardServiceError('INVALID_INPUT', 'deprecated merchant cannot be activated');
+      result = { ...merchant, status: 'active' };
+      state.merchants[index] = result;
+    });
+    return result;
+  }
+
+  deprecateMerchant(canonicalId: string, supersededBy: string): MerchantIdentity {
+    let result!: MerchantIdentity;
+    this.store.update((state) => {
+      const index = state.merchants.findIndex((merchant) => merchant.canonicalId === canonicalId);
+      if (index < 0 || !state.merchants.some((merchant) => merchant.canonicalId === supersededBy)) throw new RewardServiceError('MERCHANT_NOT_FOUND', 'merchant supersession target not found');
+      result = { ...state.merchants[index]!, status: 'deprecated', supersededBy };
+      state.merchants[index] = result;
+    });
+    return result;
+  }
+
+  resolveMerchant(rawQuery: string, facts: { country?: string; market?: string; mcc?: string; channel?: string } = {}): MerchantResolution {
+    if (typeof rawQuery !== 'string' || rawQuery.length === 0 || [...rawQuery].length > 128) throw new RewardServiceError('INVALID_INPUT', 'merchant query must contain 1..128 Unicode characters');
+    const state = this.store.read();
+    const active = state.merchants.filter((merchant) => merchant.status !== 'deprecated');
+    const exactId = active.find((merchant) => merchant.canonicalId === rawQuery);
+    const matches = exactId ? [exactId] : active.filter((merchant) => [merchant.canonicalNameZhHant, ...(merchant.officialAliases ?? [])].some((name) => normalizedMerchantKey(name) === normalizedMerchantKey(rawQuery)));
+    const compatible = matches.filter((merchant) => {
+      if (facts.country && merchant.operatingMarkets?.length && !merchant.operatingMarkets.includes(facts.country.toUpperCase())) return false;
+      if (facts.mcc && merchant.mccs?.length && !merchant.mccs.includes(facts.mcc)) return false;
+      if (facts.channel && merchant.channels?.length && !merchant.channels.includes(facts.channel as 'in_store' | 'online')) return false;
+      return true;
+    }).map((merchant) => merchant.status === 'deprecated' && merchant.supersededBy ? state.merchants.find((next) => next.canonicalId === merchant.supersededBy) ?? merchant : merchant);
+    const candidates = compatible.slice(0, 10);
+    const catalogVersion = crypto.createHash('sha256').update(JSON.stringify(state.merchants)).digest('hex').slice(0, 16);
+    if (candidates.length === 1) return { resolutionStatus: 'confirmed', merchant: candidates[0], boundedCandidates: candidates, catalogVersion };
+    if (candidates.length > 1) return { resolutionStatus: 'ambiguous', boundedCandidates: candidates, requiredFacts: facts.country || facts.market ? undefined : ['transaction.country'], catalogVersion };
+    return { resolutionStatus: 'unresolved', boundedCandidates: [], requiredFacts: ['transaction.merchant'], catalogVersion };
+  }
+
+  searchActiveOffers(input: { rawQuery?: string; cardId?: string; country?: string; channel?: string; asOf?: string; limit?: number; page?: number } = {}): { offers: readonly OfferRuleVersion[]; pageInfo: { page: number; limit: number; total: number; totalPages: number; hasMore: boolean } } {
+    const limit = input.limit ?? 10;
+    const page = input.page ?? 1;
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 20 || !Number.isSafeInteger(page) || page < 1) throw new RewardServiceError('INVALID_INPUT', 'limit must be 1..20 and page must be a positive integer');
+    const asOf = input.asOf ?? nowIso();
+    const state = this.store.read();
+    const offers = state.rules.filter((rule) => {
+      if (rule.status !== 'active' || (input.cardId && rule.cardId !== input.cardId)) return false;
+      const source = state.snapshots.find((snapshot) => snapshot.id === rule.sourceSnapshotId);
+      if (!source?.verified || Date.parse(rule.validFrom) > Date.parse(asOf) || (rule.validTo && Date.parse(rule.validTo) < Date.parse(asOf))) return false;
+      if (input.channel && rule.match.channels?.length && !rule.match.channels.includes(input.channel)) return false;
+      if (input.country && rule.match.countries?.length && !rule.match.countries.includes(input.country)) return false;
+      if (!input.rawQuery) return true;
+      const resolved = this.resolveMerchant(input.rawQuery, { ...(input.country === undefined ? {} : { country: input.country }), ...(input.channel === undefined ? {} : { channel: input.channel }) });
+      return resolved.resolutionStatus === 'confirmed' && rule.match.merchants?.includes(resolved.merchant!.canonicalId);
+    }).sort((a, b) => a.id.localeCompare(b.id));
+    const start = (page - 1) * limit;
+    return { offers: offers.slice(start, start + limit), pageInfo: { page, limit, total: offers.length, totalPages: Math.ceil(offers.length / limit), hasMore: start + limit < offers.length } };
+  }
+
   getCardSwitchStatus(cardId: string, asOfUtc = nowIso()): CardSwitchStatus {
     const state = this.store.read();
     const card = state.cards.find((item) => item.id === cardId);
     if (!card) throw new RewardServiceError('CARD_NOT_FOUND', `card ${cardId} not found`);
-    const current = state.cardSwitches.filter((item) => item.cardId === cardId).at(-1);
+    const current = this.visibleSwitches(state).filter((item) => item.cardId === cardId).at(-1);
     return cardSwitchStatus(card, current, state.campaigns, asOfUtc);
   }
 
@@ -138,7 +233,7 @@ export class RewardService {
     const state = this.store.read();
     const card = state.cards.find((item) => item.id === cardId);
     if (!card) throw new RewardServiceError('CARD_NOT_FOUND', `card ${cardId} not found`);
-    const current = state.cardSwitches.filter((item) => item.cardId === cardId && (item.kind ?? 'card_switch') === kind).at(-1);
+    const current = this.visibleSwitches(state).filter((item) => item.cardId === cardId && (item.kind ?? 'card_switch') === kind).at(-1);
     const base = cardSwitchStatus(card, current, state.campaigns, asOfUtc);
     const availableNow = base.availableCandidates.filter((candidate) => !candidate.eligibility?.length);
     const availableAfterActions = base.availableCandidates.filter((candidate) => Boolean(candidate.eligibility?.length)).map((campaign) => ({ campaign, requiredActions: campaign.eligibility ?? [] }));
@@ -150,14 +245,14 @@ export class RewardService {
     const card = state.cards.find((item) => item.id === input.cardId);
     if (!card) throw new RewardServiceError('CARD_NOT_FOUND', `card ${input.cardId} not found`);
     if (input.kind === 'campaign_registration' && !input.campaignId) throw new RewardServiceError('INVALID_INPUT', 'campaignId is required for campaign_registration');
-    const projection = { ...projectionFromInput({ ...input, switchedAtUtc: input.completedAt, effectiveFrom: input.effectiveFrom, ...(input.effectiveTo === undefined ? {} : { effectiveTo: input.effectiveTo }), ...(input.campaignId === undefined ? {} : { campaignId: input.campaignId }) }), kind: input.kind };
-    const duplicate = state.cardSwitches.find((item) => item.idempotencyKey === input.idempotencyKey);
+    const projection = { ...projectionFromInput({ ...input, switchedAtUtc: input.completedAt, effectiveFrom: input.effectiveFrom, ...(input.effectiveTo === undefined ? {} : { effectiveTo: input.effectiveTo }), ...(input.campaignId === undefined ? {} : { campaignId: input.campaignId }) }), kind: input.kind, ...(this.metadataUser === undefined ? {} : { ownerUser: this.metadataUser }) };
+    const duplicate = this.visibleSwitches(state).find((item) => item.idempotencyKey === input.idempotencyKey);
     if (duplicate) {
       if (JSON.stringify(duplicate) !== JSON.stringify(projection)) throw new RewardServiceError('IDEMPOTENCY_CONFLICT', 'idempotencyKey already belongs to a different benefit status');
       return this.getUserBenefitStatus(input.kind, input.cardId, input.completedAt);
     }
     this.store.update((next) => {
-      const index = next.cardSwitches.findIndex((item) => item.cardId === input.cardId && (item.kind ?? 'card_switch') === input.kind);
+      const index = next.cardSwitches.findIndex((item) => (item.ownerUser === this.metadataUser || (item.ownerUser === undefined && this.metadataUser === undefined)) && item.cardId === input.cardId && (item.kind ?? 'card_switch') === input.kind);
       if (index >= 0) next.cardSwitches[index] = projection;
       else next.cardSwitches.push(projection);
       if (input.kind === 'campaign_registration' && input.campaignId) {
@@ -174,8 +269,8 @@ export class RewardService {
     const state = this.store.read();
     const card = state.cards.find((item) => item.id === input.cardId);
     if (!card) throw new RewardServiceError('CARD_NOT_FOUND', `card ${input.cardId} not found`);
-    const projection = projectionFromInput(input);
-    const duplicate = state.cardSwitches.find((item) => item.idempotencyKey === input.idempotencyKey);
+    const projection = { ...projectionFromInput(input), ...(this.metadataUser === undefined ? {} : { ownerUser: this.metadataUser }) };
+    const duplicate = this.visibleSwitches(state).find((item) => item.idempotencyKey === input.idempotencyKey);
     if (duplicate) {
       if (JSON.stringify(duplicate) !== JSON.stringify(projection)) throw new RewardServiceError('IDEMPOTENCY_CONFLICT', 'idempotencyKey already belongs to a different card switch');
       return cardSwitchStatus(card, duplicate, state.campaigns, input.switchedAtUtc);
@@ -194,7 +289,7 @@ export class RewardService {
       next.cardSwitches.push(projection);
     });
     const next = this.store.read();
-    const current = next.cardSwitches.filter((item) => item.cardId === input.cardId).at(-1);
+    const current = this.visibleSwitches(next).filter((item) => item.cardId === input.cardId).at(-1);
     return cardSwitchStatus(card, current, next.campaigns, input.switchedAtUtc);
   }
 
@@ -283,11 +378,11 @@ export class RewardService {
     return result.rule;
   }
 
-  recommend(transaction: TransactionTuple, limit = 5): RankingEntry[] {
+  recommend(transaction: TransactionTuple, limit = 10): RankingEntry[] {
     transaction = validateTransaction(transaction);
-    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 5) throw new RewardServiceError('INVALID_INPUT', 'limit must be a safe integer from 1 to 5');
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 20) throw new RewardServiceError('INVALID_INPUT', 'limit must be a safe integer from 1 to 20');
     const state = this.store.read();
-    return rankCards(state.cards, state.rules, transaction, this.context(state, nowIso(), transaction), Math.min(5, Math.max(1, limit)));
+    return rankCards(state.cards, state.rules, transaction, this.context(state, nowIso(), transaction), limit);
   }
 
   recordTransaction(transaction: TransactionTuple): RewardBreakdown {
@@ -297,34 +392,35 @@ export class RewardService {
     const requestedTransaction = transaction;
     const state = this.store.read();
     let originalRecord: RecordedTransaction | undefined;
-    const duplicate = state.transactions.find((record) => record.transaction.idempotencyKey === transaction.idempotencyKey);
+    const visibleTransactions = this.visibleTransactions(state);
+    const duplicate = visibleTransactions.find((record) => record.transaction.idempotencyKey === transaction.idempotencyKey);
     if (duplicate) {
       if (JSON.stringify(duplicate.transaction) !== JSON.stringify(transaction)) throw new RewardServiceError('IDEMPOTENCY_CONFLICT', 'idempotencyKey already belongs to a different transaction');
       return duplicate.reward;
     }
     if (transaction.kind === 'refund') {
       if (!transaction.refundOfId) throw new RewardServiceError('INVALID_REFUND', 'refund requires refundOfId');
-      const original = state.transactions.find((record) => record.transaction.idempotencyKey === transaction.refundOfId);
+      const original = visibleTransactions.find((record) => record.transaction.idempotencyKey === transaction.refundOfId);
       if (!original) throw new RewardServiceError('INVALID_REFUND', 'refundOfId does not reference a recorded transaction');
       originalRecord = original;
       if (original.transaction.cardId !== transaction.cardId) throw new RewardServiceError('INVALID_REFUND', 'refund must reference a transaction for the same card');
       if (original.transaction.kind !== 'purchase') throw new RewardServiceError('INVALID_REFUND', 'refund must reference a purchase');
       const originalAmount = original.transaction.amount.amountMinor;
       const alreadyRefunded = state.transactions
-        .filter((record) => record.transaction.kind === 'refund' && record.transaction.refundOfId === transaction.refundOfId)
+        .filter((record) => record.ownerUser === this.metadataUser && record.transaction.kind === 'refund' && record.transaction.refundOfId === transaction.refundOfId)
         .reduce((sum, record) => sum + record.transaction.amount.amountMinor, 0);
       const refundableAmount = Math.max(0, originalAmount - alreadyRefunded);
       const refundAmount = Math.min(transaction.amount.amountMinor, refundableAmount);
       if (refundAmount <= 0) throw new RewardServiceError('INVALID_REFUND', 'refund exceeds the original purchase amount');
       const originalReward = Math.max(0, original.reward.cappedReward?.amountMinor ?? 0);
       const rewardAlreadyRefunded = state.transactions
-        .filter((record) => record.transaction.kind === 'refund' && record.transaction.refundOfId === transaction.refundOfId)
+        .filter((record) => record.ownerUser === this.metadataUser && record.transaction.kind === 'refund' && record.transaction.refundOfId === transaction.refundOfId)
         .reduce((sum, record) => sum + Math.max(0, -(record.reward.cappedReward?.amountMinor ?? 0)), 0);
       const rewardToReverse = Math.min(originalReward - rewardAlreadyRefunded, Math.floor((originalReward * refundAmount) / originalAmount));
       transaction = { ...original.transaction, ...transaction, amount: { ...transaction.amount, amountMinor: refundAmount }, originalRewardMinor: rewardToReverse };
     }
     const evaluationTransaction = transaction.kind === 'refund'
-      ? { ...transaction, occurredAt: state.transactions.find((record) => record.transaction.idempotencyKey === transaction.refundOfId)?.transaction.occurredAt ?? transaction.occurredAt }
+      ? { ...transaction, occurredAt: visibleTransactions.find((record) => record.transaction.idempotencyKey === transaction.refundOfId)?.transaction.occurredAt ?? transaction.occurredAt }
       : transaction;
     const card = state.cards.find((item) => item.id === transaction.cardId);
     const context = this.context(state, evaluationTransaction.occurredAt, evaluationTransaction);
@@ -336,18 +432,18 @@ export class RewardService {
     }
     const appliedAtUtc = nowIso();
     const originalComponents = transaction.kind === 'refund' && transaction.refundOfId
-      ? state.rewardComponents.filter((component) => component.transactionId === transaction.refundOfId)
+      ? state.rewardComponents.filter((component) => component.transactionId === transaction.refundOfId && visibleTransactions.some((record) => record.transaction.idempotencyKey === component.transactionId))
       : [];
     const sourceComponents = reward.components?.length ? reward.components : (reward.ruleId && reward.ruleVersion && reward.sourceSnapshotId ? [{ kind: 'card_issuer' as const, ruleId: reward.ruleId, ruleVersion: reward.ruleVersion, sourceSnapshotId: reward.sourceSnapshotId, reward: reward.cappedReward, unit: reward.cappedReward?.currency ?? 'TWD', confidence: 'confirmed' as const }] : []);
     const componentRecords: RewardComponentRecord[] = originalComponents.length
       ? originalComponents.map((component) => {
         const originalAmount = originalRecord?.transaction.amount.amountMinor ?? transaction.amount.amountMinor;
-        const previousRefundAmount = state.transactions.filter((record) => record.transaction.kind === 'refund' && record.transaction.refundOfId === transaction.refundOfId).reduce((sum, record) => sum + record.transaction.amount.amountMinor, 0);
-        const previousReversed = state.rewardComponents.filter((record) => record.transactionId !== transaction.refundOfId && record.ruleId === component.ruleId && state.transactions.some((txRecord) => txRecord.transaction.idempotencyKey === record.transactionId && txRecord.transaction.refundOfId === transaction.refundOfId)).reduce((sum, record) => sum + Math.abs(record.reward.value), 0);
+        const previousRefundAmount = visibleTransactions.filter((record) => record.transaction.kind === 'refund' && record.transaction.refundOfId === transaction.refundOfId).reduce((sum, record) => sum + record.transaction.amount.amountMinor, 0);
+        const previousReversed = state.rewardComponents.filter((record) => record.transactionId !== transaction.refundOfId && record.ruleId === component.ruleId && visibleTransactions.some((txRecord) => txRecord.transaction.idempotencyKey === record.transactionId && txRecord.transaction.refundOfId === transaction.refundOfId)).reduce((sum, record) => sum + Math.abs(record.reward.value), 0);
         const isFinal = previousRefundAmount + transaction.amount.amountMinor >= originalAmount;
         const reversed = isFinal ? Math.max(0, component.reward.value - previousReversed) : Math.floor((component.reward.value * transaction.amount.amountMinor) / originalAmount);
         const capUsages = component.capUsages.map((usage) => {
-          const prior = state.rewardComponents.filter((record) => record.transactionId !== transaction.refundOfId && record.ruleId === component.ruleId && state.transactions.some((txRecord) => txRecord.transaction.idempotencyKey === record.transactionId && txRecord.transaction.refundOfId === transaction.refundOfId)).flatMap((record) => record.capUsages).filter((entry) => entry.poolId === usage.poolId && entry.periodKey === usage.periodKey).reduce((sum, entry) => sum + Math.abs(entry.consumedAmount), 0);
+          const prior = state.rewardComponents.filter((record) => record.transactionId !== transaction.refundOfId && record.ruleId === component.ruleId && visibleTransactions.some((txRecord) => txRecord.transaction.idempotencyKey === record.transactionId && txRecord.transaction.refundOfId === transaction.refundOfId)).flatMap((record) => record.capUsages).filter((entry) => entry.poolId === usage.poolId && entry.periodKey === usage.periodKey).reduce((sum, entry) => sum + Math.abs(entry.consumedAmount), 0);
           const restored = isFinal ? Math.max(0, usage.consumedAmount - prior) : Math.floor((usage.consumedAmount * transaction.amount.amountMinor) / originalAmount);
           return { ...usage, consumedAmount: -restored };
         });
@@ -365,7 +461,7 @@ export class RewardService {
         });
         return { componentId: componentId(requestedTransaction.idempotencyKey!, component.ruleId, component.ruleVersion), transactionId: requestedTransaction.idempotencyKey!, ruleId: component.ruleId, ruleVersion: component.ruleVersion, route: component.kind === 'merchant_loyalty' ? 'merchant' : component.kind === 'payment_provider' ? 'payment_provider' : 'card_issuer', ...(component.kind === 'payment_provider' ? { provider: requestedTransaction.route?.providerId } : {}), reward: { value: component.reward?.amountMinor ?? 0, unitType: 'currency', unitName: component.unit, ...(component.reward?.currency ? { currency: component.reward.currency } : {}) }, capUsages, appliedAtUtc };
       });
-    const record: RecordedTransaction = { transaction: requestedTransaction, reward: { ...reward, transaction: requestedTransaction } };
+    const record: RecordedTransaction = { transaction: requestedTransaction, reward: { ...reward, transaction: requestedTransaction }, ...(this.metadataUser === undefined ? {} : { ownerUser: this.metadataUser }) };
     this.store.update((next) => { next.transactions.push(record); next.rewardComponents.push(...componentRecords); });
     return record.reward;
   }
@@ -388,7 +484,7 @@ export class RewardService {
       const periodKey = resolveCyclePeriodKey(card, capPeriod, asOf);
 
       let used = 0;
-      for (const record of state.transactions) {
+      for (const record of this.visibleTransactions(state)) {
         if (record.transaction.mode !== 'actual') continue;
         const txRuleIds = record.reward.components?.map((component) => component.ruleId) ?? (record.reward.ruleId ? [record.reward.ruleId] : []);
         const txRules = txRuleIds.map((id) => state.rules.find((r) => r.id === id)).filter((r): r is OfferRuleVersion => Boolean(r));

@@ -20,7 +20,7 @@ The system enforces a strict separation of concerns between the AI Agent and the
                                      ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
 │                        taiwan-card-rewards-mcp                          │
-│  - Pure, deterministic calculation & uncertainty-aware ranking (Top-5) │
+│  - Pure, deterministic calculation & uncertainty-aware ranking (default 10) │
 │  - User-scoped JSON ledger (cards, snapshots, rules, transactions)     │
 │  - Exclusive process locking & atomic file persistence                  │
 │  - Official source governance & calculation trust gates                 │
@@ -67,16 +67,21 @@ node dist/cli.js --data-dir <absolute-path> [--user <user-id>]
 
 ## 3. The MCP Tool Surface
 
-The MCP server exposes 8 base reward tools plus two generic benefit tools. Standalone `confirm_offer` is not part of the surface; candidate activation is folded directly into `upsert_offer`.
+The MCP server exposes reward tools plus bounded merchant resolution and generic
+benefit tools. Standalone `confirm_offer` is not part of the surface; candidate
+activation is folded directly into `upsert_offer`.
 
 | Tool Name | Persistence | Description | Key Fail-Closed Errors |
 |---|:---:|---|---|
 | `calculate_reward` | Read-only | Pure stateless evaluation of a rule against a transaction with evaluation context. | `INSUFFICIENT_FACTS`, `SOURCE_UNAVAILABLE`, `NEEDS_REVIEW`, `STALE` |
-| `rank_cards` | Read-only | Pure stateless deterministic ranking (Top-5) across supplied cards and rules. | `INSUFFICIENT_FACTS`, `SOURCE_UNAVAILABLE`, `NEEDS_REVIEW`, `STALE` |
+| `rank_cards` | Read-only | Pure stateless deterministic ranking with bounded pages (default 10); the Agent may select five for presentation. | `INSUFFICIENT_FACTS`, `SOURCE_UNAVAILABLE`, `NEEDS_REVIEW`, `STALE` |
 | `register_card` | Mutating | Register or update a card product descriptor (`id`, `issuer`, `productName`, `network`, `country`). | `INVALID_CARD`, `STORE_UNAVAILABLE` |
 | `list_cards` | Read-only | List all registered cards in the user's store. | `STORE_UNAVAILABLE` |
 | `upsert_offer` | Mutating | Ingest an official or candidate source snapshot and versioned rule; activates candidate if valid confirmation is supplied. | `INVALID_OFFER`, `INVALID_CONFIRMATION`, `STORE_UNAVAILABLE` |
-| `recommend` | Read-only | Recommend up to 5 cards evaluated against registered cards and actual ledger usage without mutating usage. | `INSUFFICIENT_FACTS`, `NEEDS_REVIEW`, `STALE` |
+| `register_merchant` | Controlled mutating | Propose or register a canonical Traditional-Chinese merchant identity from approved provenance; the Agent cannot auto-activate a new identity. | `MERCHANT_ID_COLLISION`, `SOURCE_UNTRUSTED`, `NEEDS_REVIEW` |
+| `recommend` | Read-only | Recommend a bounded page of cards (default 10) evaluated against registered cards and actual ledger usage without mutating usage; the Agent selects what to present. | `INSUFFICIENT_FACTS`, `NEEDS_REVIEW`, `STALE` |
+| `search_active_offers` | Read-only | Search current active offers and return bounded canonical merchant/offer records; it never applies a reward. | `MISSING_REQUIRED_FACT`, `NOT_FOUND`, `STALE` |
+| `resolve_merchant` | Read-only | Validate an Agent-provided canonical merchant ID/name and return bounded merchant facts; it never interprets aliases or applies a reward. | `MERCHANT_AMBIGUOUS`, `MISSING_REQUIRED_FACT`, `NOT_FOUND` |
 | `record_transaction` | Mutating | Record an actual purchase (with `idempotencyKey`) or linked refund, updating durable cap usage. | `IDEMPOTENCY_CONFLICT`, `INVALID_REFUND`, `INSUFFICIENT_FACTS`, `NEEDS_REVIEW` |
 | `remaining_caps` | Read-only | Query remaining reward cap balances per rule and usageKey derived from actual transactions. | `INVALID_INPUT`, `STORE_UNAVAILABLE` |
 | `get_user_benefit_status` | Read-only | Show current benefit plus available-now and action-required candidates. | `CARD_NOT_FOUND`, `STORE_UNAVAILABLE` |
@@ -111,6 +116,21 @@ The MCP server exposes 8 base reward tools plus two generic benefit tools. Stand
        }
      }
      ```
+
+3. **Merchant Identity Resolution**:
+   - The Agent does not load the full merchant catalog. It interprets the raw
+     label, nickname, or abbreviation and sends a candidate canonical ID/name
+     plus market facts to `recommend`; the tool performs merchant pre-flight
+     validation automatically.
+   - If the user asks which merchants currently have offers, call
+     `search_active_offers` and use its canonical IDs/names. If the candidate is
+     ambiguous or missing facts, call `resolve_merchant` for validation and ask
+     the user to choose when needed.
+   - After a candidate is confirmed, call `recommend` again. The MCP validates
+     the merchant and selects active rules; the Agent never selects `ruleId`.
+   - A new merchant identity must go through the controlled `register_merchant`
+     catalog flow with a fixed Traditional-Chinese canonical name and provenance;
+     normal recommendation calls never create identities.
 
 ### C. Planned Spend Recommendations vs Actual Purchases
 - **Planned Evaluation (Simulation / Intent)**:

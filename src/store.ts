@@ -1,13 +1,15 @@
 import * as crypto from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import type { CardDescriptor, CardSwitchCampaign, CardSwitchEnrollment, CardSwitchProjection, CapPoolDefinition, OfferRuleVersion, OfferSourceSnapshot, RewardBreakdown, RewardComponentRecord, TransactionTuple } from './types.js';
+import type { CardDescriptor, CardSwitchCampaign, CardSwitchEnrollment, CardSwitchProjection, CapPoolDefinition, MerchantIdentity, OfferRuleVersion, OfferSourceSnapshot, RewardBreakdown, RewardComponentRecord, TransactionTuple } from './types.js';
 import type { StartupConfig } from './startup.js';
 import { validateStoredState } from './validation.js';
 
 export interface RecordedTransaction {
   transaction: TransactionTuple;
   reward: RewardBreakdown;
+  /** User scope is stamped by the workspace; absent is legacy/unscoped data. */
+  ownerUser?: string;
 }
 
 export interface StoredState {
@@ -21,9 +23,10 @@ export interface StoredState {
   cardSwitches: CardSwitchProjection[];
   capPools: CapPoolDefinition[];
   rewardComponents: RewardComponentRecord[];
+  merchants: MerchantIdentity[];
 }
 
-export const emptyState = (): StoredState => ({ schemaVersion: 2, cards: [], snapshots: [], rules: [], transactions: [], campaigns: [], switchEnrollments: [], cardSwitches: [], capPools: [], rewardComponents: [] });
+export const emptyState = (): StoredState => ({ schemaVersion: 2, cards: [], snapshots: [], rules: [], transactions: [], campaigns: [], switchEnrollments: [], cardSwitches: [], capPools: [], rewardComponents: [], merchants: [] });
 
 export class StoreError extends Error {
   constructor(public readonly code: string, message: string) {

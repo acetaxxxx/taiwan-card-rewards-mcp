@@ -138,9 +138,42 @@ reward, fee, and comparison currencies when they differ.
 _Avoid_: implicit TWD, display currency only
 
 **FX Snapshot**:
-A dated, source-attributed exchange-rate observation scoped to the currencies,
-provider, card or issuer, and effective time for which it may be used.
+A dated, source-attributed exchange-rate observation for a currency pair and
+effective time. The Agent supplies the observation; the MCP creates the
+authoritative ID when it persists the snapshot used by a durable transaction.
 _Avoid_: live rate, timeless conversion
+
+**Current FX Rate**:
+The single fresh rate selected for a currency pair and rate type; issuer or card
+scope is added only when the source explicitly requires it.
+_Avoid_: global FX table, simultaneous equivalent snapshots
+
+**Merchant Identity**:
+A canonical merchant entity shared across issuers and cards. Its fixed
+Traditional-Chinese canonical name is separate from offer applicability facts
+such as market, country, channel, and MCC.
+_Avoid_: issuer-specific merchant, localized merchant identity, raw statement name
+
+**Canonical Merchant Name**:
+The single `zh-Hant-TW` name maintained for a Merchant Identity and used by all
+offers in this project; source-language labels remain evidence, not aliases.
+_Avoid_: localized display name, bank-specific merchant name, alias table
+
+**Agent Merchant Interpretation**:
+The LLM Agent's provisional conversion of a raw merchant label, nickname, or
+translation into a canonical merchant candidate. It is not MCP durable state
+until MCP validates the canonical ID/name and market facts.
+_Avoid_: treating an Agent alias guess as a verified merchant identity
+
+**Canonical Merchant Fact**:
+The market-scoped merchant identity selected by the Agent from MCP-provided
+candidates and validated by MCP before rule evaluation.
+_Avoid_: Agent-selected rule ID, raw statement string, unconfirmed translation
+
+**Active Offer Index**:
+The derived index of Offer Rules that are active, source-trusted, time-valid,
+and evaluable for recommendation or reward calculation.
+_Avoid_: all merchant catalog, candidate offer list, search result cache
 
 ## Transactions and accounting
 
@@ -226,6 +259,11 @@ A required fact, source, rate, or operator result that is unavailable or
 ambiguous, so the calculation cannot claim a confident outcome.
 _Avoid_: zero reward, false, model guess
 
+**Actionable Diagnostic**:
+A machine-readable explanation of a non-confident result containing a code,
+data path, required facts, and the next retry or confirmation action.
+_Avoid_: bare unknown, free-form error, silent fallback
+
 **Stale Evidence**:
 Offer Evidence or an FX Snapshot whose validity or freshness window no longer
 supports a current confident calculation.
@@ -281,12 +319,34 @@ _Avoid_: caller promise, warning flag, best effort
   change the Reward Ledger, and a Refund must remain linked to its source.
 - A Rule Version, Card Cycle, Currency Context, FX Snapshot, and Reward Valuation
   used by a Recorded Purchase remain traceable for later reconciliation.
+- An Agent workspace may retain raw research evidence, but the MCP durable state
+  retains only validated typed facts, provenance references, rule versions,
+  ledger records, and the FX snapshot actually used by a durable transaction.
+- The MCP generates authoritative IDs for persisted snapshots and records;
+  Agent references and idempotency keys are correlation inputs, not server IDs.
 - A query that needs a local period boundary must use an explicit Timezone
   Authority; the AI agent asks the user when the relevant timezone is missing,
   and the calculator does not infer it from the server or environment locale.
 - Unknown Condition and Stale Evidence cannot silently become a match, a zero,
   or a confident Recommendation; the AI agent must refresh evidence or ask the
   user when the missing fact is user-owned.
+- A non-confident result must carry an Actionable Diagnostic. Legacy `unknown`
+  may remain for compatibility, but it cannot be the only recovery signal.
+- Merchant matching uses MCP-managed canonical IDs (`mch_<ULID>`) and fixed Traditional-Chinese
+  names; Agent alias/translation guesses must be validated before reward
+  evaluation, and market/country belong to offer applicability rather than issuer
+  identity.
+- The MerchantIdentity catalog is a deployment-shared reference catalog, while
+  user transactions, held cards, and reward ledgers remain strictly tenant-isolated.
+- Canonical merchant IDs are generated authoritatively by MCP as immutable `mch_<ULID>`
+  during controlled registration; LLM agents propose candidates but never assign IDs.
+- Merged or duplicate merchant identities never rewrite historical records; deprecated
+  identities reference the active canonical ID via `supersededBy`.
+- Merchant and offer ingestion follows a strict lifecycle (trusted source extraction ->
+  candidate -> user confirmation -> active); recommendation and calculation workflows
+  are strictly read-only and never automatically write or activate merchant entities or rules.
+- A merchant with no active offer rules (`no_active_offer`) or an unresolved merchant condition
+  never blocks non-merchant-dependent general base card rules from producing confident results.
 - User-Supplied Offer Input remains `candidate` until its official source,
   required fields, and interpretation have been reviewed; it cannot silently
   activate a rule.
@@ -309,6 +369,10 @@ _Avoid_: caller promise, warning flag, best effort
 - A Reward Calculation is not a Recommendation. The calculation supplies
   explainable facts and explicit sort options; the agent supplies contextual
   judgment.
+- The Agent may interpret language and select a merchant candidate with user
+  confirmation, but `recommend` and `record_transaction` let MCP select all
+  applicable active rules; an Agent-supplied `ruleId` is not authoritative for
+  reward choice.
 - A user may enter a new card name before it is resolved. That name can be kept
   as an Unresolved Card, but it has no active reward rule until the agent supplies
   verified evidence and the user confirms required facts.
