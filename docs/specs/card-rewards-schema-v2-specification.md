@@ -385,7 +385,7 @@ Schema v2 is a breaking format change:
 
 ## 10. Target Specification & Implementation Status
 
-This document defines the **target normative specification** for Schema v2. Package/server version 0.4.0 implements the canonical top-level cap-pool registry, shared multi-metric aggregation, current benefit projections, fail-closed combination resolution, and the ten-tool MCP surface described above.
+This document defines the **target normative specification** for Schema v2. Package/server version 0.7.0 implements the canonical top-level cap-pool registry, shared multi-metric aggregation, current benefit projections, fail-closed combination resolution, and the twelve-tool MCP surface described above.
 
 The persisted/runtime compatibility shape has a few deliberate differences from the illustrative v2 interfaces in Sections 3 and 4:
 1. Runtime rules use `combination.mode` and `prerequisiteRuleIds`; the normative `type` and singular `prerequisiteRuleId` names describe the same policy concepts.
