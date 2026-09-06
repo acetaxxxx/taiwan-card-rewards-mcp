@@ -56,8 +56,8 @@ describe('Ticket 04 & Contract Convergence: 10 tools and Offer Confirmation in u
     reward: { kind: 'percentage', rateBps: 300 },
   };
 
-  it('maintains exactly 13 public MCP tools and does not expose a standalone confirm_offer tool', () => {
-    expect(mcpTools).toHaveLength(13);
+  it('maintains exactly 15 public MCP tools and does not expose a standalone confirm_offer tool', () => {
+    expect(mcpTools).toHaveLength(15);
     const toolNames = mcpTools.map((t) => t.name);
     expect(toolNames).not.toContain('confirm_offer');
     expect(toolNames).toContain('upsert_offer');

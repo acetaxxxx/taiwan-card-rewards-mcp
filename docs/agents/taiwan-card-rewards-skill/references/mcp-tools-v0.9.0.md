@@ -1,10 +1,10 @@
-# MCP Tools v0.9.0 合約規範 (13 Public Tools)
+# MCP Tools v0.9.0 合約規範 (15 Public Tools)
 
-本文件定義 `taiwan-card-rewards-mcp` (v0.9.0) 所提供的 13 項公開 MCP 工具簽名、參數結構與錯誤碼。
+本文件定義 `taiwan-card-rewards-mcp` (v0.9.0) 所提供的 15 項公開 MCP 工具簽名、參數結構與錯誤碼。
 
 ---
 
-## 工具總表 (Tool Matrix)
+## 工具總表 (Tool Matrix - 15 Public Tools)
 
 | # | 工具名稱 (Tool Name) | 類型 | 說明 |
 |---|---|---|---|
@@ -17,10 +17,12 @@
 | 7 | `list_cards` | 唯讀 / 查詢 | 列出使用者已登記之所有信用卡清冊 |
 | 8 | `remaining_caps` | 唯讀 / 查詢 | 查詢指定卡片、月份或全期上限池之剩餘額度 |
 | 9 | `get_user_benefit_status` | 唯讀 / 查詢 | 查詢使用者已選擇之權益方案或登錄狀態 |
-| 10 | `register_card` | 寫入 / 管理 | 登記使用者持有的信用卡至個人資料庫 |
-| 11 | `upsert_offer` | 寫入 / 管理 | 新增或更新卡片優惠活動快照與規則定義 |
-| 12 | `upsert_user_benefit_status` | 寫入 / 管理 | 更新使用者權益方案選擇（如 CUBE 切換）或活動登錄紀錄 |
-| 13 | `record_transaction` | 寫入 / 記帳 | 記錄實際消費扣減上限池，或記錄退款以對沖額度 |
+| 10 | `list_payment_routes` | 唯讀 / 查詢 | 查詢目前使用者已註冊之支付路徑清冊（支援有界分頁） |
+| 11 | `register_card` | 寫入 / 管理 | 登記使用者持有的信用卡至個人資料庫 |
+| 12 | `upsert_offer` | 寫入 / 管理 | 新增或更新卡片優惠活動快照與規則定義 |
+| 13 | `upsert_payment_route` | 寫入 / 管理 | 登記或更新確認/候選支付路徑拓撲與扣款來源（絕不儲存敏感憑據） |
+| 14 | `upsert_user_benefit_status` | 寫入 / 管理 | 更新使用者權益方案選擇（如 CUBE 切換）或活動登錄紀錄 |
+| 15 | `record_transaction` | 寫入 / 記帳 | 記錄實際消費扣減上限池，或記錄退款以對沖額度 |
 
 ---
 
@@ -28,78 +30,49 @@
 
 ### `recommendation_preflight`
 - **用途**：在執行正式推薦前，診斷消費情境是否存在缺少事實、過期匯率或商家歧義。
-- **輸入參數**：
-  - `amount`: `number` (必填，消費金額)
-  - `currency`: `string` (必填，三位 ISO 幣別，如 `"TWD"`, `"JPY"`)
-  - `merchantName`: `string` (選填，商家名稱)
-  - `merchantId`: `string` (選填，權威商家識別碼 `mch_...`)
-  - `paymentRoute`: `PaymentRouteContext` (選填，支付通道結構)
-  - `targetDate`: `string` (選填，ISO 8601 日期)
-  - `fxSnapshot`: `FxSnapshot` (選填，外幣匯率快照)
-- **回傳結構**：
-  - `ready`: `boolean` (是否已準備就緒可直接執行 `recommend`)
-  - `requiredActions`: `string[]` (待修復動作：`"clarify_merchant"`, `"refresh_external_data"`, `"research_evidence"`, `"register_card"`, `"review_conflict"`)
-  - `diagnostics`: `DiagnosticDetail[]` (診斷細節與問題說明)
-  - `dataVersion`: `string` (目前資料與規則版本號)
+- **輸入參數**：`transaction: recommendationTransaction`, `context?: EvaluationContext`
+- **回傳結構**：`ready: boolean`, `requiredActions: string[]`, `diagnostics: DiagnosticDetail[]`, `dataVersion: string`
 
 ### `recommend`
 - **用途**：執行最佳用卡推薦與排序，提供清晰的組件回饋拆解。
-- **輸入參數**：
-  - `amount`: `number` (必填)
-  - `currency`: `string` (必填)
-  - `merchantId`: `string` (選填)
-  - `paymentRoute`: `PaymentRouteContext` (選填)
-  - `targetDate`: `string` (選填)
-  - `fxSnapshot`: `FxSnapshot` (選填)
-  - `limit`: `number` (選填，預設 5，最大 20)
-  - `cursor`: `string` (選填，分頁游標)
-- **回傳結構**：
-  - `recommendations`: `CardRecommendation[]`
-    - `cardId`: `string`
-    - `cardName`: `string`
-    - `totalRewardEstimated`: `number`
-    - `effectiveRate`: `number` (百分比，如 0.035 代表 3.5%)
-    - `components`: `RewardComponentBreakdown[]` (基礎、加碼、活動拆解)
-    - `capImpact`: `CapImpactDetail[]` (各上限池消耗預估)
-    - `prerequisitesMet`: `boolean`
-    - `warnings`: `string[]`
-  - `nextCursor`: `string | null`
-  - `hasMore`: `boolean`
+- **輸入參數**：`transaction: recommendationTransaction`, `cardIds?: string[]`, `merchant?: MerchantIdentity`, `context?: EvaluationContext`, `limit?: number`, `page?: number`, `projection?: "summary" | "detail" | "calculation"`
 
 ---
 
-## 2. 試算與商家工具
+## 2. 支付路徑管理工具 (Payment Route Tools)
 
-### `calculate_reward`
-- **用途**：針對單一特定卡片計算回饋細節。
-- **輸入參數**：`cardId`, `amount`, `currency`, `merchantId`, `paymentRoute`, `targetDate`, `fxSnapshot`.
-- **回傳結構**：`RewardCalculationResult` (含總回饋金額、幣別、點數類型與各組件計算過程)。
+> [!IMPORTANT]
+> **支付路徑 (Payment Route) 與優惠活動 (Offer) 之區別**：
+> - **Payment Route** 定義支付實體拓撲與扣款工具（商家會員層 ➔ 錢包載體 ➔ 中介處理商 ➔ 發卡機構；扣款為信用卡、帳戶或現金）。
+> - **Offer** 定義具體的回饋比率、步進、疊加模式與上限池規則。
 
-### `resolve_merchant`
-- **用途**：傳入模糊商家字串，比對資料庫並回傳候選商家識別碼。
-- **輸入參數**：`query: string`, `limit?: number`.
-- **回傳結構**：`MerchantCandidate[]` (含 `merchantId`, `canonicalName`, `category`, `confidence`, `aliases`)。
+### `upsert_payment_route`
+- **用途**：登記或更新一筆支付路徑拓撲與扣款工具配置。
+- **輸入參數**：`route: PaymentRouteDescriptor`
+  - `id`: `string` (選填，路徑唯一 ID)
+  - `status`: `"candidate" | "active" | "stale" | "conflict" | "needs_review"` (選填)
+  - `layers`: `PaymentRouteLayer[]` (必填，依序包含 `merchant_loyalty`, `payment_provider`, `wallet`, `intermediate_provider`, `card_network`, `card_issuer`)
+  - `funding`: `PaymentFunding` (必填，`kind: "credit_card" | "account" | "cash"`, `cardId?`, `subtype?: "linked_bank_account" | "wallet_balance"`)
+  - `sourceUrl`: `string` (選填，官方來源網址)
+  - `sourceSnapshotId`: `string` (選填)
+  - `contentHash`: `string` (選填)
+  - `observedAt`: `string` (必填，ISO 8601 時間)
+  - `validFrom`: `string` (選填)
+  - `validTo`: `string` (選填)
+  - `authority`: `string` (選填)
+  - `confidence`: `"high" | "medium" | "low"` (選填)
+  - `confirmation`: `{ confirmedAt: string, confirmedBy: string }` (選填，使用者確認紀錄)
+  - `idempotencyKey`: `string` (必填，唯一防重鍵)
+- **安全防線**：嚴禁傳入任何卡號 (PAN)、CVV、OTP 或密碼，違者觸發 `SENSITIVE_FIELD_FORBIDDEN`。
+
+### `list_payment_routes`
+- **用途**：查詢目前使用者已登記的支付路徑清冊。
+- **輸入參數**：`limit?: number` (1..20), `page?: number` (1-based), `projection?: "summary" | "detail" | "calculation" | "audit"`
+- **回傳結構**：`routes: PaymentRouteDescriptor[]`, `page: number`, `limit: number`, `total: number`, `hasMore: boolean`
 
 ---
 
-## 3. 寫入與記帳工具
-
-### `record_transaction`
-- **用途**：記錄實際消費以扣減上限池，或記錄退款。
-- **輸入參數**：
-  - `idempotencyKey`: `string` (必填，唯一防重鍵，如 `"tx_req_20260906_001"`)
-  - `cardId`: `string` (必填)
-  - `amount`: `number` (必填，正數為消費，負數為退款)
-  - `currency`: `string` (必填)
-  - `transactionDate`: `string` (必填，ISO 8601)
-  - `merchantId`: `string` (選填)
-  - `paymentRoute`: `PaymentRouteContext` (選填)
-  - `refundReferenceTxId`: `string` (選填，退款時關聯之原始交易 ID)
-- **回傳結構**：`TransactionRecordResult` (含 `transactionId`, `recordedReward`, `updatedCapBalances`)。
-
----
-
-## 4. 系統標準錯誤代碼 (Error Codes)
+## 3. 系統標準錯誤代碼 (Error Codes)
 
 | 錯誤碼 | 說明 | 代理人處理方式 |
 |---|---|---|

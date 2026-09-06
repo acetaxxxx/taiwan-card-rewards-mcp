@@ -12,6 +12,29 @@ export interface PaymentRouteContext {
   transactionCurrency: Currency; settlementCurrency?: Currency; billingCurrency?: Currency; conversionOwner?: ConversionOwner; rateType?: FxRateType; conversionTiming?: ConversionTiming;
   foreignTransactionFee?: Money; markup?: Money; serviceFee?: Money; dcc?: boolean;
 }
+export type PaymentRouteLayerKind = 'merchant_loyalty' | 'payment_provider' | 'wallet' | 'intermediate_provider' | 'card_network' | 'card_issuer';
+export interface PaymentRouteLayer { kind: PaymentRouteLayerKind; providerId?: string; appId?: string; paymentMethod?: string; displayName?: string; }
+export type FundingInstrument =
+  | { kind: 'credit_card'; cardId?: string }
+  | { kind: 'account'; subtype: 'linked_bank_account' | 'wallet_balance' }
+  | { kind: 'cash' };
+export interface PaymentRouteRecord {
+  id: string;
+  status: 'candidate' | 'active' | 'stale' | 'conflict' | 'needs_review';
+  layers: readonly PaymentRouteLayer[];
+  funding: FundingInstrument;
+  sourceUrl?: string;
+  sourceSnapshotId?: string;
+  contentHash?: string;
+  observedAt: string;
+  validFrom?: string;
+  validTo?: string;
+  authority?: EvidenceAuthority;
+  confidence?: 'high' | 'medium' | 'low';
+  confirmation?: { confirmedAt: string; confirmedBy: string };
+  idempotencyKey: string;
+  ownerUser?: string;
+}
 export type StackingConfidence = 'confirmed' | 'possible';
 export type RewardComponentKind = 'merchant_loyalty' | 'payment_provider' | 'card_issuer';
 export interface RewardComponent {
@@ -25,7 +48,7 @@ export interface RewardComponent {
   sourceReference?: string | undefined;
   observedAt?: string | undefined;
 }
-export type PaymentRouteLayer = 'merchant' | 'payment_provider' | 'card_issuer';
+export type RewardComponentRouteLayer = 'merchant' | 'payment_provider' | 'card_issuer';
 export interface ComponentCapUsage {
   poolId: string;
   periodKey: string;
@@ -43,7 +66,7 @@ export interface RewardComponentRecord {
   transactionId: string;
   ruleId: string;
   ruleVersion: string;
-  route: PaymentRouteLayer;
+  route: RewardComponentRouteLayer;
   provider?: string | undefined;
   reward: RewardAmount;
   capUsages: readonly ComponentCapUsage[];
@@ -260,6 +283,7 @@ export interface CycleWindow {
 
 export interface TransactionTuple {
   idempotencyKey?: string | undefined;
+  routeId?: string | undefined;
   cardId: string;
   kind: TransactionKind;
   mode: TransactionMode;
@@ -311,7 +335,7 @@ export interface RecommendationRequirement {
   retryAction?: string;
 }
 export interface RecommendationRequiredAction {
-  action: 'resolve_merchant' | 'ask_user' | 'refresh_external_data' | 'submit_evidence' | 'review_offer';
+  action: 'resolve_merchant' | 'ask_user' | 'register_payment_route' | 'refresh_external_data' | 'submit_evidence' | 'review_offer';
   path: string;
   requiredFacts: readonly string[];
 }

@@ -8,7 +8,7 @@
     "sourceVersion": "0.9.0",
     "sourceHash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "mcpContractVersion": "0.9.0",
-    "mcpToolsCount": 13,
+    "mcpToolsCount": 15,
     "lastVerifiedAt": "2026-09-06T12:00:00Z",
     "canonicalLink": "docs/agents/taiwan-card-rewards-skill/SKILL.md",
     "invariants": [

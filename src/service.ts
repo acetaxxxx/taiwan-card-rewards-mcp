@@ -1,10 +1,10 @@
 import * as crypto from 'node:crypto';
 import { type LedgerStore, type RecordedTransaction, type StoredState } from './store.js';
 import { convertMinor, evaluateOffer, rankCards, resolveCyclePeriodKey } from './evaluator.js';
-import type { CardDescriptor, CardSwitchInput, CardSwitchProjection, CardSwitchStatus, CapPeriod, CapPoolDefinition, EvaluationContext, MerchantIdentity, MerchantResolution, Money, OfferConfirmation, OfferRuleVersion, OfferSourceSnapshot, RankingEntry, RewardBreakdown, RewardComponentRecord, TransactionTuple, UserBenefitInput, UserBenefitStatus, RecommendationPreflight, RecommendationRequiredAction, RecommendationRequirement, Diagnostic, EvidenceRecord } from './types.js';
+import type { CardDescriptor, CardSwitchInput, CardSwitchProjection, CardSwitchStatus, CapPeriod, CapPoolDefinition, EvaluationContext, MerchantIdentity, MerchantResolution, Money, OfferConfirmation, OfferRuleVersion, OfferSourceSnapshot, RankingEntry, RewardBreakdown, RewardComponentRecord, TransactionTuple, UserBenefitInput, UserBenefitStatus, RecommendationPreflight, RecommendationRequiredAction, RecommendationRequirement, Diagnostic, EvidenceRecord, PaymentRouteRecord } from './types.js';
 import type { StartupConfig } from './startup.js';
 import { RewardServiceError } from './errors.js';
-import { validateCard, validateCapPool, validateConfirmation, validateMerchant, validateRecommendationTransaction, validateRule, validateSnapshot, validateTransaction, validateEvidence, validateFactCandidate } from './validation.js';
+import { validateCard, validateCapPool, validateConfirmation, validateMerchant, validateRecommendationTransaction, validateRule, validateSnapshot, validateTransaction, validateEvidence, validateFactCandidate, validatePaymentRouteRecord } from './validation.js';
 import { cardSwitchStatus, projectionFromInput } from './card-switch.js';
 
 export { RewardServiceError } from './errors.js';
@@ -22,7 +22,7 @@ function merchantId(): string {
   for (let i = 0; i < 16; i += 1) encoded += ULID_ALPHABET[bytes[i % bytes.length]! % 32];
   return `mch_${encoded}`;
 }
-function ownedId(prefix: 'ev' | 'fact'): string {
+function ownedId(prefix: 'ev' | 'fact' | 'route'): string {
   let time = Date.now();
   let encoded = '';
   for (let i = 0; i < 10; i += 1) { encoded = ULID_ALPHABET[time % 32] + encoded; time = Math.floor(time / 32); }
@@ -30,6 +30,7 @@ function ownedId(prefix: 'ev' | 'fact'): string {
   for (let i = 0; i < 16; i += 1) encoded += ULID_ALPHABET[bytes[i % bytes.length]! % 32];
   return `${prefix}_${encoded}`;
 }
+function routeId(): string { return ownedId('route'); }
 function normalizedMerchantKey(value: string): string {
   return value.normalize('NFKC').toLocaleLowerCase('und').replace(/[\p{P}\p{S}]+/gu, ' ').replace(/\s+/gu, ' ').trim();
 }
@@ -50,6 +51,20 @@ export class RewardService {
   }
 
   listEvidence(): readonly EvidenceRecord[] { return this.store.read().evidence; }
+
+  upsertPaymentRoute(input: unknown): PaymentRouteRecord {
+    const source = typeof input === 'object' && input !== null ? input as Record<string, unknown> : {};
+    const parsed = validatePaymentRouteRecord({ ...source, id: 'route_input', ...(source.status === undefined ? { status: source.confirmation ? 'active' : 'candidate' } : {}), ...(source.ownerUser === undefined ? {} : { ownerUser: source.ownerUser }) });
+    if (parsed.status === 'active' && !parsed.confirmation) throw new RewardServiceError('INVALID_CONFIRMATION', 'active payment routes require explicit user confirmation');
+    const state = this.store.read();
+    const existing = state.paymentRoutes.find((route) => route.idempotencyKey === parsed.idempotencyKey && (route.ownerUser === this.metadataUser || (route.ownerUser === undefined && this.metadataUser === undefined)));
+    const desired = { ...parsed, id: existing?.id ?? routeId(), ...(this.metadataUser === undefined ? {} : { ownerUser: this.metadataUser }) };
+    if (existing) { if (JSON.stringify({ ...existing, id: parsed.id, ownerUser: parsed.ownerUser }) !== JSON.stringify({ ...desired, id: parsed.id, ownerUser: parsed.ownerUser })) throw new RewardServiceError('IDEMPOTENCY_CONFLICT', 'idempotencyKey already belongs to a different payment route'); return existing; }
+    this.store.update((next) => { next.paymentRoutes.push(desired); });
+    return desired;
+  }
+
+  listPaymentRoutes(): readonly PaymentRouteRecord[] { const state = this.store.read(); return state.paymentRoutes.filter((route) => route.ownerUser === this.metadataUser || (route.ownerUser === undefined && this.metadataUser === undefined)); }
 
   submitFactCandidate(input: unknown) {
     const parsed = validateFactCandidate(input);
@@ -439,6 +454,18 @@ export class RewardService {
       requirements.push({ id: 'card', category: 'card', path: 'transaction.cardId', status: 'missing', retryAction: 'register_card' });
       diagnostics.push({ code: 'missing_required_fact', path: 'transaction.cardId', requiredFacts: ['transaction.cardId'], retryAction: 'register_card' });
       requiredActions.push({ action: 'ask_user', path: 'transaction.cardId', requiredFacts: ['transaction.cardId'] });
+    }
+    if (parsed.routeId) {
+      const route = state.paymentRoutes.find((candidate) => candidate.id === parsed.routeId && (candidate.ownerUser === this.metadataUser || (candidate.ownerUser === undefined && this.metadataUser === undefined)));
+      if (!route) {
+        requirements.push({ id: 'route', category: 'payment_route', path: 'transaction.routeId', status: 'missing', retryAction: 'register_payment_route' });
+        diagnostics.push({ code: 'missing_required_fact', path: 'transaction.routeId', requiredFacts: ['registered payment route'], retryAction: 'register_payment_route' });
+        requiredActions.push({ action: 'register_payment_route', path: 'transaction.routeId', requiredFacts: ['registered payment route'] });
+      } else if (route.status !== 'active' || (route.validTo && Date.parse(route.validTo) < Date.parse(evaluatedAt))) {
+        requirements.push({ id: 'route', category: 'payment_route', path: 'transaction.routeId', status: route.status === 'conflict' ? 'conflict' : 'stale', retryAction: 'refresh_external_data' });
+        diagnostics.push({ code: route.status === 'conflict' ? 'needs_review' : 'stale_rule', path: 'transaction.routeId', requiredFacts: ['active current payment route'], retryAction: 'refresh_external_data' });
+        requiredActions.push({ action: 'refresh_external_data', path: 'transaction.routeId', requiredFacts: ['active current payment route'] });
+      } else knownFacts.push(`route:${route.id}`);
     }
     const rules = state.rules.filter((rule) => rule.status === 'active' && (!card || rule.cardId === card.id));
     const merchantSpecific = rules.some((rule) => Boolean(rule.match.merchants?.length));

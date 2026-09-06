@@ -1,7 +1,7 @@
 # Agent Research Skill 與 Recommendation Pre-flight 標準作業程序 (SOP)
 
 **文件狀態**：正式營運指引 (Normative Agent SOP)
-**適用版本**：v0.9.0+ (13-Tool MCP Contract)
+**適用版本**：v0.9.0+ (15-Tool MCP Contract)
 **語言**：繁體中文
 **遵循規範**：[`CONTEXT.md`](../../CONTEXT.md), [ADR 0001](../adr/0001-independent-card-rewards-domain-and-agent-supplied-rules.md), [ADR 0003](../adr/0003-complete-initial-mcp-surface-with-layered-trust-gates.md), [ADR 0004](../adr/0004-generic-benefit-status-and-schema-v2.md), [ADR 0005](../adr/0005-payment-route-opportunity-stacking.md), [ADR 0006](../adr/0006-multi-component-reward-ledger-and-cap-attribution.md), [使用者安裝與 Skill 分發 SOP](user-installation-and-skill-distribution-sop.md), [Schema v2 Spec](../specs/card-rewards-schema-v2-specification.md), [Agent-Supplied FX Spec](../specs/agent-supplied-fx-and-fail-closed-specification.md), [MerchantIdentity Spec](../specs/market-aware-merchant-identity-and-valid-offer-search-specification.md), [Pre-flight & Freshness Spec](../../.scratch/recommendation-preflight-evidence-freshness/spec.md).
 
@@ -27,9 +27,9 @@
 
 ---
 
-## 2. 13-Tool MCP 合約體系
+## 2. 15-Tool MCP 合約體系
 
-MCP 伺服器公開 13 項標準工具，Agent 必須依照其唯讀與寫入屬性合規調用：
+MCP 伺服器公開 15 項標準工具，Agent 必須依照其唯讀與寫入屬性合規調用：
 
 | 工具名稱 | 屬性 | 核心職責 | 主要 Fail-Closed 狀態碼 |
 |---|:---:|---|---|
@@ -42,8 +42,10 @@ MCP 伺服器公開 13 項標準工具，Agent 必須依照其唯讀與寫入屬
 | `list_cards` | 唯讀 | 列出使用者已登記之信用卡清冊與卡片屬性 | `STORE_UNAVAILABLE` |
 | `remaining_caps` | 唯讀 | 查詢指定卡片之各上限池實際剩餘額度 | `CARD_NOT_FOUND`, `INSUFFICIENT_FACTS` |
 | `get_user_benefit_status` | 唯讀 | 查詢權益切換 (card_switch) 或登錄活動 (campaign) 狀態 | `CARD_NOT_FOUND`, `STORE_UNAVAILABLE` |
+| `list_payment_routes` | 唯讀 | 查詢使用者登記之支付路徑清冊（支援有界分頁） | `INVALID_INPUT`, `STORE_UNAVAILABLE` |
 | `register_card` | 寫入 | 登記或更新使用者持卡屬性（發卡行、產品名、結帳日、時區） | `INVALID_INPUT`, `STORE_UNAVAILABLE` |
 | `upsert_offer` | 寫入 | 儲存來源快照 (Snapshot)、規則版本 (Rule)，並可一併附帶確認書 (Confirmation) | `INVALID_OFFER`, `INVALID_CONFIRMATION` |
+| `upsert_payment_route` | 寫入 | 登記或更新確認/候選支付路徑拓撲與扣款來源（絕不儲存敏感憑據） | `INVALID_INPUT`, `IDEMPOTENCY_CONFLICT`, `SENSITIVE_FIELD_FORBIDDEN` |
 | `upsert_user_benefit_status` | 寫入 | 記錄使用者確認已完成之權益切換或活動登錄事實 | `CARD_NOT_FOUND`, `INVALID_CONFIRMATION` |
 | `record_transaction` | 寫入 | 記錄實際消費或關聯退款至持久化帳本，更新上限池消耗 | `IDEMPOTENCY_CONFLICT`, `INVALID_REFUND` |
 
