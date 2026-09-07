@@ -19,7 +19,7 @@
 | 9 | `get_user_benefit_status` | 唯讀 / 查詢 | 查詢使用者已選擇之權益方案或登錄狀態 |
 | 10 | `list_payment_routes` | 唯讀 / 查詢 | 查詢目前使用者已註冊之支付路徑清冊（支援有界分頁） |
 | 11 | `register_card` | 寫入 / 管理 | 登記使用者持有的信用卡至個人資料庫 |
-| 12 | `upsert_offer` | 寫入 / 管理 | 新增或更新卡片優惠活動快照與規則定義 |
+| 12 | `upsert_offer` | 寫入 / 管理 | 新增或更新卡片優惠活動快照與規則定義；可在同一次呼叫原子建立一個 candidate merchant |
 | 13 | `upsert_payment_route` | 寫入 / 管理 | 登記或更新確認/候選支付路徑拓撲與扣款來源（絕不儲存敏感憑據） |
 | 14 | `upsert_user_benefit_status` | 寫入 / 管理 | 更新使用者權益方案選擇（如 CUBE 切換）或活動登錄紀錄 |
 | 15 | `record_transaction` | 寫入 / 記帳 | 記錄實際消費扣減上限池，或記錄退款以對沖額度 |

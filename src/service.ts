@@ -11,6 +11,8 @@ export { RewardServiceError } from './errors.js';
 
 export interface RemainingCap { ruleId: string; usageKey: string; remaining: Money; }
 
+type MerchantOnboardingInput = Omit<MerchantIdentity, 'canonicalId'> & { canonicalId?: string };
+
 function nowIso(): string { return new Date().toISOString(); }
 function componentId(transactionId: string, ruleId: string, version: string): string { return `${encodeURIComponent(transactionId)}:${encodeURIComponent(ruleId)}:${encodeURIComponent(version)}`; }
 const ULID_ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
@@ -206,6 +208,8 @@ export class RewardService {
     return result;
   }
 
+  listMerchants(): readonly MerchantIdentity[] { return this.store.read().merchants; }
+
   confirmMerchant(canonicalId: string): MerchantIdentity {
     let result!: MerchantIdentity;
     this.store.update((state) => {
@@ -353,9 +357,13 @@ export class RewardService {
     rule: OfferRuleVersion,
     confirmation?: OfferConfirmation,
     capPools?: readonly CapPoolDefinition[],
-  ): { snapshot: OfferSourceSnapshot; rule: OfferRuleVersion } {
+    merchant?: MerchantOnboardingInput,
+  ): { snapshot: OfferSourceSnapshot; rule: OfferRuleVersion; merchant?: MerchantIdentity } {
     snapshot = validateSnapshot(snapshot);
+    if (merchant !== undefined && merchant.status !== undefined && merchant.status !== 'candidate') throw new RewardServiceError('INVALID_INPUT', 'new merchants must start as candidate');
+    const merchantDraft = merchant === undefined ? undefined : validateMerchant({ ...merchant, canonicalId: 'mch_pending', status: 'candidate' });
     rule = validateRule(rule);
+    if (merchantDraft?.provenance.sourceSnapshotId !== undefined && merchantDraft.provenance.sourceSnapshotId !== snapshot.id) throw new RewardServiceError('INVALID_OFFER', 'merchant provenance must reference the offer source snapshot');
     const incomingPools = (capPools ?? []).map((pool) => validateCapPool(pool));
     const conf = confirmation
       ? validateConfirmation(confirmation)
@@ -387,13 +395,24 @@ export class RewardService {
 
     if (!snapshot.id || !snapshot.url || !snapshot.contentHash || !snapshot.parserVersion) throw new RewardServiceError('INVALID_OFFER', 'source snapshot metadata is incomplete');
     if (rule.sourceSnapshotId !== snapshot.id || !rule.id || !rule.cardId) throw new RewardServiceError('INVALID_OFFER', 'rule must reference its source snapshot');
+    let onboardedMerchant: MerchantIdentity | undefined;
+    let storedRule = rule;
     this.store.update((state) => {
+      if (merchantDraft) {
+        if ((rule.match.merchants?.length ?? 0) > 1) throw new RewardServiceError('INVALID_OFFER', 'merchant onboarding accepts one merchant selector per offer');
+        const normalizedName = normalizedMerchantKey(merchantDraft.canonicalNameZhHant);
+        const operatingMarkets = JSON.stringify(merchantDraft.operatingMarkets ?? []);
+        onboardedMerchant = state.merchants.find((item) => normalizedMerchantKey(item.canonicalNameZhHant) === normalizedName && JSON.stringify(item.operatingMarkets ?? []) === operatingMarkets)
+          ?? { ...merchantDraft, canonicalId: merchantId() };
+        storedRule = { ...rule, match: { ...rule.match, merchants: [onboardedMerchant.canonicalId] } };
+        if (storedRule.status === 'active' && onboardedMerchant.status !== 'active') throw new RewardServiceError('INVALID_OFFER', 'merchant-specific active offers require an active merchant; keep the offer candidate until the merchant is confirmed');
+      }
       for (const pool of incomingPools) {
         const existingPool = state.capPools.find((item) => item.id === pool.id);
         if (existingPool && JSON.stringify(existingPool) !== JSON.stringify(pool)) throw new RewardServiceError('INVALID_OFFER', 'cannot modify immutable cap pool');
         if (!existingPool) state.capPools.push(pool);
       }
-      for (const ref of rule.capPoolRefs ?? []) if (!state.capPools.some((pool) => pool.id === ref)) throw new RewardServiceError('INVALID_OFFER', `rule references missing cap pool ${ref}`);
+      for (const ref of storedRule.capPoolRefs ?? []) if (!state.capPools.some((pool) => pool.id === ref)) throw new RewardServiceError('INVALID_OFFER', `rule references missing cap pool ${ref}`);
       const existingSnapshot = state.snapshots.find((item) => item.id === snapshot.id);
       if (existingSnapshot) {
         if (
@@ -405,10 +424,10 @@ export class RewardService {
           throw new RewardServiceError('INVALID_OFFER', 'cannot modify immutable source snapshot');
         }
       }
-      const existingRule = state.rules.find((item) => item.id === rule.id && item.version === rule.version);
+      const existingRule = state.rules.find((item) => item.id === storedRule.id && item.version === storedRule.version);
       if (existingRule) {
         const { confirmation: c1, status: s1, ...r1 } = existingRule;
-        const { confirmation: c2, status: s2, ...r2 } = rule;
+        const { confirmation: c2, status: s2, ...r2 } = storedRule;
         if (JSON.stringify(r1) !== JSON.stringify(r2)) {
           throw new RewardServiceError('INVALID_OFFER', 'cannot modify immutable rule version');
         }
@@ -416,11 +435,12 @@ export class RewardService {
       const snapshotIndex = state.snapshots.findIndex((item) => item.id === snapshot.id);
       if (snapshotIndex >= 0) state.snapshots[snapshotIndex] = snapshot;
       else state.snapshots.push(snapshot);
-      const ruleIndex = state.rules.findIndex((item) => item.id === rule.id);
-      if (ruleIndex >= 0) state.rules[ruleIndex] = rule;
-      else state.rules.push(rule);
+      const ruleIndex = state.rules.findIndex((item) => item.id === storedRule.id);
+      if (ruleIndex >= 0) state.rules[ruleIndex] = storedRule;
+      else state.rules.push(storedRule);
+      if (onboardedMerchant && !state.merchants.some((item) => item.canonicalId === onboardedMerchant!.canonicalId)) state.merchants.push(onboardedMerchant);
     });
-    return { snapshot, rule };
+    return { snapshot, rule: storedRule, ...(onboardedMerchant ? { merchant: onboardedMerchant } : {}) };
   }
 
   confirmOffer(ruleId: string, confirmation: OfferConfirmation): OfferRuleVersion {

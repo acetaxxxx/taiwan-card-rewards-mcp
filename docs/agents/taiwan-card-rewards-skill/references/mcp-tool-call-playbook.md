@@ -188,6 +188,7 @@
 ```
 
 ### 2.2 `upsert_offer` (優惠快照與規則寫入)
+- **商家欄位**：若 `resolve_merchant` 已確認商家，將 `mch_<ULID>` 放在 `rule.match.merchants`。若商家尚未收錄但官方證據足夠，則在同一次呼叫加入 `merchant`（`canonicalNameZhHant`、`canonicalNameLocale: "zh-Hant-TW"`、可選 aliases/markets/MCC/channels、`status: "candidate"`、`provenance`）；MCP 會生成並綁定 canonical ID，且與 candidate rule 原子保存。不要傳入自行產生的 canonical ID，也不要用 candidate merchant 直接寫 active rule。
 - **呼叫範例**：
 ```json
 {

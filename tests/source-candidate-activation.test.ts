@@ -150,4 +150,39 @@ describe('Ticket 04 & Contract Convergence: 10 tools and Offer Confirmation in u
     expect(recs[0].status).toBe('ok');
     expect(recs[0].grossReward?.amountMinor).toBe(300);
   });
+
+  it('atomically onboards a merchant identity for merchant-specific offers', () => {
+    const result = service.upsertOffer(validSnapshot, { ...candidateRule, match: {} }, undefined, undefined, {
+      canonicalNameZhHant: '測試商家', canonicalNameLocale: 'zh-Hant-TW', status: 'candidate',
+      provenance: { sourceUrl: validSnapshot.url, version: '1', updatedAt: validSnapshot.fetchedAt },
+      canonicalId: 'caller-supplied-id',
+    });
+    expect(result.merchant?.canonicalId).toMatch(/^mch_[0-9A-HJKMNP-TV-Z]{26}$/);
+    expect(result.rule.match.merchants).toEqual([result.merchant?.canonicalId]);
+    expect(result.merchant?.status).toBe('candidate');
+    expect(service.listMerchants()).toHaveLength(1);
+
+    const retry = service.upsertOffer(validSnapshot, { ...candidateRule, match: {} }, undefined, undefined, {
+      canonicalNameZhHant: '測試商家', canonicalNameLocale: 'zh-Hant-TW', status: 'candidate',
+      provenance: { sourceUrl: validSnapshot.url, version: '1', updatedAt: validSnapshot.fetchedAt },
+    });
+    expect(retry.merchant?.canonicalId).toBe(result.merchant?.canonicalId);
+    expect(service.listMerchants()).toHaveLength(1);
+  });
+
+  it('keeps an atomically onboarded merchant-specific offer fail-closed until the merchant is confirmed', () => {
+    expect(() => service.upsertOffer(validSnapshot, { ...candidateRule, status: 'active', match: {} }, undefined, undefined, {
+      canonicalNameZhHant: '待確認商家', canonicalNameLocale: 'zh-Hant-TW', status: 'candidate',
+      provenance: { sourceUrl: validSnapshot.url, version: '1', updatedAt: validSnapshot.fetchedAt },
+    })).toThrow(/active merchant|candidate/i);
+    expect(service.listMerchants()).toHaveLength(0);
+  });
+
+  it('rejects merchant provenance that is detached from the offer snapshot', () => {
+    expect(() => service.upsertOffer(validSnapshot, candidateRule, undefined, undefined, {
+      canonicalNameZhHant: '來源不一致商家', canonicalNameLocale: 'zh-Hant-TW', status: 'candidate',
+      provenance: { sourceSnapshotId: 'other-snapshot', version: '1', updatedAt: validSnapshot.fetchedAt },
+    })).toThrow(/source snapshot/i);
+    expect(service.listMerchants()).toHaveLength(0);
+  });
 });
