@@ -92,7 +92,7 @@ export interface MerchantIdentity {
 ```
 
 ### 3.2 Canonical ID 產生機制
-1. **MCP 系統權威生成**：`canonicalId` 由 MCP 在受控的 `register_merchant` / catalog ingestion 流程中生成不可變的 `mch_<ULID>`（例如 `mch_01JABC123XYZ45678901234567`）。
+1. **MCP 系統權威生成**：`canonicalId` 由 MCP 在受控的 catalog ingestion 流程中生成不可變的 `mch_<ULID>`（例如 `mch_01JABC123XYZ45678901234567`）。現行公開合約可透過 `upsert_offer.merchant` 與候選 rule 原子建立；不得由 caller 傳入或覆寫 ID。
 2. **禁止 LLM 自行生成**：LLM Agent 僅能作為候選提案方（Proposer），**嚴禁自行發明、拼接或宣告 Canonical ID**（例如禁止使用英文名稱拼接如 `mch_pxmart_tw` 作為 ID）。
 3. **跨發卡行一致性**：同一實體在不同發卡行、信用卡或優惠規則中均引用同一 `canonicalId`。
 

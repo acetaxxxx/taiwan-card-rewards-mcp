@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "name": "taiwan-card-rewards-local-adapter-manifest",
+  "version": "1.0.0",
+  "description": "Standard manifest metadata required for all derived local adapters of taiwan-card-rewards-skill",
+  "metadata": {
+    "adapterName": "taiwan-card-rewards-custom-adapter",
+    "sourceVersion": "0.9.0",
+    "sourceHash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "mcpContractVersion": "0.9.0",
+    "mcpToolsCount": 15,
+    "lastVerifiedAt": "2026-09-06T12:00:00Z",
+    "canonicalLink": "docs/agents/taiwan-card-rewards-skill/SKILL.md",
+    "invariants": [
+      "Zero Network inside MCP Server",
+      "Zero PAN, CVV, OTP, or Password transmission",
+      "Zero Fuzzy auto-accept",
+      "Zero 1:1 FX fallback",
+      "Deterministic MCP calculations authority",
+      "Non-blocking general domestic base rules"
+    ]
+  }
+}

@@ -278,6 +278,25 @@ export function evaluateOffer(
   const inputErrors = invalidActual(tx);
   if (inputErrors.length) return { ...base, status: 'unknown', unknownReasons: inputErrors };
   if (rule.cardId !== tx.cardId) return base;
+  if (tx.routeId !== undefined) {
+    if (rule.routeId !== undefined && tx.routeId !== rule.routeId) return base;
+    const route = context.paymentRoutes?.find((candidate) => candidate.id === tx.routeId);
+    if (!route) return { ...base, status: 'unknown', ruleId: rule.id, unknownReasons: ['payment route is not registered'], diagnostics: [diagnostic('missing_required_fact', 'transaction.routeId', ['registered payment route'], 'register_payment_route')] };
+    const evaluatedAt = Date.parse(evaluationNow);
+    const startsInFuture = route.validFrom !== undefined && Date.parse(route.validFrom) > evaluatedAt;
+    const ended = route.validTo !== undefined && Date.parse(route.validTo) < evaluatedAt;
+    if (route.status !== 'active' || startsInFuture || ended) {
+      const stale = route.status === 'stale' || startsInFuture || ended;
+      return { ...base, status: stale ? 'stale' : 'needs_review', ruleId: rule.id, unknownReasons: [`payment route is ${route.status}${startsInFuture || ended ? ' outside its validity window' : ''}`], diagnostics: [diagnostic(stale ? 'stale_rule' : 'needs_review', 'transaction.routeId', ['active current payment route'], 'refresh_or_resolve_payment_route')] };
+    }
+    if (route.funding.kind === 'credit_card' && route.funding.cardId !== undefined && route.funding.cardId !== tx.cardId) return base;
+    if (rule.componentKind === 'card_issuer') {
+      if (route.funding.kind !== 'credit_card') return base;
+      if (route.funding.cardId === undefined) return { ...base, status: 'unknown', ruleId: rule.id, unknownReasons: ['credit-card funding card identity is not registered'], diagnostics: [diagnostic('missing_required_fact', 'paymentRoute.funding.cardId', ['registered card identity'], 'register_payment_route')] };
+    }
+  } else if (rule.routeId !== undefined) {
+    return base;
+  }
   if (rule.status !== 'active') {
     return { ...base, status: rule.status === 'stale' ? 'stale' : 'needs_review', ruleId: rule.id, unknownReasons: [`rule status is ${rule.status}`], diagnostics: [diagnostic(rule.status === 'stale' ? 'stale_rule' : 'needs_review', 'rule.status', ['rule confirmation'], 'refresh_or_confirm_offer')] };
   }

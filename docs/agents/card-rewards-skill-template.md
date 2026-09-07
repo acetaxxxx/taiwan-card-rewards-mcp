@@ -14,40 +14,45 @@ description: Help users compare and record Taiwan card rewards through a pinned 
 ## Boundary
 
 Use the MCP for calculations, source/rule provenance, caps, ledger writes, and
-refunds. Use this skill for questions, confirmation, and presentation.
+refunds. Use this skill for questions, confirmation, external research, and presentation.
 
 ## Startup
 
-1. Connect to the host-provided pinned MCP package (release `0.8.0` or a
+1. Connect to the host-provided pinned MCP package (release `0.9.0` or a
    later reviewed release).
-2. Validate handshake, server identity, all 12 public tools, and each nested
-   schema including required fields, bounds, enums, and closed object shapes.
+2. Validate handshake, server identity, all 15 public tools (including
+   `recommendation_preflight`), and each nested schema including required fields,
+   bounds, enums, and closed object shapes.
 3. Stop with an unavailable message if validation fails.
 
-## Read flow
+## Pre-flight and Read flow
 
 Research official bank/network terms for rounding, registration, stacking, and caps before creating rules. Keep third-party findings explicitly as candidates and ask the user to resolve uncertainty.
 
 Refresh checklist: search issuer card/campaign/registration pages, app notices, network, wallet, merchant, and official terms/FAQ/PDF sources. Capture period repetition, quota/first-N, open/close/effective dates, eligibility, reward unit/rounding/step, `capPoolRefs`, and additive/replace/best_of/exclusive/prerequisite policy. Community/blog/forum/video/user reports are lead-only evidence; retain provenance and seek official corroboration. Ask when registration/plan selection happened, expose confirmed benefits as `availableNow` and unmet actions as `availableAfterActions`, and ask about a Backfilled Purchase when a past transaction was omitted.
 
-1. Collect only the facts needed for this request.
-2. Load cards and relevant enrollment/plan state.
-3. Calculate or rank with source snapshot, rule version, effective dates, cap,
-   currency, and FX context.
-4. Show `ok`, `unknown`, `stale`, `needs_review`, or `no_match` explicitly.
-5. Ask the user about missing facts instead of guessing.
+1. Execute `recommendation_preflight` with current transaction context.
+2. Route on `requiredActions`:
+   - `clarify_merchant` / `choose_market`: invoke `resolve_merchant` and present candidates to user.
+   - `refresh_external_data` (`fx_rate`): query official rate, quantize to PPM, and supply `FxSnapshot`.
+   - `research_evidence` / `refresh_offer`: research official sources, obtain `OfferConfirmation`, and submit via `upsert_offer`.
+   - `register_card`: onboard card descriptor via `register_card`.
+   - `review_conflict`: prompt user to arbitrate contradictory terms.
+3. Rerun `recommendation_preflight` until `ready == true`.
+4. Execute `recommend` (with configurable bounded limit and cursor pagination).
+5. Display ranked results with component breakdown, cap consumption, and explainable status.
 
 ## Write flow
 
 1. Summarize the exact mutation, source/rule version, scope, and consequences.
 2. Obtain affirmative user confirmation immediately before the write.
-3. Use an idempotency key for actual transactions and link refunds to a
-   recorded purchase.
+3. Use an idempotency key for actual transactions (`record_transaction`) and link refunds to a recorded purchase.
 4. Re-display the MCP result and any warnings after the write.
 
 ## Safety
 
 Keep identity and data scope host-bound. Forward no credentials or sensitive
-payment fields. On MCP failure, stop the operation; do not create fallback
-calculation or persistence code.
+payment fields (PAN, CVV, OTP, passwords). On MCP failure, stop the operation;
+do not create fallback calculation or persistence code. Never guess missing facts
+or assume 1:1 FX fallback.
 ```
