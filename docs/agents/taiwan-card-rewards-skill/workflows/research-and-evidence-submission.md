@@ -25,7 +25,11 @@
 
 ## 3. 提交促銷規則至 MCP (`upsert_offer`)
 
-查核完成後，組裝符合 `src/mcp-contract.ts` 之規範 payload 提交：
+在提交前先完成 **Merchant Identity Gate**：對條款中的每一個特定商家呼叫 `resolve_merchant`，把已確認的 `merchant.canonicalId` 放入 `rule.match.merchants`。`ambiguous` 必須向使用者確認；`unresolved` 必須保留為候選或改用其他已證實 selector。不要把 raw merchant name 或自行產生的 `mch_<ULID>` 寫入 active rule。
+
+目前公開 MCP 合約的 `resolve_merchant` 是唯讀，沒有 `register_merchant`；因此 Agent 不能在這個步驟虛構「建立商家」的工具結果。若產品要支援「建立商家與 rule 的原子操作」，需另行新增 contract seam、持久化交易與 TDD，完成前沿用既有 merchant catalog。
+
+Merchant gate 通過後，組裝符合 `src/mcp-contract.ts` 之規範 payload 提交：
 
 ```json
 {

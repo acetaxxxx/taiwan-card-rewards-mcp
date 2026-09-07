@@ -6,6 +6,7 @@ export const mcpInstructions = [
   'Call list_cards before recommendations; use register_card for card descriptors only.',
   'The Agent or UI must obtain and parse bank pages, images, or PDFs before calling this server. Treat user/OCR-derived offers as unverified candidates.',
   'Store candidate offers with upsert_offer. Activate only after explicit user confirmation by passing a valid confirmation object in the same call.',
+  'Before storing a merchant-specific offer, call resolve_merchant and put only a confirmed canonical mch_<ULID> in rule.match.merchants; ask the user on ambiguity, keep unresolved offers as candidates or use another verified selector, and never invent merchant IDs. The current public surface has no register_merchant tool.',
   'Use recommend, calculate_reward, or rank_cards for planned evaluation; planned calls do not consume caps.',
   'Run recommendation_preflight before recommend when facts may be missing, stale, or conflicting; it is read-only and returns actionable recovery steps.',
   'Use record_transaction with a stable idempotencyKey for actual purchases and linked refunds. Never send PAN, CVV, OTP, passwords, tokens, or user_id.',

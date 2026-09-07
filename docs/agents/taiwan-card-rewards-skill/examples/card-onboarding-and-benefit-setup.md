@@ -73,7 +73,58 @@ Agent 回應：「收到！為您登記這兩張卡片。請確認以下安全�
 
 ---
 
-## Step 4: 登記國泰 CUBE 權益方案 (`upsert_user_benefit_status`)
+## Step 4: 建立／確認優惠規則所需的商家實體
+
+只要優惠條款對特定商家、商家集團或支付通路有額外條件，Agent 必須先完成商家 identity gate，再建立 rule。不要把人類可讀店名直接放進 `rule.match.merchants`。
+
+### 4.1 先解析每一個條款中的商家
+
+例如官方條款提到「全聯福利中心」：
+
+```json
+{
+  "rawQuery": "全聯福利中心",
+  "country": "TW",
+  "mcc": "5411",
+  "channel": "in_store"
+}
+```
+
+呼叫 `resolve_merchant` 後，只有 `resolutionStatus: "confirmed"` 才能繼續：
+
+```json
+{
+  "resolutionStatus": "confirmed",
+  "merchant": {
+    "canonicalId": "mch_01J8Y7A9B0C1D2E3F4G5H6J7K8",
+    "canonicalNameZhHant": "全聯福利中心",
+    "operatingMarkets": ["TW"],
+    "mccs": ["5411"]
+  }
+}
+```
+
+建立 `upsert_offer` payload 時，使用 `canonicalId`：
+
+```json
+{
+  "match": {
+    "merchants": ["mch_01J8Y7A9B0C1D2E3F4G5H6J7K8"],
+    "countries": ["TW"],
+    "channels": ["in_store"]
+  }
+}
+```
+
+### 4.2 歧義與未收錄商家的處理
+
+- `ambiguous`：列出候選商家，請使用者確認市場／分店／業態，再重新呼叫 `resolve_merchant`。
+- `unresolved`：保留官方原文與候選 rule 為 `candidate`，或改用已被條款明確支持的 MCC／國家／通路條件；不要自行產生 `mch_<ULID>`。
+- 目前公開 MCP 合約中沒有 `register_merchant` 工具；`resolve_merchant` 是唯讀查詢。Agent 不得宣稱已建立一個不存在的商家，也不得把 raw name 當成 canonical ID。若需要由 Agent 直接新增商家目錄，必須另行設計 atomic merchant-onboarding seam，再加入合約與測試。
+
+**完成條件**：每一個 `rule.match.merchants` 值都必須來自已確認的 `canonicalId`，或該 rule 不使用 merchant selector；未達成前不可將 merchant-specific rule 寫成 `active`。
+
+## Step 5: 登記國泰 CUBE 權益方案 (`upsert_user_benefit_status`)
 
 ```json
 {
@@ -102,6 +153,6 @@ Agent 回應：「收到！為您登記這兩張卡片。請確認以下安全�
 
 ---
 
-## Step 5: 完成回報
+## Step 6: 完成回報
 
-Agent 回覆：「已成功為您登記 **國泰世華 CUBE 卡**（玩數位方案）與 **台新 @GoGo 卡**。未來試算與推薦將優先以您的持卡清冊為基準！」
+Agent 回覆：「已成功為您登記 **國泰世華 CUBE 卡**（玩數位方案）與 **台新 @GoGo 卡**。商家優惠將先通過 canonical merchant identity，再寫入規則；未確認的商家不會被當成有效優惠。未來試算與推薦將優先以您的持卡清冊與已確認商家為基準！」

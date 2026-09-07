@@ -213,8 +213,9 @@
     "validTo": "2026-12-31T23:59:59Z",
     "settlementCurrency": "TWD",
     "match": {
-      "merchants": ["momo購物網", "PChome 24h購物", "蝦皮購物"],
-      "channels": ["line_pay", "jkopay"]
+      "merchants": ["mch_01J8Y7A9B0C1D2E3F4G5H6J7K8"],
+      "channels": ["online"],
+      "paymentMethods": ["line_pay", "jkopay"]
     },
     "reward": {
       "kind": "point",
