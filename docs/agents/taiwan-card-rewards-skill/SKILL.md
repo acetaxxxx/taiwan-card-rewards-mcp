@@ -44,13 +44,16 @@ Onboarding SOP      Pre-flight SOP              Research SOP        Ledger SOP
 呼叫 register_card         ▼                    呼叫 upsert_offer
 與 upsert_user_     呼叫 recommend 輸出         提交事實快照
 benefit_status      最佳推薦排序
+       │
+       └─ 使用者要求查優惠時：先走官方研究、resolve_merchant，
+          再用 canonical merchant ID 或 atomic candidate merchant 寫入 rule
 ```
 
 ### 意圖對應表 (Intent Mapping)
 
 | 使用者意圖 | 觸發情境範例 | 導向作業程序 / 參考文件 |
 |---|---|---|
-| **初次持卡與方案登記** | 「我有富邦 J 卡和國泰 CUBE 卡」、「幫我設定 CUBE 卡玩數位」 | ➡️ [`workflows/card-onboarding-and-benefit-enrollment.md`](workflows/card-onboarding-and-benefit-enrollment.md) |
+| **初次持卡與方案登記** | 「我有富邦 J 卡和國泰 CUBE 卡」、「幫我設定 CUBE 卡玩數位」 | ➡️ [`workflows/card-onboarding-and-benefit-enrollment.md`](workflows/card-onboarding-and-benefit-enrollment.md)；若使用者要求查優惠，沿該流程的 merchant/research 分支 |
 | **消費選卡推薦** | 「我在 momo 買 3,000 元刷哪張卡最好？」、「這筆機票要用哪張卡刷？」 | ➡️ [`workflows/preflight-and-required-actions.md`](workflows/preflight-and-required-actions.md) |
 | **商家消歧義與辨識** | 「在 Uber 刷 500 元」、「高鐵 TGo 購票」 | ➡️ [`workflows/merchant-resolution-and-disambiguation.md`](workflows/merchant-resolution-and-disambiguation.md) |
 | **優惠發現與完整分頁** | 「查一下這張卡的所有有效電商活動」 | ➡️ [`workflows/offer-discovery-and-pagination.md`](workflows/offer-discovery-and-pagination.md) |
@@ -73,7 +76,7 @@ benefit_status      最佳推薦排序
   - [`references/lifecycle-and-privacy.md`](references/lifecycle-and-privacy.md)：實體識別碼（`mch_`, `ev_`, `fact_`, `snap_`, `tx_`）生命週期與隱私脫敏守則。
 
 - ⚡ **標準作業流程 (Workflows)**
-  - [`workflows/card-onboarding-and-benefit-enrollment.md`](workflows/card-onboarding-and-benefit-enrollment.md)：初次持卡安全登錄與動態權益設定 SOP。
+  - [`workflows/card-onboarding-and-benefit-enrollment.md`](workflows/card-onboarding-and-benefit-enrollment.md)：初次持卡安全登錄、優惠研究分流、merchant identity gate 與動態權益設定 SOP。
   - [`workflows/preflight-and-required-actions.md`](workflows/preflight-and-required-actions.md)：Pre-flight 呼叫、歧義恢復循環與推薦輸出 SOP。
   - [`workflows/merchant-resolution-and-disambiguation.md`](workflows/merchant-resolution-and-disambiguation.md)：商家實體確定性消歧義與候選比對 SOP。
   - [`workflows/offer-discovery-and-pagination.md`](workflows/offer-discovery-and-pagination.md)：完整分頁遍歷與有界優惠發現 SOP。
