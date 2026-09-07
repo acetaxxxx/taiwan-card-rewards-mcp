@@ -4,10 +4,10 @@
 
 ---
 
-## 1. 唯讀查詢與診斷類工具 (Read-Only & Diagnostic)
+## 1. 唯讀查詢與診斷類工具 (Read-Only & Evaluation, 10 項)
 
 ### 1.1 `recommendation_preflight`
-- **用途**：推薦前置檢查，診斷是否缺少匯率快照、商家歧義或過期條款。
+- **用途**：推薦前置檢查，診斷是否缺少匯率快照、商家歧義或過期條款（唯讀，不變更狀態）。
 - **呼叫範例**：
 ```json
 {
@@ -20,7 +20,7 @@
       "currency": "TWD"
     },
     "merchant": "momo購物網",
-    "channel": "direct_card"
+    "channel": "online"
   }
 }
 ```
@@ -47,7 +47,8 @@
       "amountMinor": 300000,
       "currency": "TWD"
     },
-    "merchant": "momo購物網"
+    "merchant": "momo購物網",
+    "channel": "online"
   },
   "limit": 5,
   "page": 1,
@@ -55,87 +56,9 @@
 }
 ```
 
-### 1.3 `resolve_merchant`
-- **用途**：精確比對商家名稱，回傳權威商家 ID (`mch_<ULID>`) 與分類。
+### 1.3 `calculate_reward`
+- **用途**：純數學試算單一促銷規則於特定交易之回饋，不讀寫持久化帳本。
 - **呼叫範例**：
-```json
-{
-  "rawQuery": "Uber Eats",
-  "country": "TW",
-  "market": "food_delivery"
-}
-```
-- **預期回應**：
-```json
-{
-  "canonicalId": "mch_01J8Y7A9B0C1D2E3F4G5H6J7K8",
-  "canonicalNameZhHant": "Uber Eats (優食外送)",
-  "market": "food_delivery",
-  "country": "TW",
-  "mcc": "5812",
-  "status": "exact_match"
-}
-```
-
-### 1.4 `search_active_offers`
-- **用途**：分頁搜尋有效優惠條款。
-- **呼叫範例**：
-```json
-{
-  "cardId": "fubon_j",
-  "limit": 10,
-  "page": 1,
-  "projection": "summary"
-}
-```
-- **預期回應**：
-```json
-{
-  "offers": [
-    { "ruleId": "rule_fubon_j_domestic_base", "rewardRateBps": 10000, "status": "active" },
-    { "ruleId": "rule_fubon_j_japan_korea", "rewardRateBps": 30000, "status": "active" }
-  ],
-  "page": 1,
-  "limit": 10,
-  "total": 2,
-  "hasMore": false
-}
-```
-
-### 1.5 `list_cards`
-- **呼叫範例**：
-```json
-{
-  "limit": 20,
-  "page": 1,
-  "projection": "summary"
-}
-```
-
-### 1.6 `remaining_caps`
-- **呼叫範例**：
-```json
-{
-  "cardId": "cathay_cube",
-  "asOf": "2026-09-06T12:00:00Z",
-  "limit": 10,
-  "page": 1
-}
-```
-
-### 1.7 `get_user_benefit_status`
-- **呼叫範例**：
-```json
-{
-  "kind": "card_switch",
-  "cardId": "cathay_cube",
-  "projection": "detail"
-}
-```
-
-### 1.8 `calculate_reward` & `rank_cards`
-- **用途**：純數學試算（不讀寫持久化帳本）。
-- **呼叫範例 (`calculate_reward`)**：
 ```json
 {
   "rule": {
@@ -146,10 +69,14 @@
     "status": "active",
     "validFrom": "2026-01-01T00:00:00Z",
     "settlementCurrency": "TWD",
-    "match": { "countries": ["TW"] },
+    "match": {
+      "countries": ["TW"],
+      "channels": ["online"]
+    },
     "reward": {
-      "kind": "cashback",
-      "rateBps": 20000,
+      "kind": "percentage",
+      "code": "twd_cashback",
+      "rateBps": 200,
       "roundingMode": "floor"
     }
   },
@@ -166,11 +93,206 @@
 }
 ```
 
+### 1.4 `rank_cards`
+- **用途**：傳入多張卡片與規則清單，進行純計算之 Deterministic 排序，回傳最高前五名。
+- **呼叫範例**：
+```json
+{
+  "cards": [
+    {
+      "id": "cathay_cube",
+      "issuer": "國泰世華銀行",
+      "productName": "CUBE 卡",
+      "network": "Mastercard",
+      "last4": "6688",
+      "country": "TW",
+      "billingCycleDay": 15,
+      "timezone": "Asia/Taipei"
+    },
+    {
+      "id": "fubon_j",
+      "issuer": "台北富邦銀行",
+      "productName": "富邦 J 卡",
+      "network": "JCB",
+      "last4": "1234",
+      "country": "TW",
+      "billingCycleDay": 7,
+      "timezone": "Asia/Taipei"
+    }
+  ],
+  "rules": [
+    {
+      "id": "rule_cathay_cube_digital",
+      "cardId": "cathay_cube",
+      "version": "2026.09.01",
+      "sourceSnapshotId": "snap_cube_001",
+      "status": "active",
+      "validFrom": "2026-01-01T00:00:00Z",
+      "settlementCurrency": "TWD",
+      "match": { "countries": ["TW"], "channels": ["online"] },
+      "reward": {
+        "kind": "percentage",
+        "code": "cube_point",
+        "rateBps": 300,
+        "roundingMode": "floor"
+      }
+    },
+    {
+      "id": "rule_fubon_j_domestic_base",
+      "cardId": "fubon_j",
+      "version": "2026.09.01",
+      "sourceSnapshotId": "snap_fubon_001",
+      "status": "active",
+      "validFrom": "2026-01-01T00:00:00Z",
+      "settlementCurrency": "TWD",
+      "match": { "countries": ["TW"] },
+      "reward": {
+        "kind": "percentage",
+        "code": "line_points",
+        "rateBps": 100,
+        "roundingMode": "floor"
+      }
+    }
+  ],
+  "transaction": {
+    "cardId": "cathay_cube",
+    "kind": "purchase",
+    "mode": "planned",
+    "occurredAt": "2026-09-06T15:00:00+08:00",
+    "amount": { "amountMinor": 300000, "currency": "TWD" },
+    "channel": "online"
+  },
+  "context": {
+    "now": "2026-09-06T15:00:00+08:00"
+  }
+}
+```
+
+### 1.5 `resolve_merchant`
+- **用途**：精確比對商家名稱，回傳權威商家 ID (`mch_<ULID>`) 與消歧義狀態（`confirmed` | `ambiguous` | `unresolved`）。
+- **呼叫範例**：
+```json
+{
+  "rawQuery": "Uber Eats",
+  "country": "TW",
+  "market": "food_delivery",
+  "mcc": "5812",
+  "channel": "online"
+}
+```
+- **預期回應**：
+```json
+{
+  "resolutionStatus": "confirmed",
+  "merchant": {
+    "canonicalId": "mch_01J8Y7A9B0C1D2E3F4G5H6J7K8",
+    "canonicalNameZhHant": "Uber Eats (優食外送)",
+    "canonicalNameLocale": "zh-Hant-TW",
+    "operatingMarkets": ["TW"],
+    "mccs": ["5812"],
+    "channels": ["online"],
+    "status": "active"
+  }
+}
+```
+
+### 1.6 `search_active_offers`
+- **用途**：分頁搜尋有效、已驗證之促銷條款（唯讀，不啟動規則）。回傳結構包含 `offers` 清單與 `pageInfo` 分頁元資料。
+- **呼叫範例**：
+```json
+{
+  "cardId": "fubon_j",
+  "country": "TW",
+  "limit": 10,
+  "page": 1,
+  "projection": "summary"
+}
+```
+- **預期回應**：
+```json
+{
+  "offers": [
+    {
+      "id": "rule_fubon_j_domestic_base",
+      "cardId": "fubon_j",
+      "version": "2026.09.01",
+      "sourceSnapshotId": "snap_fubon_j_001",
+      "status": "active",
+      "validFrom": "2026-01-01T00:00:00Z",
+      "settlementCurrency": "TWD",
+      "match": {
+        "countries": ["TW"],
+        "channels": ["in_store", "online"]
+      },
+      "reward": {
+        "kind": "percentage",
+        "code": "line_points",
+        "rateBps": 100,
+        "roundingMode": "floor"
+      }
+    }
+  ],
+  "pageInfo": {
+    "page": 1,
+    "limit": 10,
+    "total": 1,
+    "totalPages": 1,
+    "hasMore": false
+  }
+}
+```
+
+### 1.7 `list_cards`
+- **用途**：分頁列出使用者已登記之卡片清冊。
+- **呼叫範例**：
+```json
+{
+  "limit": 20,
+  "page": 1,
+  "projection": "summary"
+}
+```
+
+### 1.8 `remaining_caps`
+- **用途**：查詢指定卡片在特定時間點之剩餘回饋上限池額度。
+- **呼叫範例**：
+```json
+{
+  "cardId": "cathay_cube",
+  "asOf": "2026-09-06T12:00:00Z",
+  "limit": 10,
+  "page": 1
+}
+```
+
+### 1.9 `get_user_benefit_status`
+- **用途**：查詢使用者卡片目前生效之權益方案（如 CUBE 卡玩數位）或活動登錄狀態。
+- **呼叫範例**：
+```json
+{
+  "kind": "card_switch",
+  "cardId": "cathay_cube",
+  "projection": "detail"
+}
+```
+
+### 1.10 `list_payment_routes`
+- **用途**：分頁查詢使用者已登記的通用支付路徑拓撲。
+- **呼叫範例**：
+```json
+{
+  "limit": 10,
+  "page": 1,
+  "projection": "summary"
+}
+```
+
 ---
 
-## 2. 狀態寫入與記帳類工具 (State Mutations)
+## 2. 狀態寫入與記帳類工具 (State Mutations & Ledger, 5 項)
 
 ### 2.1 `register_card`
+- **用途**：登記卡片安全描述元（嚴禁完整卡號 PAN、CVV、OTP 與網銀憑證）。
 - **呼叫範例**：
 ```json
 {
@@ -187,9 +309,12 @@
 }
 ```
 
-### 2.2 `upsert_offer` (優惠快照與規則寫入)
-- **商家欄位**：若 `resolve_merchant` 已確認商家，將 `mch_<ULID>` 放在 `rule.match.merchants`。若商家尚未收錄但官方證據足夠，則在同一次呼叫加入 `merchant`（`canonicalNameZhHant`、`canonicalNameLocale: "zh-Hant-TW"`、可選 aliases/markets/MCC/channels、`status: "candidate"`、`provenance`）；MCP 會生成並綁定 canonical ID，且與 candidate rule 原子保存。不要傳入自行產生的 canonical ID，也不要用 candidate merchant 直接寫 active rule。
-- **呼叫範例**：
+### 2.2 `upsert_offer` (優惠快照、規則與候選商家寫入)
+- **商家處理原則**：
+  1. 若 `resolve_merchant` 已確認商家，將回傳之 `merchant.canonicalId` (`mch_<ULID>`) 放入 `rule.match.merchants`。嚴禁自行編造 `mch_<ULID>`。
+  2. 若商家尚未收錄但官方條款已具備充分資料，在同一次呼叫中傳入 `merchant` 物件（`status: "candidate"`）；MCP 會自動生成權威 ID 並原子綁定，此時 rule 必須維持 `status: "candidate"`。
+  3. 若規則標記為 `status: "active"`，必須於同一呼叫傳入完整的 `confirmation` 物件（含 `confirmedAt`、`confirmedBy`、`sourceReference`、`offerPeriod`、`rewardUnit`）。
+- **呼叫範例 (附帶 Confirmation 之 Active 規則寫入)**：
 ```json
 {
   "snapshot": {
@@ -200,7 +325,7 @@
     "parserVersion": "1.0.0",
     "validFrom": "2026-01-01T00:00:00Z",
     "validTo": "2026-12-31T23:59:59Z",
-    "excerpt": "精選網購與行動支付享加碼 3.8% 回饋",
+    "excerpt": "精選網購與行動支付享加碼 3.8% 回饋，需綁定 Richart 自動扣繳，每期帳單加碼上限 1,000 點。",
     "verified": true,
     "sourceType": "official"
   },
@@ -215,16 +340,29 @@
     "settlementCurrency": "TWD",
     "match": {
       "merchants": ["mch_01J8Y7A9B0C1D2E3F4G5H6J7K8"],
+      "countries": ["TW"],
       "channels": ["online"],
       "paymentMethods": ["line_pay", "jkopay"]
     },
     "reward": {
-      "kind": "point",
+      "kind": "percentage",
       "code": "taishin_point",
-      "rateBps": 38000,
+      "rateBps": 380,
       "roundingMode": "floor"
     },
     "capPoolRefs": ["cap_taishin_gogo_monthly_online"]
+  },
+  "confirmation": {
+    "confirmedAt": "2026-09-06T08:05:00Z",
+    "confirmedBy": "user_explicit_statement",
+    "sourceReference": "https://www.taishinbank.com.tw/TSB/personal/credit/gogo-offer/",
+    "offerPeriod": {
+      "validFrom": "2026-01-01T00:00:00Z",
+      "validTo": "2026-12-31T23:59:59Z"
+    },
+    "rewardUnit": "TWD",
+    "rewardConditionsSummary": "使用數位帳單並以 Richart 帳戶自動扣繳",
+    "capSummary": "每期帳單加碼上限 1,000 點"
   },
   "capPools": [
     {
@@ -240,21 +378,8 @@
 }
 ```
 
-
-### 1.9 `list_payment_routes`
-- **用途**：分頁查詢使用者已登記的支付路徑。
-- **呼叫範例**：
-```json
-{
-  "limit": 10,
-  "page": 1,
-  "projection": "summary"
-}
-```
-
-### 2.4 `upsert_payment_route` (支付路徑拓撲與扣款設定)
+### 2.3 `upsert_payment_route` (支付路徑拓撲與扣款設定)
 - **用途**：登記或更新一筆支付路徑拓撲與扣款工具（無敏感金融資料）。
-- **操作守則**：Agent 必須先 `list_payment_routes` 去重，再用官方證據建立 `candidate`；只有使用者明確確認後才可寫入 `active`。PayPay、街口、台新 Pay+ 等都只是開放識別碼，不應新增品牌專用工具。
 - **呼叫範例**：
 ```json
 {
@@ -289,10 +414,35 @@
 }
 ```
 
-`candidate` 路徑不能直接產生回饋；Agent 應先補齊證據並向使用者確認 funding／費用／匯率，再以相同 idempotency key 更新為 `active`。若官方資料顯示是「信用卡儲值 → wallet balance debit」，就照實記錄兩段式語意，不能標成 direct card rail。
+### 2.4 `upsert_user_benefit_status` (動態權益與登錄狀態寫入)
+- **用途**：記錄或調整經使用者確認已完成之卡片方案切換（如 CUBE 卡玩數位）或活動登錄。
+- **呼叫範例**：
+```json
+{
+  "input": {
+    "kind": "card_switch",
+    "action": "record",
+    "cardId": "cathay_cube",
+    "timezone": "Asia/Taipei",
+    "completedAt": "2026-09-07T05:15:00+08:00",
+    "effectiveFrom": "2026-09-07T00:00:00+08:00",
+    "benefit": "digital_play",
+    "sourceUrl": "https://www.cathaybk.com.tw/cathaybk/personal/product/credit-card/cards/cube/",
+    "sourceSnapshotAt": "2026-09-07T00:00:00Z",
+    "ruleVersion": "2026.09.01",
+    "confirmation": {
+      "confirmedBy": "user_explicit_statement",
+      "confirmedAtUtc": "2026-09-07T05:15:00Z",
+      "completed": true
+    },
+    "idempotencyKey": "benefit_cube_switch_20260907_001"
+  }
+}
+```
 
-### 2.3 `record_transaction` (實際刷卡與退款)
-- **實際消費記帳**：
+### 2.5 `record_transaction` (實際刷卡與退款記帳)
+- **用途**：記錄實際消費以扣減上限池，或記錄退款以逆向回補上限池額度。
+- **實際消費記帳範例**：
 ```json
 {
   "transaction": {
@@ -309,8 +459,7 @@
   }
 }
 ```
-
-- **退款對沖**：
+- **退款對沖範例**：
 ```json
 {
   "transaction": {

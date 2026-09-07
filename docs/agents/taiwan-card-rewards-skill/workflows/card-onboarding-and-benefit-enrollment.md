@@ -1,13 +1,13 @@
 # 初次使用與卡片登錄工作流程 (Card Onboarding & Benefit Enrollment SOP)
 
-本工作流程定義當使用者首次使用或新增持有卡片時，Agent 應遵循的漸進式揭露（Progressive Disclosure）引導、安全元資料收集與登錄驗證流程。
+本工作流程定義當使用者首次使用或新增持有卡片時，Agent 應遵循的漸進式揭露（Progressive Disclosure）引導、安全元資料收集、優惠研究分流與登錄驗證流程。
 
 ---
 
 ## 1. 核心原則與安全防線
 
 > [!CAUTION]
-> **嚴格禁止索取或傳輸敏感金融欄位**：
+> **嚴格禁止索取或傳輸敏感金融欄位 (Zero Sensitive Credentials)**：
 > 1. ❌ **禁止真實完整卡號 (PAN)**：僅允許記錄卡片識別別名（如 `fubon_j_cash`, `cathay_cube`）或卡號末四碼 (`last4: "1234"`)。
 > 2. ❌ **禁止卡片安全碼 (CVV/CVC)**：嚴禁索取或儲存。
 > 3. ❌ **禁止簡訊認證碼 (OTP)**：嚴禁索取或轉發。
@@ -18,6 +18,7 @@
 - **卡片唯一標識符** (`id`): 英文數字或底線識別碼，例如 `fubon_j_points`、`taishin_gogo`。
 - **發卡機構** (`issuer`): 例如「台北富邦銀行」、「國泰世華銀行」、「台新銀行」。
 - **卡片產品名稱** (`productName`): 例如「富邦 J 卡」、「CUBE 卡」、「@GoGo 卡」。
+- **發卡國家/地區** (`country`): 選填，ISO 3166-1 alpha-2 大寫代碼（如 `"TW"`）。
 - **發卡組織** (`network`): 選填，`"VISA"`, `"Mastercard"`, `"JCB"`, `"American Express"`。
 - **卡號末四碼** (`last4`): 選填，四位數字字串（如 `"5678"`）。
 - **結帳日** (`billingCycleDay`): 選填，整數 1~31。
@@ -33,14 +34,14 @@
                                                     ▼
 [列出卡片驗證 list_cards] ◄┘
        │
-       ├── 使用者要查最新優惠？ ──► [官方研究 + merchant identity gate + upsert_offer]
+       ├── 使用者要查最新優惠？ ──► [執行 Research SOP 進行雙軌檢索 + 商家解析 + upsert_offer]
        │                                      │
        └── 使用者只要登記卡片 ────────────────┘
-                                              ▼
-                                  [確認權益方案/活動]
-                                              │
-                                              ▼
-                         [呼叫 upsert_user_benefit_status] ──► [Onboarding 完成]
+                                               ▼
+                                   [確認權益方案/活動]
+                                               │
+                                               ▼
+                          [呼叫 upsert_user_benefit_status] ──► [Onboarding 完成]
 ```
 
 ### 步驟 1：詢問並整理持卡安全清冊
@@ -87,19 +88,13 @@
 
 登記信用卡本身**不會自動建立商家或優惠 rule**。完成 `list_cards` 後，Agent 應詢問：
 
-> 「要不要現在查這些卡的最新官方優惠？如果要查，我會逐張卡整理官方來源；遇到指定商家，會先建立或解析 canonical merchant identity，再寫入 rule。」
+> 「要不要現在查這些卡的最新官方優惠？如果要查，我會先透過官方網站與社群整理站進行交叉查核；遇到指定商家，會先建立或解析 canonical merchant identity，再寫入 rule。」
 
 - 使用者回答「不用」：進入步驟 5 的權益方案詢問，或直接完成卡片 onboarding。
-- 使用者回答「要」：讀取 [`research-and-evidence-submission.md`](research-and-evidence-submission.md) 與 [`offer-discovery-and-pagination.md`](offer-discovery-and-pagination.md)，由 Agent 在 MCP 外部取得官方條款與快照，再逐條提交。
-- 每一條 merchant-specific offer 都必須先走 `resolve_merchant`：
-  - `confirmed`：把回傳的 `mch_<ULID>` 放進 `rule.match.merchants`。
-  - `ambiguous`：向使用者確認市場、分店或業態後再查詢。
-  - `unresolved` 但官方資料足夠：在同一次 `upsert_offer` 帶入 `merchant` 與 `candidate` rule，由 MCP 生成 ID 並原子保存。
-  - 官方資料不足：保留 candidate，不猜測商家身份。
-- 不同銀行若指向同一商家，重用同一個 canonical merchant ID；銀行卡、來源快照、有效期限與回饋規則仍分開保存。
-- `merchant` 是 candidate 時，不得把 merchant-specific rule 寫成 `active`；一般 MCC／國家／通路 rule 可以在其自身證據與確認條件成立時獨立處理。
-
-**完成條件**：若使用者要求研究優惠，所有已提交的 merchant-specific rule 都必須有已解析的 canonical ID，或明確標記為與 candidate merchant 原子保存的 candidate rule；不得留下 raw merchant name 作為 active selector。
+- 使用者回答「要」：**必須完整執行 [Research SOP](research-and-evidence-submission.md)**。
+  - 依照 Research SOP 進行雙軌資料查找（官方一手來源 verified + 非官方公開線索 community/secondary 交叉比對）。
+  - 對特定商家執行 Merchant Identity Gate（`resolve_merchant`），取得 `mch_<ULID>` 後再呼叫 `upsert_offer` 提交規則與來源快照。
+  - 若遇衝突或過期資訊，一律採 **Fail-Closed** 原則向使用者確認。
 
 ### 步驟 5：主動引導並登錄動態權益方案（選填）
 若卡片具備多權益切換機制（如國泰 CUBE 卡方案切換、台新 Richart 扣繳加碼），向使用者確認目前已啟用的方案：
