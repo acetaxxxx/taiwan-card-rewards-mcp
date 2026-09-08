@@ -85,6 +85,9 @@ activation is folded directly into `upsert_offer`.
 | `search_active_offers` | Read-only | Search current active offers and return bounded canonical merchant/offer records; it never applies a reward. | `MISSING_REQUIRED_FACT`, `NOT_FOUND`, `STALE` |
 | `resolve_merchant` | Read-only | Validate an Agent-provided canonical merchant ID/name and return bounded merchant facts; it never interprets aliases or applies a reward. | `MERCHANT_AMBIGUOUS`, `MISSING_REQUIRED_FACT`, `NOT_FOUND` |
 | `record_transaction` | Mutating | Record an actual purchase (with `idempotencyKey`) or linked refund, updating durable cap usage. | `IDEMPOTENCY_CONFLICT`, `INVALID_REFUND`, `INSUFFICIENT_FACTS`, `NEEDS_REVIEW` |
+| `record_event_reward_v1` | Mutating | Record a validated event reward candidate for a top-up, purchase, or explicit cross-event result; owner is taken from server metadata. | `INELIGIBLE_EVENT_REWARD`, `REWARD_NOT_CALCULABLE`, `IDEMPOTENCY_CONFLICT`, `STORE_CORRUPT` |
+| `record_event_reward_v2` | Mutating | Re-evaluate an event-local rule or explicit `funded_by` chain on the server, then record only a matched, non-stacking reward. | `UNKNOWN_EVENT_FACTS`, `NEEDS_REVIEW`, `INELIGIBLE_EVENT_REWARD`, `IDEMPOTENCY_CONFLICT`, `STORE_CORRUPT` |
+| `reverse_event_reward_v1` | Mutating | Reverse a recorded event reward from one explicit refund/reversal event, restoring proportional reward and cap usage. | `INVALID_REFUND`, `AMBIGUOUS_ORIGINAL`, `OVER_REFUND`, `IDEMPOTENCY_CONFLICT` |
 | `remaining_caps` | Read-only | Query remaining reward cap balances per rule and usageKey derived from actual transactions. | `INVALID_INPUT`, `STORE_UNAVAILABLE` |
 | `get_user_benefit_status` | Read-only | Show current benefit plus available-now and action-required candidates. | `CARD_NOT_FOUND`, `STORE_UNAVAILABLE` |
 | `upsert_user_benefit_status` | Mutating | Record or correct a user-confirmed completed card switch or campaign registration. | `CARD_NOT_FOUND`, `INVALID_CONFIRMATION`, `IDEMPOTENCY_CONFLICT` |
@@ -158,6 +161,85 @@ activation is folded directly into `upsert_offer`.
 - **Foreign Currency Spend**:
 - If transaction currency differs from rule settlement currency (e.g. JPY spend on TWD card), an `fx` object with `ratePpm`, `capturedAt`, and `maxAgeSeconds` is required. Include `provider` and `rateType` when available, plus `sourceUrl`/`contentHash` for auditability.
   - Missing or stale FX snapshots fail closed (`unknown` or `stale`).
+
+### F. Top-ups, Wallet Purchases & Cross-Event Rewards
+
+The Agent owns fact gathering and official-source research. The MCP owns strict
+validation, event matching, stacking decisions, idempotency, cap consumption,
+and durable ledger writes. The MCP does not browse bank pages and must never
+infer a provider, issuer, or funding source that is not explicitly evidenced.
+
+#### Canonical call sequence
+
+1. Ask for the route facts: direction, provider/app, merchant, funding source,
+   payment method, channel, amount, currency, timestamp, and whether the event
+   is a top-up, purchase, refund, or reversal.
+2. Resolve or register the route with `list_payment_routes` and, when confirmed,
+   `upsert_payment_route`. Research official evidence outside MCP, then ingest
+   the offer with `upsert_offer` only after the source and user confirmation
+   requirements are satisfied.
+3. For a planned action, use `recommend` or `recommendation_preflight`; planned
+   actions never create event ledger records.
+4. For an actual event, submit `record_event_reward_v2` with the target event,
+   either an `eventRule` or a `chainRule` (exactly one), any required bounded
+   `sourceEvents`, the reward candidate, and an idempotency key. The server
+   recomputes eligibility; a caller-provided `matched` status is not trusted.
+5. If the user later reports a refund or reversal, submit
+   `reverse_event_reward_v1` with exactly one explicit refund relation to the
+   original event. Never reverse by merchant name or by a guessed transaction.
+
+#### Example: linked bank account → wallet top-up → wallet purchase
+
+The Agent must represent the two economic events separately:
+
+```json
+{
+  "targetEvent": {
+    "eventId": "E2",
+    "kind": "purchase",
+    "amountMinor": 10000,
+    "currency": "TWD",
+    "funding": { "kind": "account", "subtype": "wallet_balance" },
+    "relations": { "funded_by": ["E1"] },
+    "channel": "wallet",
+    "paymentMethod": "wallet_balance"
+  },
+  "sourceEvents": [{
+    "eventId": "E1",
+    "kind": "top_up",
+    "amountMinor": 10000,
+    "currency": "TWD",
+    "funding": { "kind": "account", "subtype": "linked_bank_account" },
+    "channel": "wallet",
+    "paymentMethod": "linked_bank_account"
+  }],
+  "chainRule": {
+    "sourceRule": { "eventKind": "top_up", "fundingKind": "account", "fundingSubtype": "linked_bank_account" },
+    "targetRule": { "eventKind": "purchase", "fundingKind": "account", "fundingSubtype": "wallet_balance" },
+    "windowSeconds": 2592000
+  },
+  "idempotencyKey": "event-reward-E2-v1"
+}
+```
+
+The example proves a relationship only when `E1`, `E2`, and the explicit
+`funded_by` relation are supplied. Mixed wallet balances, missing sources,
+duplicate sources, expired windows, and ambiguous provenance return `unknown`
+or `needs_review`; the Agent must not allocate the balance automatically.
+
+#### PayPay, EasyWallet, and card-funded wallet routes
+
+Do not collapse these into one card purchase:
+
+- A card top-up followed by a wallet purchase is two events. A wallet purchase
+  does not automatically inherit the card issuer's reward.
+- PayPay inbound TWQR acceptance, PayPay outbound wallet top-up, and a bank
+  account's EasyWallet top-up are different route directions and require
+  separate evidence.
+- If the official terms do not identify the issuer, wallet, channel, or funding
+  path, return `unknown`/`needs_review` rather than recording a reward.
+- `record_transaction` remains the legacy purchase/refund path. Use the event
+  tools when top-up provenance or cross-event eligibility affects the decision.
 
 ---
 

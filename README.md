@@ -12,7 +12,7 @@ The store takes an exclusive process lock (`card-rewards.lock`) for the lifetime
 
 Build with `npm run build`, then configure Aion's stdio MCP server with command `npx` (or the installed `taiwan-card-rewards-mcp` binary) and arguments `--data-dir /absolute/tenant-directory`. GitHub source installs are supported with `npx --yes github:acetaxxxx/taiwan-card-rewards-mcp#main`; npm runs the package `prepare` script to build `dist/`. Pin a release tag such as `#v0.9.0` for repeatable use. The process reads newline-delimited JSON-RPC from stdin and writes responses to stdout; it does not open an HTTP/SSE listener. Each user must receive a separate process and data directory. Reusing one data directory is explicit shared tenancy; `--user` is display metadata only.
 
-Schema v2 (package/server 0.9.0) exposes 15 tools, including read-only `recommendation_preflight` and payment-route onboarding/listing; it also supports MCP-owned `ev_<ULID>`/`fact_<ULID>` evidence identities and typed `PaymentRouteContext`. For comprehensive workflow instructions, see the [AI Agent Usage Guide](docs/agents/usage-guide.md). Planned transactions never mutate the store. Repeated actual calls require the same idempotency key and payload; mismatches fail closed. Refunds must reference an existing recorded transaction.
+Schema v2 (package/server 0.9.0) exposes 18 tools, including read-only `recommendation_preflight`, payment-route onboarding/listing, and event-scoped reward recording/reversal. Event rewards require explicit top-up/purchase facts and, for cross-event eligibility, an evidenced `funded_by` relation; the server recomputes v2 eligibility and fails closed on ambiguity. It also supports MCP-owned `ev_<ULID>`/`fact_<ULID>` evidence identities and typed `PaymentRouteContext`. For comprehensive workflow instructions, see the [AI Agent Usage Guide](docs/agents/usage-guide.md) and [event reward workflow](docs/agents/taiwan-card-rewards-skill/workflows/event-reward-and-wallet-eligibility.md). Planned transactions never mutate the store. Repeated actual calls require the same idempotency key and payload; mismatches fail closed. Refunds must reference an existing recorded transaction or event reward.
 
 ## Boundaries
 
@@ -26,6 +26,7 @@ Schema v2 (package/server 0.9.0) exposes 15 tools, including read-only `recommen
 The design, research, specifications, and agent usage guides are kept under `docs/`:
 
 - `docs/agents/usage-guide.md` — AI Agent usage guide for installation, workflows, and fail-closed safety
+- `docs/agents/taiwan-card-rewards-skill/workflows/event-reward-and-wallet-eligibility.md` — event-scoped top-up, wallet, cross-event, and reversal workflow
 - `docs/agents/skill-authoring-guide.md` — general guidance for creating a portable card-rewards agent skill
 - `docs/agents/card-rewards-skill-template.md` — copyable skill template without private configuration
 - `schemas/card-rewards-state.schema.json` — persisted `card-rewards.json` JSON Schema (schemaVersion 2; incompatible older data requires explicit migration/reset)
