@@ -62,7 +62,7 @@ describe('proactive payment path recommendation', () => {
     const evidence = service.submitEvidence({ id: 'cycle', requirementId: 'route', sourceIdentity: 'cycle', sourceType: 'official', authority: 'wallet', claim: { route: 'cycle' }, observedAt: '2026-09-01T00:00:00Z', confidence: 'high', contentHash: 'cycle-hash', reviewState: 'accepted', sourceUrl: 'https://wallet.example/terms' });
     service.upsertPaymentRoute({ status: 'active', idempotencyKey: 'cycle-route', layers: [], funding: { kind: 'cash' }, observedAt: '2026-09-01T00:00:00Z', sourceUrl: 'https://wallet.example/terms', authority: 'wallet', confidence: 'high', evidenceIds: [evidence.id], nodes: [{ id: 's', kind: 'funding_source', displayName: 's' }, { id: 'w', kind: 'wallet_balance', displayName: 'w' }, { id: 'm', kind: 'merchant', displayName: 'm' }], edges: [{ edgeId: 'a', fromNodeId: 's', toNodeId: 'w', transition: 'wallet_top_up', evidenceIds: [evidence.id] }, { edgeId: 'b', fromNodeId: 'w', toNodeId: 's', transition: 'wallet_debit', evidenceIds: [evidence.id] }, { edgeId: 'c', fromNodeId: 's', toNodeId: 'm', transition: 'direct_settlement', evidenceIds: [evidence.id] }], confirmation: { confirmedAt: '2026-09-01T00:00:00Z', confirmedBy: 'u1' } });
     const result = service.recommendPaymentPaths({ amount: { amountMinor: 1, currency: 'TWD' } });
-    expect(result.candidates).toHaveLength(1); expect(result.blocked?.some((item) => item.reason.includes('cycle'))).toBe(true);
+    expect(result.candidates).toHaveLength(1); expect(result.blocked?.some((item) => item.reason.includes('edge'))).toBe(true);
   });
   it('reports branch truncation while retaining the stable first branch', () => {
     const store = new MemoryStore(); const service = new RewardService(store, 'u1');
