@@ -634,6 +634,8 @@ export class RewardService {
     const asOf = input.asOf ?? nowIso();
     if (Number.isNaN(Date.parse(asOf))) throw new RewardServiceError('INVALID_INPUT', 'payment path asOf is invalid');
     if (input.limit !== undefined && (!Number.isSafeInteger(input.limit) || input.limit < 1 || input.limit > 20)) throw new RewardServiceError('INVALID_INPUT', 'payment path limit must be 1..20');
+    const maxHops = input.maxHops ?? 6; const maxEvents = input.maxEvents ?? 4; const maxBranchesPerNode = input.maxBranchesPerNode ?? 8;
+    if (![maxHops, maxEvents, maxBranchesPerNode].every((value) => Number.isSafeInteger(value) && value >= 1 && value <= 20)) throw new RewardServiceError('INVALID_INPUT', 'payment path bounds are invalid');
     const state = this.store.read();
     const requested = input.routeIds === undefined ? undefined : new Set(input.routeIds);
     const visibleRoutes = this.listPaymentRoutes().filter((route) => requested === undefined || requested.has(route.id));
@@ -642,6 +644,7 @@ export class RewardService {
       if (route.authority === undefined || route.confidence !== 'high' || !route.sourceUrl?.startsWith('https://') || !route.evidenceIds?.length) return false;
       if (route.validFrom && Date.parse(route.validFrom) > Date.parse(asOf)) return false;
       if (route.validTo && Date.parse(route.validTo) < Date.parse(asOf)) return false;
+      if (route.funding.kind === 'account' && route.funding.subtype === 'wallet_balance') { const account = state.paymentAccounts.find((candidate) => candidate.id === (route.funding as { accountId?: string }).accountId && candidate.ownerUser === this.metadataUser); if (!account?.balance || account.balance.amountMinor < input.amount.amountMinor) return false; }
       const validEvidence = (id: string) => state.evidence.some((evidence) => evidence.id === id && evidence.sourceType === 'official' && evidence.reviewState === 'accepted' && (!evidence.validTo || Date.parse(evidence.validTo) >= Date.parse(asOf)));
       if (!route.evidenceIds.every(validEvidence)) return false;
       if (route.edges?.length) {
@@ -656,11 +659,11 @@ export class RewardService {
       const validEvidence = (id: string) => state.evidence.some((evidence) => evidence.id === id && evidence.sourceType === 'official' && evidence.reviewState === 'accepted' && (!evidence.validTo || Date.parse(evidence.validTo) >= Date.parse(asOf)));
       const usable = (edge: NonNullable<PaymentRouteRecord['edges']>[number]) => edge.provenance !== 'model_fixture' && edge.evidenceIds.length > 0 && edge.evidenceIds.every(validEvidence) && edge.evidenceIds.every((id) => { const evidence = state.evidence.find((candidate) => candidate.id === id); const fromRole = route.nodes?.find((node) => node.id === edge.fromNodeId)?.kind; const toRole = route.nodes?.find((node) => node.id === edge.toNodeId)?.kind; return evidence?.claim.fromRole === undefined || (evidence.claim.fromRole === fromRole && evidence.claim.toRole === toRole && evidence.claim.transition === edge.transition && (edge.market === undefined || evidence.claim.market === edge.market) && (edge.currency === undefined || evidence.claim.currency === edge.currency)); });
       const adjacency = new Map<string, typeof route.edges>();
-      for (const edge of [...route.edges].sort((a, b) => a.edgeId.localeCompare(b.edgeId))) { if (!usable(edge)) { branchBlocked.push({ routeId: route.id, reason: `edge ${edge.edgeId} lacks exact current evidence` }); continue; } adjacency.set(edge.fromNodeId, [...(adjacency.get(edge.fromNodeId) ?? []), edge]); }
+      for (const edge of [...route.edges].sort((a, b) => a.edgeId.localeCompare(b.edgeId))) { if (!usable(edge)) { branchBlocked.push({ routeId: route.id, reason: `edge ${edge.edgeId} lacks exact current evidence` }); continue; } const outgoing = adjacency.get(edge.fromNodeId) ?? []; if (outgoing.length < maxBranchesPerNode) adjacency.set(edge.fromNodeId, [...outgoing, edge]); else branchBlocked.push({ routeId: route.id, reason: `branch exceeds maxBranchesPerNode=${maxBranchesPerNode}` }); }
       const starts = route.nodes.filter((node) => node.kind === 'funding_source').map((node) => node.id).sort();
       const paths: PathOption[] = [];
       const visit = (nodeId: string, seen: Set<string>, path: NonNullable<PaymentRouteRecord['edges']>[number][]) => {
-        if (path.length > 6 || path.length >= 4 || paths.length >= 20) { if (path.length >= 4) branchBlocked.push({ routeId: route.id, reason: 'branch exceeds maxEvents=4' }); return; }
+        if (path.length > maxHops || path.length >= maxEvents || paths.length >= (input.limit ?? 20)) { if (path.length >= maxEvents) branchBlocked.push({ routeId: route.id, reason: `branch exceeds maxEvents=${maxEvents}` }); return; }
         const node = route.nodes?.find((candidate) => candidate.id === nodeId);
         if (node?.kind === 'merchant' && path.length) { paths.push({ route, pathEdges: path }); return; }
         for (const edge of adjacency.get(nodeId) ?? []) { if (seen.has(edge.toNodeId)) { branchBlocked.push({ routeId: route.id, reason: `cycle branch blocked at edge ${edge.edgeId}` }); continue; } visit(edge.toNodeId, new Set([...seen, edge.toNodeId]), [...path, edge]); }
@@ -693,7 +696,7 @@ export class RewardService {
     });
     const accepted = new Set(routes.map((route) => route.id));
     const blocked = [...visibleRoutes.filter((route) => !accepted.has(route.id)).map((route) => ({ routeId: route.id, reason: route.status !== 'active' || !route.confirmation ? 'route is not active and confirmed' : 'route has no admissible terminal branch' })), ...branchBlocked];
-    return { status: candidates.length ? (blocked.length ? 'partial' : 'ok') : (blocked.length ? 'needs_review' : 'no_match'), candidates, evaluatedAt: asOf, blocked, limits: { maxCandidates: input.limit ?? 20, maxHops: 6, maxEvents: 4, maxBranchesPerNode: 8 } };
+    return { status: candidates.length ? (blocked.length ? 'partial' : 'ok') : (blocked.length ? 'needs_review' : 'no_match'), candidates, evaluatedAt: asOf, blocked, limits: { maxCandidates: input.limit ?? 20, maxHops, maxEvents, maxBranchesPerNode } };
   }
 
   recordTransaction(transaction: TransactionTuple): RewardBreakdown {

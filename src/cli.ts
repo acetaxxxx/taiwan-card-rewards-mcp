@@ -81,7 +81,7 @@ async function callTool(service: RewardService, params: Record<string, unknown>)
   const args = validateToolArgs(name, rawArgs);
   if (name === 'recommend' && args.kind !== undefined) {
     if (args.kind !== 'payment_path' || !args.payment_path || typeof args.payment_path !== 'object' || Array.isArray(args.payment_path) || args.transaction !== undefined) throw new RewardServiceError('INVALID_INPUT', 'recommend requires exactly one card or payment_path branch');
-    const allowedPath = ['amount', 'merchant', 'mcc', 'country', 'channel', 'paymentMethod', 'asOf', 'routeIds', 'limit'];
+    const allowedPath = ['amount', 'merchant', 'mcc', 'country', 'channel', 'paymentMethod', 'asOf', 'routeIds', 'limit', 'maxHops', 'maxEvents', 'maxBranchesPerNode'];
     for (const key of Object.keys(args.payment_path as object)) if (!allowedPath.includes(key)) throw new RewardServiceError('UNKNOWN_FIELD', `recommend.payment_path contains unsupported field: ${key}`);
   }
   const paged = (value: unknown[], projection: string | undefined, page: number | undefined, limit: number | undefined, sortKey: (item: unknown) => string): unknown => {
@@ -102,7 +102,7 @@ async function callTool(service: RewardService, params: Record<string, unknown>)
     case 'recommend': {
       if (args.kind === 'payment_path' && args.payment_path && typeof args.payment_path === 'object') {
         const body = args.payment_path as Record<string, unknown>;
-        return service.recommendPaymentPaths({ amount: body.amount as PaymentPathRequest['amount'], ...(typeof body.merchant === 'string' ? { merchant: body.merchant } : {}), ...(typeof body.mcc === 'string' ? { mcc: body.mcc } : {}), ...(typeof body.country === 'string' ? { country: body.country } : {}), ...(typeof body.channel === 'string' ? { channel: body.channel } : {}), ...(typeof body.paymentMethod === 'string' ? { paymentMethod: body.paymentMethod } : {}), ...(typeof body.asOf === 'string' ? { asOf: body.asOf } : {}), ...(Array.isArray(body.routeIds) ? { routeIds: body.routeIds as string[] } : {}), ...(typeof body.limit === 'number' ? { limit: body.limit } : {}) });
+        return service.recommendPaymentPaths({ amount: body.amount as PaymentPathRequest['amount'], ...(typeof body.merchant === 'string' ? { merchant: body.merchant } : {}), ...(typeof body.mcc === 'string' ? { mcc: body.mcc } : {}), ...(typeof body.country === 'string' ? { country: body.country } : {}), ...(typeof body.channel === 'string' ? { channel: body.channel } : {}), ...(typeof body.paymentMethod === 'string' ? { paymentMethod: body.paymentMethod } : {}), ...(typeof body.asOf === 'string' ? { asOf: body.asOf } : {}), ...(Array.isArray(body.routeIds) ? { routeIds: body.routeIds as string[] } : {}), ...(typeof body.limit === 'number' ? { limit: body.limit } : {}), ...(typeof body.maxHops === 'number' ? { maxHops: body.maxHops } : {}), ...(typeof body.maxEvents === 'number' ? { maxEvents: body.maxEvents } : {}), ...(typeof body.maxBranchesPerNode === 'number' ? { maxBranchesPerNode: body.maxBranchesPerNode } : {}) });
       }
       const recommendation = parseRecommendationInput(args); const hasPage = args.page !== undefined; const rows = service.recommend(recommendation.transaction, hasPage ? 20 : (typeof args.limit === 'number' ? args.limit : 10), recommendation.options); return hasPage ? paged(rows, undefined, typeof args.page === 'number' ? args.page : undefined, typeof args.limit === 'number' ? args.limit : undefined, (item) => String((item as RankingEntry).cardId)) : rows;
     }
