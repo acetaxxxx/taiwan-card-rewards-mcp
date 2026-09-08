@@ -114,7 +114,7 @@ describe("MCP Contract and Agent Boundary", () => {
     expect(upsertOffer.properties.merchant.properties.canonicalNameLocale.const).toBe("zh-Hant-TW");
     expect(upsertOffer.properties.merchant.properties.channels.items.enum).toEqual(["in_store", "online"]);
   });
-  it("exposes all fifteen approved MCP tools with valid schemas in tools/list", async () => {
+  it("exposes all approved MCP tools with valid schemas in tools/list", async () => {
     const dir = mkdtempSync(join(tmpdir(), "mcp-contract-list-"));
     const client = new McpProcessClient(dir);
     try {
@@ -130,7 +130,7 @@ describe("MCP Contract and Agent Boundary", () => {
       // 2. tools/list
       const listRes = await client.send({ id: 2, method: "tools/list" });
       expect(listRes.result).toBeDefined();
-      expect(listRes.result.tools).toHaveLength(20);
+      expect(listRes.result.tools).toHaveLength(21);
 
       const toolNames = listRes.result.tools.map((t: any) => t.name).sort();
       const expectedNames = [
@@ -138,6 +138,7 @@ describe("MCP Contract and Agent Boundary", () => {
         "list_cards",
         "rank_cards",
         "recommend",
+        "recommend_payment_paths_v1",
         "recommendation_preflight",
         "upsert_payment_route",
         "list_payment_routes",
@@ -156,7 +157,7 @@ describe("MCP Contract and Agent Boundary", () => {
         "upsert_offer",
       ].sort();
       expect(toolNames).toEqual(expectedNames);
-      expect(mcpTools).toHaveLength(20);
+      expect(mcpTools).toHaveLength(21);
 
       // Verify schema properties of all tools
       for (const tool of listRes.result.tools) {

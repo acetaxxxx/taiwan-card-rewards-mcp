@@ -528,6 +528,33 @@ export interface RankingEntry extends RewardBreakdown {
   rank: number;
 }
 
+export interface PaymentPathRequest {
+  amount: Money;
+  merchant?: string;
+  mcc?: string;
+  country?: string;
+  channel?: string;
+  paymentMethod?: string;
+  asOf?: string;
+  routeIds?: readonly string[];
+  limit?: number;
+}
+export interface PaymentPathNode { id: string; kind: string; displayName: string; }
+export interface PaymentPathEvent { kind: 'top_up' | 'purchase' | 'account_debit' | 'card_authorization'; fromNodeId: string; toNodeId: string; }
+export interface PaymentPathCandidate {
+  id: string;
+  routeId: string;
+  nodes: readonly PaymentPathNode[];
+  events: readonly PaymentPathEvent[];
+  fundingSource: FundingInstrument;
+  grossReward: Money;
+  netReward: Money;
+  cappedReward: Money;
+  matchedRules: readonly { ruleId: string; ruleVersion: string; component: string; reward: Money }[];
+  exclusionReasons: readonly string[];
+}
+export interface PaymentPathRecommendation { status: 'ok' | 'no_match'; candidates: readonly PaymentPathCandidate[]; evaluatedAt: string; }
+
 export interface McpToolContract {
   name: string;
   description: string;

@@ -231,6 +231,8 @@ or `needs_review`; the Agent must not allocate the balance automatically.
 
 #### PayPay, EasyWallet, and card-funded wallet routes
 
+For proactive route selection, call `recommend_payment_paths_v1` with the amount and optional merchant facts. It considers only the current user's active, confirmed routes with accepted official HTTPS evidence and returns bounded nodes, transitions, funding source, reward totals, matched rules, and explicit exclusions. It never invents mixed wallet funding, unregistered routes, or unverified cross-border paths; absent or expired evidence yields no candidate.
+
 Do not collapse these into one card purchase:
 
 - A card top-up followed by a wallet purchase is two events. A wallet purchase
