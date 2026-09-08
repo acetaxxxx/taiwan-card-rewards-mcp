@@ -640,14 +640,25 @@ export class RewardService {
       if (route.authority === undefined || route.confidence !== 'high' || !route.sourceUrl?.startsWith('https://') || !route.evidenceIds?.length) return false;
       if (route.validFrom && Date.parse(route.validFrom) > Date.parse(asOf)) return false;
       if (route.validTo && Date.parse(route.validTo) < Date.parse(asOf)) return false;
-      return route.evidenceIds.every((id) => state.evidence.some((evidence) => evidence.id === id && evidence.sourceType === 'official' && evidence.reviewState === 'accepted' && (!evidence.validTo || Date.parse(evidence.validTo) >= Date.parse(asOf))));
+      const validEvidence = (id: string) => state.evidence.some((evidence) => evidence.id === id && evidence.sourceType === 'official' && evidence.reviewState === 'accepted' && (!evidence.validTo || Date.parse(evidence.validTo) >= Date.parse(asOf)));
+      if (!route.evidenceIds.every(validEvidence)) return false;
+      if (route.edges?.some((edge) => edge.provenance === 'model_fixture' || !edge.evidenceIds.length || !edge.evidenceIds.every(validEvidence))) return false;
+      if (route.edges?.length) {
+        const nodeIds = new Set(route.nodes?.map((node) => node.id));
+        if (!route.nodes?.length || route.edges.length > 6 || route.edges.some((edge) => !nodeIds.has(edge.fromNodeId) || !nodeIds.has(edge.toNodeId) || edge.fromNodeId === edge.toNodeId)) return false;
+        const indegree = new Map<string, number>(); for (const edge of route.edges) indegree.set(edge.toNodeId, (indegree.get(edge.toNodeId) ?? 0) + 1);
+        if (!route.nodes.some((node) => node.kind === 'merchant' && (indegree.get(node.id) ?? 0) > 0)) return false;
+      }
+      return true;
     }).slice(0, Math.min(input.limit ?? 20, 20));
     const candidates: PaymentPathCandidate[] = routes.map((route) => {
       const fundingId = route.funding.kind === 'credit_card' ? route.funding.cardId : route.funding.kind === 'account' ? route.funding.accountId : undefined;
       const fundingLabel = route.funding.kind === 'credit_card' ? `card:${fundingId ?? 'unknown'}` : route.funding.kind === 'account' ? `${route.funding.subtype}:${fundingId ?? 'unknown'}` : 'cash';
       const fundingNode = { id: 'funding', kind: route.funding.kind, displayName: fundingLabel };
-      const nodes = [fundingNode, ...route.layers.map((layer, index) => ({ id: `node-${index + 1}`, kind: layer.kind, displayName: layer.displayName ?? layer.providerId ?? layer.appId ?? layer.kind }))];
-      const events = route.layers.length === 0
+      const nodes = route.nodes?.length ? route.nodes : [fundingNode, ...route.layers.map((layer, index) => ({ id: `node-${index + 1}`, kind: layer.kind, displayName: layer.displayName ?? layer.providerId ?? layer.appId ?? layer.kind }))];
+      const events = route.edges?.length
+        ? route.edges.map((edge) => ({ kind: edge.transition === 'wallet_top_up' || edge.transition === 'account_debit' ? 'top_up' as const : 'purchase' as const, fromNodeId: edge.fromNodeId, toNodeId: edge.toNodeId }))
+        : route.layers.length === 0
         ? [{ kind: route.funding.kind === 'credit_card' ? 'card_authorization' as const : 'account_debit' as const, fromNodeId: 'funding', toNodeId: 'funding' }]
         : route.layers.map((_, index) => ({ kind: index < route.layers.length - 1 ? 'top_up' as const : 'purchase' as const, fromNodeId: index === 0 ? 'funding' : `node-${index}`, toNodeId: `node-${index + 1}` }));
       const transaction: TransactionTuple = { cardId: route.funding.kind === 'credit_card' ? (route.funding.cardId ?? '') : '', routeId: route.id, kind: 'purchase', mode: 'planned', occurredAt: asOf, amount: input.amount, ...(input.merchant === undefined ? {} : { merchant: input.merchant }), ...(input.mcc === undefined ? {} : { mcc: input.mcc }), ...(input.country === undefined ? {} : { country: input.country }), ...(input.channel === undefined ? {} : { channel: input.channel }), ...(input.paymentMethod === undefined ? {} : { paymentMethod: input.paymentMethod }) };
