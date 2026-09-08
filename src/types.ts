@@ -53,7 +53,7 @@ export interface PaymentRouteRecord {
 }
 export type PaymentPathNodeRole = 'funding_source' | 'wallet_balance' | 'payment_service' | 'acceptance_network' | 'merchant';
 export type PaymentPathTransition = 'card_authorization' | 'account_debit' | 'wallet_top_up' | 'wallet_debit' | 'service_to_acceptance' | 'merchant_settlement' | 'direct_settlement' | 'split_tender';
-export interface PaymentPathEdge { edgeId: string; fromNodeId: string; toNodeId: string; transition: PaymentPathTransition; evidenceIds: readonly string[]; provenance?: 'official' | 'model_fixture'; market?: string; currency?: string; validFrom?: string; validTo?: string; }
+export interface PaymentPathEdge { edgeId: string; fromNodeId: string; toNodeId: string; transition: PaymentPathTransition; evidenceIds: readonly string[]; provenance?: 'official' | 'model_fixture'; direction?: 'inbound' | 'outbound'; fromMarket?: string; toMarket?: string; market?: string; currency?: string; validFrom?: string; validTo?: string; }
 export type PaymentAccountKind = 'linked_bank_account' | 'wallet_balance' | 'foreign_currency_account';
 export interface PaymentAccountRecord {
   id: string;

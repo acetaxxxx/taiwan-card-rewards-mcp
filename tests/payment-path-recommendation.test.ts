@@ -57,6 +57,10 @@ describe('proactive payment path recommendation', () => {
     service.upsertPaymentRoute({ status: 'active', idempotencyKey: 'wallet-route', layers: [{ kind: 'wallet', providerId: 'wallet', evidenceIds: [evidence.id] }], funding: { kind: 'account', subtype: 'wallet_balance', accountId: account.id }, observedAt: '2026-09-01T00:00:00Z', sourceUrl: 'https://wallet.example/terms', authority: 'wallet', confidence: 'high', evidenceIds: [evidence.id], confirmation: { confirmedAt: '2026-09-01T00:00:00Z', confirmedBy: 'u1' } });
     expect(service.recommendPaymentPaths({ amount: { amountMinor: 50, currency: 'TWD' } }).candidates).toHaveLength(1);
   });
+  it('rejects an unauthenticated path query', () => {
+    const service = new RewardService(new MemoryStore(), undefined);
+    expect(() => service.recommendPaymentPaths({ amount: { amountMinor: 1, currency: 'TWD' } })).toThrow(/authenticated/);
+  });
   it('keeps a legal terminal branch when a sibling branch contains a cycle', () => {
     const store = new MemoryStore(); const service = new RewardService(store, 'u1');
     const evidence = service.submitEvidence({ id: 'cycle', requirementId: 'route', sourceIdentity: 'cycle', sourceType: 'official', authority: 'wallet', claim: { route: 'cycle' }, observedAt: '2026-09-01T00:00:00Z', confidence: 'high', contentHash: 'cycle-hash', reviewState: 'accepted', sourceUrl: 'https://wallet.example/terms' });
