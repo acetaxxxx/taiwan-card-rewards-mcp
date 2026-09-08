@@ -79,6 +79,11 @@ async function callTool(service: RewardService, params: Record<string, unknown>)
   const rawArgs = params.arguments ?? {};
   rejectSensitiveFields(rawArgs);
   const args = validateToolArgs(name, rawArgs);
+  if (name === 'recommend' && args.kind !== undefined) {
+    if (args.kind !== 'payment_path' || !args.payment_path || typeof args.payment_path !== 'object' || Array.isArray(args.payment_path) || args.transaction !== undefined) throw new RewardServiceError('INVALID_INPUT', 'recommend requires exactly one card or payment_path branch');
+    const allowedPath = ['amount', 'merchant', 'mcc', 'country', 'channel', 'paymentMethod', 'asOf', 'routeIds', 'limit'];
+    for (const key of Object.keys(args.payment_path as object)) if (!allowedPath.includes(key)) throw new RewardServiceError('UNKNOWN_FIELD', `recommend.payment_path contains unsupported field: ${key}`);
+  }
   const paged = (value: unknown[], projection: string | undefined, page: number | undefined, limit: number | undefined, sortKey: (item: unknown) => string): unknown => {
     if (projection !== undefined && !['summary', 'detail', 'calculation', 'audit'].includes(projection)) throw new RewardServiceError('INVALID_INPUT', 'projection is invalid');
     const projected = projection === 'summary' ? value.map((item) => {
