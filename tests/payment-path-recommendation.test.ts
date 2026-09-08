@@ -57,4 +57,28 @@ describe('proactive payment path recommendation', () => {
     service.upsertPaymentRoute({ status: 'active', idempotencyKey: 'wallet-route', layers: [{ kind: 'wallet', providerId: 'wallet', evidenceIds: [evidence.id] }], funding: { kind: 'account', subtype: 'wallet_balance', accountId: account.id }, observedAt: '2026-09-01T00:00:00Z', sourceUrl: 'https://wallet.example/terms', authority: 'wallet', confidence: 'high', evidenceIds: [evidence.id], confirmation: { confirmedAt: '2026-09-01T00:00:00Z', confirmedBy: 'u1' } });
     expect(service.recommendPaymentPaths({ amount: { amountMinor: 50, currency: 'TWD' } }).candidates).toHaveLength(1);
   });
+  it('keeps a legal terminal branch when a sibling branch contains a cycle', () => {
+    const store = new MemoryStore(); const service = new RewardService(store, 'u1');
+    const evidence = service.submitEvidence({ id: 'cycle', requirementId: 'route', sourceIdentity: 'cycle', sourceType: 'official', authority: 'wallet', claim: { route: 'cycle' }, observedAt: '2026-09-01T00:00:00Z', confidence: 'high', contentHash: 'cycle-hash', reviewState: 'accepted', sourceUrl: 'https://wallet.example/terms' });
+    service.upsertPaymentRoute({ status: 'active', idempotencyKey: 'cycle-route', layers: [], funding: { kind: 'cash' }, observedAt: '2026-09-01T00:00:00Z', sourceUrl: 'https://wallet.example/terms', authority: 'wallet', confidence: 'high', evidenceIds: [evidence.id], nodes: [{ id: 's', kind: 'funding_source', displayName: 's' }, { id: 'w', kind: 'wallet_balance', displayName: 'w' }, { id: 'm', kind: 'merchant', displayName: 'm' }], edges: [{ edgeId: 'a', fromNodeId: 's', toNodeId: 'w', transition: 'wallet_top_up', evidenceIds: [evidence.id] }, { edgeId: 'b', fromNodeId: 'w', toNodeId: 's', transition: 'wallet_debit', evidenceIds: [evidence.id] }, { edgeId: 'c', fromNodeId: 's', toNodeId: 'm', transition: 'direct_settlement', evidenceIds: [evidence.id] }], confirmation: { confirmedAt: '2026-09-01T00:00:00Z', confirmedBy: 'u1' } });
+    const result = service.recommendPaymentPaths({ amount: { amountMinor: 1, currency: 'TWD' } });
+    expect(result.candidates).toHaveLength(1); expect(result.blocked?.some((item) => item.reason.includes('cycle'))).toBe(true);
+  });
+  it('reports branch truncation while retaining the stable first branch', () => {
+    const store = new MemoryStore(); const service = new RewardService(store, 'u1');
+    const evidence = service.submitEvidence({ id: 'bound', requirementId: 'route', sourceIdentity: 'bound', sourceType: 'official', authority: 'wallet', claim: { route: 'bound' }, observedAt: '2026-09-01T00:00:00Z', confidence: 'high', contentHash: 'bound-hash', reviewState: 'accepted', sourceUrl: 'https://wallet.example/terms' });
+    service.upsertPaymentRoute({ status: 'active', idempotencyKey: 'bound-route', layers: [], funding: { kind: 'cash' }, observedAt: '2026-09-01T00:00:00Z', sourceUrl: 'https://wallet.example/terms', authority: 'wallet', confidence: 'high', evidenceIds: [evidence.id], nodes: [{ id: 's', kind: 'funding_source', displayName: 's' }, { id: 'm1', kind: 'merchant', displayName: 'm1' }, { id: 'm2', kind: 'merchant', displayName: 'm2' }], edges: [{ edgeId: 'a', fromNodeId: 's', toNodeId: 'm1', transition: 'direct_settlement', evidenceIds: [evidence.id] }, { edgeId: 'b', fromNodeId: 's', toNodeId: 'm2', transition: 'direct_settlement', evidenceIds: [evidence.id] }], confirmation: { confirmedAt: '2026-09-01T00:00:00Z', confirmedBy: 'u1' } });
+    const result = service.recommendPaymentPaths({ amount: { amountMinor: 1, currency: 'TWD' }, maxBranchesPerNode: 1 });
+    expect(result.candidates).toHaveLength(1); expect(result.blocked?.some((item) => item.reason.includes('maxBranchesPerNode'))).toBe(true);
+  });
+  it.each([
+    ['expired edge evidence', { validTo: '2026-08-01T00:00:00Z' }],
+    ['conflicting edge evidence', { reviewState: 'conflict' as const }],
+    ['wrong-direction edge claim', { claim: { fromRole: 'merchant', toRole: 'funding_source', transition: 'direct_settlement' } }],
+  ])('blocks %s without swallowing the request', (_name, override) => {
+    const store = new MemoryStore(); const service = new RewardService(store, 'u1');
+    const evidence = service.submitEvidence({ id: 'bad-edge', requirementId: 'route', sourceIdentity: 'bad', sourceType: 'official', authority: 'wallet', claim: { route: 'bad' }, observedAt: '2026-09-01T00:00:00Z', confidence: 'high', contentHash: `bad-${_name}`, reviewState: 'accepted', sourceUrl: 'https://wallet.example/terms', ...override });
+    service.upsertPaymentRoute({ status: 'active', idempotencyKey: `bad-${_name}`, layers: [], funding: { kind: 'cash' }, observedAt: '2026-09-01T00:00:00Z', sourceUrl: 'https://wallet.example/terms', authority: 'wallet', confidence: 'high', evidenceIds: [evidence.id], nodes: [{ id: 's', kind: 'funding_source', displayName: 's' }, { id: 'm', kind: 'merchant', displayName: 'm' }], edges: [{ edgeId: 'bad', fromNodeId: 's', toNodeId: 'm', transition: 'direct_settlement', evidenceIds: [evidence.id] }], confirmation: { confirmedAt: '2026-09-01T00:00:00Z', confirmedBy: 'u1' } });
+    expect(service.recommendPaymentPaths({ amount: { amountMinor: 1, currency: 'TWD' }, asOf: '2026-09-01T00:00:00Z' }).candidates).toHaveLength(0);
+  });
 });
