@@ -68,6 +68,7 @@ export interface PaymentAccountRecord {
   confirmation?: { confirmedAt: string; confirmedBy: string };
   idempotencyKey: string;
   ownerUser?: string;
+  balance?: Money;
 }
 export type StackingConfidence = 'confirmed' | 'possible';
 export type RewardComponentKind = 'merchant_loyalty' | 'payment_provider' | 'card_issuer';
@@ -543,6 +544,9 @@ export interface PaymentPathRequest {
   asOf?: string;
   routeIds?: readonly string[];
   limit?: number;
+  maxHops?: number;
+  maxEvents?: number;
+  maxBranchesPerNode?: number;
 }
 export interface PaymentPathNode { id: string; kind: string; displayName: string; }
 export interface PaymentPathEvent { kind: 'top_up' | 'purchase' | 'account_debit' | 'card_authorization'; fromNodeId: string; toNodeId: string; }
