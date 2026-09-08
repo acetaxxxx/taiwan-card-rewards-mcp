@@ -636,7 +636,8 @@ export class RewardService {
     if (input.limit !== undefined && (!Number.isSafeInteger(input.limit) || input.limit < 1 || input.limit > 20)) throw new RewardServiceError('INVALID_INPUT', 'payment path limit must be 1..20');
     const state = this.store.read();
     const requested = input.routeIds === undefined ? undefined : new Set(input.routeIds);
-    const routes = this.listPaymentRoutes().filter((route) => requested === undefined || requested.has(route.id)).filter((route) => {
+    const visibleRoutes = this.listPaymentRoutes().filter((route) => requested === undefined || requested.has(route.id));
+    const routes = visibleRoutes.filter((route) => {
       if (route.status !== 'active' || !route.confirmation) return false;
       if (route.authority === undefined || route.confidence !== 'high' || !route.sourceUrl?.startsWith('https://') || !route.evidenceIds?.length) return false;
       if (route.validFrom && Date.parse(route.validFrom) > Date.parse(asOf)) return false;
@@ -646,7 +647,7 @@ export class RewardService {
       if (route.edges?.some((edge) => edge.provenance === 'model_fixture' || !edge.evidenceIds.length || !edge.evidenceIds.every(validEvidence) || edge.evidenceIds.some((id) => { const evidence = state.evidence.find((candidate) => candidate.id === id); const fromRole = route.nodes?.find((node) => node.id === edge.fromNodeId)?.kind; const toRole = route.nodes?.find((node) => node.id === edge.toNodeId)?.kind; return evidence?.claim.fromRole !== undefined && (evidence.claim.fromRole !== fromRole || evidence.claim.toRole !== toRole || evidence.claim.transition !== edge.transition || (edge.market !== undefined && evidence.claim.market !== edge.market) || (edge.currency !== undefined && evidence.claim.currency !== edge.currency)); }))) return false;
       if (route.edges?.length) {
         const nodeIds = new Set(route.nodes?.map((node) => node.id));
-        if (!route.nodes?.length || route.edges.length > 6 || route.edges.some((edge) => !nodeIds.has(edge.fromNodeId) || !nodeIds.has(edge.toNodeId) || edge.fromNodeId === edge.toNodeId)) return false;
+        if (!route.nodes?.length || route.edges.length > 6 || route.edges.length > 4 || route.edges.some((edge) => !nodeIds.has(edge.fromNodeId) || !nodeIds.has(edge.toNodeId) || edge.fromNodeId === edge.toNodeId)) return false;
         const indegree = new Map<string, number>(); for (const edge of route.edges) indegree.set(edge.toNodeId, (indegree.get(edge.toNodeId) ?? 0) + 1);
         if (!route.nodes.some((node) => node.kind === 'merchant' && (indegree.get(node.id) ?? 0) > 0)) return false;
       }
@@ -675,7 +676,9 @@ export class RewardService {
       const pathSignature = JSON.stringify({ version: 1, routeId: route.id, nodes, edges: pathEdges ?? events, funding: route.funding, merchant: input.merchant, currency: input.amount.currency });
       return { id: `path:${pathSignature}`, routeId: route.id, nodes, events, fundingSource: route.funding, grossReward, netReward: cappedReward, cappedReward, matchedRules, pathSignature, status: 'ready', exclusionReasons: matchedRules.length ? evaluations.length === matchedRules.length ? [] : ['possible stacking policy excluded'] : ['no applicable verified card rule'] };
     });
-    return { status: candidates.length ? 'ok' : 'no_match', candidates, evaluatedAt: asOf };
+    const accepted = new Set(routes.map((route) => route.id));
+    const blocked = visibleRoutes.filter((route) => !accepted.has(route.id)).map((route) => ({ routeId: route.id, reason: route.status !== 'active' || !route.confirmation ? 'route is not active and confirmed' : route.edges?.some((edge) => edge.provenance === 'model_fixture') ? 'model_fixture edge is not admissible in production' : 'missing, stale, conflicting, or non-exact edge evidence' }));
+    return { status: candidates.length ? (blocked.length ? 'partial' : 'ok') : (blocked.length ? 'needs_review' : 'no_match'), candidates, evaluatedAt: asOf, blocked, limits: { maxCandidates: input.limit ?? 20, maxHops: 6, maxEvents: 4, maxBranchesPerNode: 8 } };
   }
 
   recordTransaction(transaction: TransactionTuple): RewardBreakdown {

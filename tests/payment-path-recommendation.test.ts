@@ -19,7 +19,7 @@ describe('proactive payment path recommendation', () => {
   it('fails closed for unverified or non-active routes and remains user scoped', () => {
     const store = new MemoryStore(); const one = new RewardService(store, 'u1'); const two = new RewardService(store, 'u2');
     one.upsertPaymentRoute({ ...route, status: 'candidate', confirmation: undefined, evidenceIds: undefined, idempotencyKey: 'candidate' });
-    expect(one.recommendPaymentPaths({ amount: { amountMinor: 1, currency: 'TWD' } }).candidates).toHaveLength(0);
+    expect(one.recommendPaymentPaths({ amount: { amountMinor: 1, currency: 'TWD' } })).toEqual(expect.objectContaining({ candidates: [], blocked: [expect.objectContaining({ reason: expect.stringContaining('active') })] }));
     expect(two.recommendPaymentPaths({ amount: { amountMinor: 1, currency: 'TWD' } }).candidates).toHaveLength(0);
   });
   it('generates a bounded multi-layer plan without mutating the ledger', () => {
