@@ -628,7 +628,8 @@ export class RewardService {
   }
 
   /** Build only explicitly active, user-owned and officially evidenced routes. */
-  recommendPaymentPaths(input: PaymentPathRequest): PaymentPathRecommendation {
+  recommendPaymentPaths(input: PaymentPathRequest | { kind: 'payment_path'; payment_path: PaymentPathRequest }): PaymentPathRecommendation {
+    if ('kind' in input) input = input.payment_path;
     if (!input || !input.amount || !Number.isSafeInteger(input.amount.amountMinor) || input.amount.amountMinor < 0 || !input.amount.currency) throw new RewardServiceError('INVALID_INPUT', 'payment path amount is invalid');
     const asOf = input.asOf ?? nowIso();
     if (Number.isNaN(Date.parse(asOf))) throw new RewardServiceError('INVALID_INPUT', 'payment path asOf is invalid');
