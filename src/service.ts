@@ -644,27 +644,26 @@ export class RewardService {
       if (route.validTo && Date.parse(route.validTo) < Date.parse(asOf)) return false;
       const validEvidence = (id: string) => state.evidence.some((evidence) => evidence.id === id && evidence.sourceType === 'official' && evidence.reviewState === 'accepted' && (!evidence.validTo || Date.parse(evidence.validTo) >= Date.parse(asOf)));
       if (!route.evidenceIds.every(validEvidence)) return false;
-      if (route.edges?.some((edge) => edge.provenance === 'model_fixture' || !edge.evidenceIds.length || !edge.evidenceIds.every(validEvidence) || edge.evidenceIds.some((id) => { const evidence = state.evidence.find((candidate) => candidate.id === id); const fromRole = route.nodes?.find((node) => node.id === edge.fromNodeId)?.kind; const toRole = route.nodes?.find((node) => node.id === edge.toNodeId)?.kind; return evidence?.claim.fromRole !== undefined && (evidence.claim.fromRole !== fromRole || evidence.claim.toRole !== toRole || evidence.claim.transition !== edge.transition || (edge.market !== undefined && evidence.claim.market !== edge.market) || (edge.currency !== undefined && evidence.claim.currency !== edge.currency)); }))) return false;
       if (route.edges?.length) {
-        const nodeIds = new Set(route.nodes?.map((node) => node.id));
-        if (!route.nodes?.length || route.edges.length > 6 || route.edges.length > 4 || route.edges.some((edge) => !nodeIds.has(edge.fromNodeId) || !nodeIds.has(edge.toNodeId) || edge.fromNodeId === edge.toNodeId)) return false;
-        const indegree = new Map<string, number>(); for (const edge of route.edges) indegree.set(edge.toNodeId, (indegree.get(edge.toNodeId) ?? 0) + 1);
-        if (!route.nodes.some((node) => node.kind === 'merchant' && (indegree.get(node.id) ?? 0) > 0)) return false;
+        if (!route.nodes?.length) return false;
       }
       return true;
     }).sort((a, b) => `${a.id}:${a.edges?.map((edge) => edge.edgeId).sort().join(',') ?? ''}`.localeCompare(`${b.id}:${b.edges?.map((edge) => edge.edgeId).sort().join(',') ?? ''}`)).slice(0, input.limit ?? 20);
     type PathOption = { route: PaymentRouteRecord; pathEdges?: readonly NonNullable<PaymentRouteRecord['edges']>[number][] };
+    const branchBlocked: { routeId: string; reason: string }[] = [];
     const routePaths: PathOption[] = routes.flatMap((route): PathOption[] => {
       if (!route.edges?.length || !route.nodes?.length) return [{ route }];
+      const validEvidence = (id: string) => state.evidence.some((evidence) => evidence.id === id && evidence.sourceType === 'official' && evidence.reviewState === 'accepted' && (!evidence.validTo || Date.parse(evidence.validTo) >= Date.parse(asOf)));
+      const usable = (edge: NonNullable<PaymentRouteRecord['edges']>[number]) => edge.provenance !== 'model_fixture' && edge.evidenceIds.length > 0 && edge.evidenceIds.every(validEvidence) && edge.evidenceIds.every((id) => { const evidence = state.evidence.find((candidate) => candidate.id === id); const fromRole = route.nodes?.find((node) => node.id === edge.fromNodeId)?.kind; const toRole = route.nodes?.find((node) => node.id === edge.toNodeId)?.kind; return evidence?.claim.fromRole === undefined || (evidence.claim.fromRole === fromRole && evidence.claim.toRole === toRole && evidence.claim.transition === edge.transition && (edge.market === undefined || evidence.claim.market === edge.market) && (edge.currency === undefined || evidence.claim.currency === edge.currency)); });
       const adjacency = new Map<string, typeof route.edges>();
-      for (const edge of [...route.edges].sort((a, b) => a.edgeId.localeCompare(b.edgeId))) adjacency.set(edge.fromNodeId, [...(adjacency.get(edge.fromNodeId) ?? []), edge]);
+      for (const edge of [...route.edges].sort((a, b) => a.edgeId.localeCompare(b.edgeId))) { if (!usable(edge)) { branchBlocked.push({ routeId: route.id, reason: `edge ${edge.edgeId} lacks exact current evidence` }); continue; } adjacency.set(edge.fromNodeId, [...(adjacency.get(edge.fromNodeId) ?? []), edge]); }
       const starts = route.nodes.filter((node) => node.kind === 'funding_source').map((node) => node.id).sort();
       const paths: PathOption[] = [];
       const visit = (nodeId: string, seen: Set<string>, path: NonNullable<PaymentRouteRecord['edges']>[number][]) => {
-        if (path.length > 6 || paths.length >= 20) return;
+        if (path.length > 6 || path.length >= 4 || paths.length >= 20) { if (path.length >= 4) branchBlocked.push({ routeId: route.id, reason: 'branch exceeds maxEvents=4' }); return; }
         const node = route.nodes?.find((candidate) => candidate.id === nodeId);
         if (node?.kind === 'merchant' && path.length) { paths.push({ route, pathEdges: path }); return; }
-        for (const edge of adjacency.get(nodeId) ?? []) { if (seen.has(edge.toNodeId)) continue; visit(edge.toNodeId, new Set([...seen, edge.toNodeId]), [...path, edge]); }
+        for (const edge of adjacency.get(nodeId) ?? []) { if (seen.has(edge.toNodeId)) { branchBlocked.push({ routeId: route.id, reason: `cycle branch blocked at edge ${edge.edgeId}` }); continue; } visit(edge.toNodeId, new Set([...seen, edge.toNodeId]), [...path, edge]); }
       };
       for (const start of starts) visit(start, new Set([start]), []);
       return paths;
@@ -693,7 +692,7 @@ export class RewardService {
       return { id: `path:${pathSignature}`, routeId: route.id, nodes, events, fundingSource: route.funding, grossReward, netReward: cappedReward, cappedReward, matchedRules, pathSignature, status: 'ready', exclusionReasons: matchedRules.length ? evaluations.length === matchedRules.length ? [] : ['possible stacking policy excluded'] : ['no applicable verified card rule'] };
     });
     const accepted = new Set(routes.map((route) => route.id));
-    const blocked = visibleRoutes.filter((route) => !accepted.has(route.id)).map((route) => ({ routeId: route.id, reason: route.status !== 'active' || !route.confirmation ? 'route is not active and confirmed' : route.edges?.some((edge) => edge.provenance === 'model_fixture') ? 'model_fixture edge is not admissible in production' : 'missing, stale, conflicting, or non-exact edge evidence' }));
+    const blocked = [...visibleRoutes.filter((route) => !accepted.has(route.id)).map((route) => ({ routeId: route.id, reason: route.status !== 'active' || !route.confirmation ? 'route is not active and confirmed' : 'route has no admissible terminal branch' })), ...branchBlocked];
     return { status: candidates.length ? (blocked.length ? 'partial' : 'ok') : (blocked.length ? 'needs_review' : 'no_match'), candidates, evaluatedAt: asOf, blocked, limits: { maxCandidates: input.limit ?? 20, maxHops: 6, maxEvents: 4, maxBranchesPerNode: 8 } };
   }
 
