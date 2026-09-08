@@ -36,4 +36,11 @@ describe('proactive payment path recommendation', () => {
     service.upsertPaymentRoute({ status: 'active', idempotencyKey: 'fixture-route', layers: [], funding: { kind: 'cash' }, observedAt: '2026-09-01T00:00:00Z', sourceUrl: 'https://wallet.example/terms', authority: 'wallet', confidence: 'high', evidenceIds: [evidence.id], nodes: [{ id: 'cash', kind: 'funding_source', displayName: 'cash' }, { id: 'merchant', kind: 'merchant', displayName: 'merchant' }], edges: [{ edgeId: 'e', fromNodeId: 'cash', toNodeId: 'merchant', transition: 'direct_settlement', evidenceIds: [evidence.id], provenance: 'model_fixture' }], confirmation: { confirmedAt: '2026-09-01T00:00:00Z', confirmedBy: 'u1' } });
     expect(service.recommendPaymentPaths({ amount: { amountMinor: 1, currency: 'TWD' } }).candidates).toHaveLength(0);
   });
+  it('is deterministic and rejects bounds beyond the public limit', () => {
+    const store = new MemoryStore(); const service = new RewardService(store, 'u1');
+    expect(() => service.recommendPaymentPaths({ amount: { amountMinor: 1, currency: 'TWD' }, limit: 21 })).toThrow(/limit/);
+    const first = service.recommendPaymentPaths({ amount: { amountMinor: 1, currency: 'TWD' } });
+    const second = service.recommendPaymentPaths({ amount: { amountMinor: 1, currency: 'TWD' } });
+    expect(second).toEqual(first);
+  });
 });

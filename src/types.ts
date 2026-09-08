@@ -557,8 +557,10 @@ export interface PaymentPathCandidate {
   cappedReward: Money;
   matchedRules: readonly { ruleId: string; ruleVersion: string; component: string; reward: Money }[];
   exclusionReasons: readonly string[];
+  status?: 'ready' | 'blocked' | 'no_match';
+  pathSignature?: string;
 }
-export interface PaymentPathRecommendation { status: 'ok' | 'no_match'; candidates: readonly PaymentPathCandidate[]; evaluatedAt: string; }
+export interface PaymentPathRecommendation { status: 'ok' | 'partial' | 'needs_facts' | 'needs_review' | 'no_match'; candidates: readonly PaymentPathCandidate[]; evaluatedAt: string; blocked?: readonly { routeId: string; reason: string }[]; diagnostics?: readonly string[]; limits?: { maxCandidates: number; maxHops: number; maxEvents: number; maxBranchesPerNode: number }; }
 
 export interface McpToolContract {
   name: string;

@@ -633,6 +633,7 @@ export class RewardService {
     if (!input || !input.amount || !Number.isSafeInteger(input.amount.amountMinor) || input.amount.amountMinor < 0 || !input.amount.currency) throw new RewardServiceError('INVALID_INPUT', 'payment path amount is invalid');
     const asOf = input.asOf ?? nowIso();
     if (Number.isNaN(Date.parse(asOf))) throw new RewardServiceError('INVALID_INPUT', 'payment path asOf is invalid');
+    if (input.limit !== undefined && (!Number.isSafeInteger(input.limit) || input.limit < 1 || input.limit > 20)) throw new RewardServiceError('INVALID_INPUT', 'payment path limit must be 1..20');
     const state = this.store.read();
     const requested = input.routeIds === undefined ? undefined : new Set(input.routeIds);
     const routes = this.listPaymentRoutes().filter((route) => requested === undefined || requested.has(route.id)).filter((route) => {
@@ -642,7 +643,7 @@ export class RewardService {
       if (route.validTo && Date.parse(route.validTo) < Date.parse(asOf)) return false;
       const validEvidence = (id: string) => state.evidence.some((evidence) => evidence.id === id && evidence.sourceType === 'official' && evidence.reviewState === 'accepted' && (!evidence.validTo || Date.parse(evidence.validTo) >= Date.parse(asOf)));
       if (!route.evidenceIds.every(validEvidence)) return false;
-      if (route.edges?.some((edge) => edge.provenance === 'model_fixture' || !edge.evidenceIds.length || !edge.evidenceIds.every(validEvidence))) return false;
+      if (route.edges?.some((edge) => edge.provenance === 'model_fixture' || !edge.evidenceIds.length || !edge.evidenceIds.every(validEvidence) || edge.evidenceIds.some((id) => { const evidence = state.evidence.find((candidate) => candidate.id === id); const fromRole = route.nodes?.find((node) => node.id === edge.fromNodeId)?.kind; const toRole = route.nodes?.find((node) => node.id === edge.toNodeId)?.kind; return evidence?.claim.fromRole !== undefined && (evidence.claim.fromRole !== fromRole || evidence.claim.toRole !== toRole || evidence.claim.transition !== edge.transition || (edge.market !== undefined && evidence.claim.market !== edge.market) || (edge.currency !== undefined && evidence.claim.currency !== edge.currency)); }))) return false;
       if (route.edges?.length) {
         const nodeIds = new Set(route.nodes?.map((node) => node.id));
         if (!route.nodes?.length || route.edges.length > 6 || route.edges.some((edge) => !nodeIds.has(edge.fromNodeId) || !nodeIds.has(edge.toNodeId) || edge.fromNodeId === edge.toNodeId)) return false;
@@ -650,14 +651,15 @@ export class RewardService {
         if (!route.nodes.some((node) => node.kind === 'merchant' && (indegree.get(node.id) ?? 0) > 0)) return false;
       }
       return true;
-    }).slice(0, Math.min(input.limit ?? 20, 20));
+    }).sort((a, b) => `${a.id}:${a.edges?.map((edge) => edge.edgeId).sort().join(',') ?? ''}`.localeCompare(`${b.id}:${b.edges?.map((edge) => edge.edgeId).sort().join(',') ?? ''}`)).slice(0, input.limit ?? 20);
     const candidates: PaymentPathCandidate[] = routes.map((route) => {
       const fundingId = route.funding.kind === 'credit_card' ? route.funding.cardId : route.funding.kind === 'account' ? route.funding.accountId : undefined;
       const fundingLabel = route.funding.kind === 'credit_card' ? `card:${fundingId ?? 'unknown'}` : route.funding.kind === 'account' ? `${route.funding.subtype}:${fundingId ?? 'unknown'}` : 'cash';
       const fundingNode = { id: 'funding', kind: route.funding.kind, displayName: fundingLabel };
-      const nodes = route.nodes?.length ? route.nodes : [fundingNode, ...route.layers.map((layer, index) => ({ id: `node-${index + 1}`, kind: layer.kind, displayName: layer.displayName ?? layer.providerId ?? layer.appId ?? layer.kind }))];
-      const events = route.edges?.length
-        ? route.edges.map((edge) => ({ kind: edge.transition === 'wallet_top_up' || edge.transition === 'account_debit' ? 'top_up' as const : 'purchase' as const, fromNodeId: edge.fromNodeId, toNodeId: edge.toNodeId }))
+      const nodes = (route.nodes?.length ? [...route.nodes] : [fundingNode, ...route.layers.map((layer, index) => ({ id: `node-${index + 1}`, kind: layer.kind, displayName: layer.displayName ?? layer.providerId ?? layer.appId ?? layer.kind }))]).sort((a, b) => a.id.localeCompare(b.id));
+      const pathEdges = route.edges ? [...route.edges].sort((a, b) => a.edgeId.localeCompare(b.edgeId)) : undefined;
+      const events = pathEdges?.length
+        ? pathEdges.map((edge) => ({ kind: edge.transition === 'wallet_top_up' || edge.transition === 'account_debit' ? 'top_up' as const : 'purchase' as const, fromNodeId: edge.fromNodeId, toNodeId: edge.toNodeId }))
         : route.layers.length === 0
         ? [{ kind: route.funding.kind === 'credit_card' ? 'card_authorization' as const : 'account_debit' as const, fromNodeId: 'funding', toNodeId: 'funding' }]
         : route.layers.map((_, index) => ({ kind: index < route.layers.length - 1 ? 'top_up' as const : 'purchase' as const, fromNodeId: index === 0 ? 'funding' : `node-${index}`, toNodeId: `node-${index + 1}` }));
@@ -670,7 +672,8 @@ export class RewardService {
       const sum = (field: 'grossReward' | 'cappedReward') => matchedRules.reduce((amount, item) => amount + (item.reward.amountMinor), 0);
       const cappedReward = matchedRules.length ? { amountMinor: sum('cappedReward'), currency: input.amount.currency } : zero;
       const grossReward = matchedRules.length ? { amountMinor: sum('grossReward'), currency: input.amount.currency } : zero;
-      return { id: `path:${route.id}`, routeId: route.id, nodes, events, fundingSource: route.funding, grossReward, netReward: cappedReward, cappedReward, matchedRules, exclusionReasons: matchedRules.length ? evaluations.length === matchedRules.length ? [] : ['possible stacking policy excluded'] : ['no applicable verified card rule'] };
+      const pathSignature = JSON.stringify({ version: 1, routeId: route.id, nodes, edges: pathEdges ?? events, funding: route.funding, merchant: input.merchant, currency: input.amount.currency });
+      return { id: `path:${pathSignature}`, routeId: route.id, nodes, events, fundingSource: route.funding, grossReward, netReward: cappedReward, cappedReward, matchedRules, pathSignature, status: 'ready', exclusionReasons: matchedRules.length ? evaluations.length === matchedRules.length ? [] : ['possible stacking policy excluded'] : ['no applicable verified card rule'] };
     });
     return { status: candidates.length ? 'ok' : 'no_match', candidates, evaluatedAt: asOf };
   }
