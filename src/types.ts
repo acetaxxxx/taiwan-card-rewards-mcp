@@ -12,6 +12,19 @@ export interface PaymentRouteContext {
   transactionCurrency: Currency; settlementCurrency?: Currency; billingCurrency?: Currency; conversionOwner?: ConversionOwner; rateType?: FxRateType; conversionTiming?: ConversionTiming;
   foreignTransactionFee?: Money; markup?: Money; serviceFee?: Money; dcc?: boolean;
 }
+export type PaymentEventKind = 'top_up' | 'purchase' | 'refund' | 'reversal' | 'reward_issuance' | 'reward_redemption';
+export type PaymentEventFunding = { kind: 'credit_card'; cardId?: string } | { kind: 'account'; subtype: 'linked_bank_account' | 'wallet_balance' | 'foreign_currency_account' } | { kind: 'cash' };
+export interface PaymentEventRelations { funded_by?: readonly string[]; caused_by?: readonly string[]; refunds?: readonly string[]; }
+export interface PaymentEvent { id: string; kind: PaymentEventKind; amount: Money; occurredAt: string; funding: PaymentEventFunding; cardId?: string; routeId?: string; channel?: string; paymentMethod?: string; relations?: PaymentEventRelations; }
+export interface PaymentEventRule { id: string; version: string; eventKind: PaymentEventKind; fundingKind?: PaymentEventFunding['kind']; fundingSubtype?: Extract<PaymentEventFunding, { kind: 'account' }>['subtype']; channel?: string; paymentMethod?: string; }
+export interface PaymentEventMatch { status: 'matched' | 'no_match' | 'unknown'; reasons: readonly string[]; }
+export interface PaymentEventChainRule { id: string; version: string; relation: 'funded_by'; windowSeconds: number; sourceRule: PaymentEventRule; targetRule: PaymentEventRule; }
+export interface PaymentEventRewardCandidate { eventId: string; ruleId: string; ruleVersion: string; evidenceId: string; sponsor: string; benefitGroup: string; reward?: RewardSpec; combination?: RewardCombinationPolicy; capPoolId?: string; }
+export interface PaymentEventRewardCandidateInput extends PaymentEventRewardCandidate { eligibility: PaymentEventMatch; }
+export interface PaymentEventRewardDecision { status: 'matched' | 'no_match' | 'needs_review'; candidates: readonly PaymentEventRewardCandidate[]; reasons: readonly string[]; }
+export interface EventRewardLedgerRecord { idempotencyKey: string; ownerUser: string; eventId: string; eventAmount: Money; ruleId: string; ruleVersion: string; evidenceId: string; sponsor: string; benefitGroup: string; reward: Money; rewardSpecFingerprint: string; capUsage?: { poolId: string; periodKey: string; consumedAmount: number }; }
+export interface EventRewardReversalRecord { idempotencyKey: string; ownerUser: string; eventId: string; originalEventId: string; refundedAmount: Money; ruleId: string; ruleVersion: string; evidenceId: string; sponsor: string; benefitGroup: string; reward: Money; capUsage?: { poolId: string; periodKey: string; consumedAmount: number }; }
+export interface EventRewardCapUsageRecord { ownerUser: string; poolId: string; periodKey: string; consumedAmount: number; }
 export type PaymentRouteLayerKind = 'merchant_loyalty' | 'merchant_acceptance' | 'consumer_app' | 'payment_provider' | 'wallet' | 'interoperability_scheme' | 'intermediate_provider' | 'card_network' | 'card_issuer';
 export interface PaymentRouteLayer { kind: PaymentRouteLayerKind; providerId?: string; appId?: string; paymentMethod?: string; displayName?: string; evidenceIds?: readonly string[]; }
 export type FundingInstrument =

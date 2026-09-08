@@ -99,6 +99,9 @@ async function callTool(service: RewardService, params: Record<string, unknown>)
     case 'upsert_payment_route': return service.upsertPaymentRoute(args.route);
     case 'list_payment_routes': { const rows = [...service.listPaymentRoutes()]; return (args.limit !== undefined || args.page !== undefined || args.projection !== undefined) ? paged(rows, typeof args.projection === 'string' ? args.projection : undefined, typeof args.page === 'number' ? args.page : undefined, typeof args.limit === 'number' ? args.limit : undefined, (item) => String((item as { id: string }).id)) : rows; }
     case 'record_transaction': return service.recordTransaction(validateTransaction(args.transaction));
+    case 'record_event_reward_v1': return service.recordEventReward(args);
+    case 'record_event_reward_v2': return service.recordValidatedEventReward(args);
+    case 'reverse_event_reward_v1': return service.reverseEventReward(args);
     case 'remaining_caps': { const rows = service.remainingCaps(String(args.cardId), typeof args.asOf === 'string' ? args.asOf : undefined); return (args.limit !== undefined || args.page !== undefined || args.projection !== undefined) ? paged(rows, typeof args.projection === 'string' ? args.projection : undefined, typeof args.page === 'number' ? args.page : undefined, typeof args.limit === 'number' ? args.limit : undefined, (item) => String((item as { usageKey: string }).usageKey)) : rows; }
     case 'get_user_benefit_status': {
       const kind = args.kind;

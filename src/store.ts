@@ -1,7 +1,7 @@
 import * as crypto from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import type { CardDescriptor, CardSwitchCampaign, CardSwitchEnrollment, CardSwitchProjection, CapPoolDefinition, MerchantIdentity, OfferRuleVersion, OfferSourceSnapshot, RewardBreakdown, RewardComponentRecord, TransactionTuple, EvidenceRecord, FactCandidate, PaymentRouteRecord } from './types.js';
+import type { CardDescriptor, CardSwitchCampaign, CardSwitchEnrollment, CardSwitchProjection, CapPoolDefinition, MerchantIdentity, OfferRuleVersion, OfferSourceSnapshot, RewardBreakdown, RewardComponentRecord, TransactionTuple, EvidenceRecord, FactCandidate, PaymentRouteRecord, EventRewardLedgerRecord, EventRewardReversalRecord, EventRewardCapUsageRecord } from './types.js';
 import type { StartupConfig } from './startup.js';
 import { validateStoredState } from './validation.js';
 
@@ -27,9 +27,13 @@ export interface StoredState {
   evidence: EvidenceRecord[];
   factCandidates: FactCandidate[];
   paymentRoutes: PaymentRouteRecord[];
+  eventRewardSchemaVersion: 1;
+  eventRewardLedger: EventRewardLedgerRecord[];
+  eventRewardReversals: EventRewardReversalRecord[];
+  eventRewardCapUsage: EventRewardCapUsageRecord[];
 }
 
-export const emptyState = (): StoredState => ({ schemaVersion: 2, cards: [], snapshots: [], rules: [], transactions: [], campaigns: [], switchEnrollments: [], cardSwitches: [], capPools: [], rewardComponents: [], merchants: [], evidence: [], factCandidates: [], paymentRoutes: [] });
+export const emptyState = (): StoredState => ({ schemaVersion: 2, cards: [], snapshots: [], rules: [], transactions: [], campaigns: [], switchEnrollments: [], cardSwitches: [], capPools: [], rewardComponents: [], merchants: [], evidence: [], factCandidates: [], paymentRoutes: [], eventRewardSchemaVersion: 1, eventRewardLedger: [], eventRewardReversals: [], eventRewardCapUsage: [] });
 
 export class StoreError extends Error {
   constructor(public readonly code: string, message: string) {

@@ -1,10 +1,10 @@
 import * as crypto from 'node:crypto';
 import { type LedgerStore, type RecordedTransaction, type StoredState } from './store.js';
-import { convertMinor, evaluateOffer, rankCards, resolveCyclePeriodKey } from './evaluator.js';
-import type { CardDescriptor, CardSwitchInput, CardSwitchProjection, CardSwitchStatus, CapPeriod, CapPoolDefinition, EvaluationContext, MerchantIdentity, MerchantResolution, Money, OfferConfirmation, OfferRuleVersion, OfferSourceSnapshot, RankingEntry, RewardBreakdown, RewardComponentRecord, TransactionTuple, UserBenefitInput, UserBenefitStatus, RecommendationPreflight, RecommendationRequiredAction, RecommendationRequirement, Diagnostic, EvidenceRecord, PaymentRouteRecord } from './types.js';
+import { EventRewardLedger, convertMinor, createPaymentEventRewardCandidate, decidePaymentEventRewards, evaluateOffer, matchPaymentEvent, matchPaymentEventChain, rankCards, resolveCyclePeriodKey } from './evaluator.js';
+import type { CardDescriptor, CardSwitchInput, CardSwitchProjection, CardSwitchStatus, CapPeriod, CapPoolDefinition, EvaluationContext, MerchantIdentity, MerchantResolution, Money, OfferConfirmation, OfferRuleVersion, OfferSourceSnapshot, RankingEntry, RewardBreakdown, RewardComponentRecord, TransactionTuple, UserBenefitInput, UserBenefitStatus, RecommendationPreflight, RecommendationRequiredAction, RecommendationRequirement, Diagnostic, EvidenceRecord, PaymentRouteRecord, EventRewardLedgerRecord, EventRewardReversalRecord } from './types.js';
 import type { StartupConfig } from './startup.js';
 import { RewardServiceError } from './errors.js';
-import { validateCard, validateCapPool, validateConfirmation, validateMerchant, validateRecommendationTransaction, validateRule, validateSnapshot, validateTransaction, validateEvidence, validateFactCandidate, validatePaymentRouteRecord } from './validation.js';
+import { validateCard, validateCapPool, validateConfirmation, validateMerchant, validateRecommendationTransaction, validateRule, validateSnapshot, validateTransaction, validateEvidence, validateFactCandidate, validatePaymentRouteRecord, validateEventRewardInput, validatePaymentEvent, validatePaymentEventChainRule, validatePaymentEventRule } from './validation.js';
 import { cardSwitchStatus, projectionFromInput } from './card-switch.js';
 
 export { RewardServiceError } from './errors.js';
@@ -39,6 +39,48 @@ function normalizedMerchantKey(value: string): string {
 
 export class RewardService {
   constructor(readonly store: LedgerStore, readonly metadataUser: string | undefined) {}
+
+  recordEventReward(input: unknown): EventRewardLedgerRecord {
+    if (!this.metadataUser) throw new RewardServiceError('UNAUTHENTICATED', 'event reward recording requires an authenticated user');
+    const parsed = validateEventRewardInput(input);
+    const state = this.store.read();
+    return new EventRewardLedger(this.metadataUser, state.capPools, this.store).record(createPaymentEventRewardCandidate(parsed.candidate), parsed.event, parsed.idempotencyKey);
+  }
+
+  recordValidatedEventReward(input: unknown): EventRewardLedgerRecord {
+    if (!this.metadataUser) throw new RewardServiceError('UNAUTHENTICATED', 'event reward recording requires an authenticated user');
+    const source = typeof input === 'object' && input !== null ? input as Record<string, unknown> : {};
+    if (Object.keys(source).some((key) => !['event', 'sourceEvents', 'rule', 'chainRule', 'candidate', 'idempotencyKey'].includes(key))) throw new RewardServiceError('UNKNOWN_FIELD', 'validated event reward contains unsupported field');
+    if (source.rule !== undefined && source.chainRule !== undefined) throw new RewardServiceError('INVALID_INPUT', 'validated event reward accepts either rule or chainRule, not both');
+    if (source.rule === undefined && source.chainRule === undefined) throw new RewardServiceError('INVALID_INPUT', 'validated event reward requires a rule or chainRule');
+    if (source.chainRule !== undefined && source.sourceEvents === undefined) throw new RewardServiceError('INVALID_INPUT', 'validated event reward chainRule requires sourceEvents');
+    const event = validatePaymentEvent(source.event);
+    const sourceEventsValue = source.sourceEvents === undefined ? [] : source.sourceEvents;
+    if (!Array.isArray(sourceEventsValue) || sourceEventsValue.length > 16) throw new RewardServiceError('INVALID_INPUT', 'sourceEvents must contain at most 16 events');
+    const sourceEvents = sourceEventsValue.map(validatePaymentEvent);
+    const parsedCandidate = validateEventRewardInput({ event, candidate: source.candidate, idempotencyKey: source.idempotencyKey }).candidate;
+    const eligibility = source.chainRule === undefined ? matchPaymentEvent(validatePaymentEventRule(source.rule), event) : matchPaymentEventChain(validatePaymentEventChainRule(source.chainRule), event, sourceEvents);
+    const candidate = createPaymentEventRewardCandidate({ ...parsedCandidate, eventId: event.id, eligibility });
+    const state = this.store.read();
+    const ledger = new EventRewardLedger(this.metadataUser, state.capPools, this.store);
+    if (candidate) {
+      const existingEventReward = ledger.list().some((record) => record.eventId === event.id && record.idempotencyKey !== source.idempotencyKey);
+      if (existingEventReward) throw new RewardServiceError('NEEDS_REVIEW', 'event reward candidates require an explicit stacking decision before durable recording');
+      const decision = decidePaymentEventRewards([candidate]);
+      if (decision.status !== 'matched') throw new RewardServiceError('NEEDS_REVIEW', 'event reward combination policy requires review');
+    }
+    return ledger.record(candidate, event, String(source.idempotencyKey));
+  }
+
+  reverseEventReward(input: unknown): EventRewardReversalRecord {
+    if (!this.metadataUser) throw new RewardServiceError('UNAUTHENTICATED', 'event reward reversal requires an authenticated user');
+    const source = typeof input === 'object' && input !== null ? input as Record<string, unknown> : {};
+    if (Object.keys(source).some((key) => !['event', 'idempotencyKey'].includes(key))) throw new RewardServiceError('UNKNOWN_FIELD', 'event reward reversal contains unsupported field');
+    const event = validatePaymentEvent(source.event);
+    const idempotencyKey = typeof source.idempotencyKey === 'string' ? source.idempotencyKey : (() => { throw new RewardServiceError('INVALID_INPUT', 'event reward reversal idempotencyKey is required'); })();
+    const state = this.store.read();
+    return new EventRewardLedger(this.metadataUser, state.capPools, this.store).reverse(event, idempotencyKey);
+  }
 
   submitEvidence(input: unknown): EvidenceRecord {
     const parsed = validateEvidence(input);
