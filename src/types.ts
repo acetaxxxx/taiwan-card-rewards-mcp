@@ -13,7 +13,7 @@ export interface PaymentRouteContext {
   foreignTransactionFee?: Money; markup?: Money; serviceFee?: Money; dcc?: boolean;
 }
 export type PaymentEventKind = 'top_up' | 'purchase' | 'refund' | 'reversal' | 'reward_issuance' | 'reward_redemption';
-export type PaymentEventFunding = { kind: 'credit_card'; cardId?: string } | { kind: 'account'; subtype: 'linked_bank_account' | 'wallet_balance' | 'foreign_currency_account' } | { kind: 'cash' };
+export type PaymentEventFunding = { kind: 'credit_card'; cardId?: string } | { kind: 'account'; subtype: 'linked_bank_account' | 'wallet_balance' | 'foreign_currency_account'; accountId?: string } | { kind: 'cash' };
 export interface PaymentEventRelations { funded_by?: readonly string[]; caused_by?: readonly string[]; refunds?: readonly string[]; }
 export interface PaymentEvent { id: string; kind: PaymentEventKind; amount: Money; occurredAt: string; funding: PaymentEventFunding; cardId?: string; routeId?: string; channel?: string; paymentMethod?: string; relations?: PaymentEventRelations; }
 export interface PaymentEventRule { id: string; version: string; eventKind: PaymentEventKind; fundingKind?: PaymentEventFunding['kind']; fundingSubtype?: Extract<PaymentEventFunding, { kind: 'account' }>['subtype']; channel?: string; paymentMethod?: string; }
@@ -29,7 +29,7 @@ export type PaymentRouteLayerKind = 'merchant_loyalty' | 'merchant_acceptance' |
 export interface PaymentRouteLayer { kind: PaymentRouteLayerKind; providerId?: string; appId?: string; paymentMethod?: string; displayName?: string; evidenceIds?: readonly string[]; }
 export type FundingInstrument =
   | { kind: 'credit_card'; cardId?: string }
-  | { kind: 'account'; subtype: 'linked_bank_account' | 'wallet_balance' | 'foreign_currency_account' }
+  | { kind: 'account'; subtype: 'linked_bank_account' | 'wallet_balance' | 'foreign_currency_account'; accountId?: string }
   | { kind: 'cash' };
 export interface PaymentRouteRecord {
   id: string;
@@ -46,6 +46,21 @@ export interface PaymentRouteRecord {
   confidence?: 'high' | 'medium' | 'low';
   confirmation?: { confirmedAt: string; confirmedBy: string };
   evidenceIds?: readonly string[];
+  idempotencyKey: string;
+  ownerUser?: string;
+}
+export type PaymentAccountKind = 'linked_bank_account' | 'wallet_balance' | 'foreign_currency_account';
+export interface PaymentAccountRecord {
+  id: string;
+  providerId: string;
+  kind: PaymentAccountKind;
+  displayName: string;
+  status: 'candidate' | 'active' | 'stale' | 'needs_review';
+  observedAt: string;
+  sourceUrl?: string;
+  sourceSnapshotId?: string;
+  evidenceIds?: readonly string[];
+  confirmation?: { confirmedAt: string; confirmedBy: string };
   idempotencyKey: string;
   ownerUser?: string;
 }
@@ -268,6 +283,9 @@ export interface OfferRuleVersion {
   capPoolRefs?: readonly string[] | undefined;
   /** Optional exact PaymentRoute binding; absent means the legacy generic rule. */
   routeId?: string | undefined;
+  /** Optional recommendation-time event eligibility; exactly one may be supplied. */
+  eventRule?: PaymentEventRule | undefined;
+  eventChainRule?: PaymentEventChainRule | undefined;
 }
 
 export interface FxSnapshot {
@@ -503,6 +521,7 @@ export interface EvaluationContext {
   capPools?: readonly CapPoolDefinition[] | undefined;
   benefitStatuses?: readonly UserBenefitStatus[] | undefined;
   paymentRoutes?: readonly PaymentRouteRecord[] | undefined;
+  paymentEvents?: { target: PaymentEvent; sourceEvents: readonly PaymentEvent[] } | undefined;
 }
 
 export interface RankingEntry extends RewardBreakdown {

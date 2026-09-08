@@ -49,8 +49,8 @@ docs/agents/taiwan-card-rewards-skill/
 ├── README.md                                          # [導覽] 本說明文件與快速安裝指南
 ├── references/                                        # [規範] 架構與合約規範
 │   ├── architecture-and-boundaries.md                 # MCP vs Agent 權責劃分與資料隔離
-│   ├── mcp-tools-v0.9.0.md                            # 15 項公開 MCP 工具簽名、參數與錯誤碼
-│   ├── mcp-tool-call-playbook.md                      # 15 項工具之標準實戰 JSON Payload 呼叫手冊
+│   ├── mcp-tools-v0.9.0.md                            # 20 項公開 MCP 工具簽名、參數與錯誤碼
+│   ├── mcp-tool-call-playbook.md                      # 20 項工具之標準實戰 JSON Payload 呼叫手冊
 │   └── lifecycle-and-privacy.md                       # 實體 ID 生命週期與隱私脫敏守則
 ├── workflows/                                         # [流程] 標準作業程序 (SOP)
 │   ├── card-onboarding-and-benefit-enrollment.md      # 初次持卡安全登錄與動態權益設定 SOP

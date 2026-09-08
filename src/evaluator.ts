@@ -494,6 +494,14 @@ export function evaluateOffer(
   } else if (rule.routeId !== undefined) {
     return base;
   }
+  if (rule.eventRule !== undefined || rule.eventChainRule !== undefined) {
+    const path = context.paymentEvents;
+    if (!path) return { ...base, status: 'unknown', ruleId: rule.id, ruleVersion: rule.version, unknownReasons: ['recommendation payment event path is missing'], diagnostics: [diagnostic('missing_required_fact', 'context.paymentEvents', ['target event and explicit source events'], 'ask_user')] };
+    if (path.target.amount.amountMinor !== tx.amount.amountMinor || path.target.amount.currency !== tx.amount.currency || path.target.occurredAt !== tx.occurredAt) return { ...base, status: 'unknown', ruleId: rule.id, ruleVersion: rule.version, unknownReasons: ['target payment event does not match recommendation transaction'], diagnostics: [diagnostic('invalid_input', 'context.paymentEvents.target', ['target event amount and timestamp'], 'rebuild_payment_event_path')] };
+    const eventMatch = rule.eventRule !== undefined ? matchPaymentEvent(rule.eventRule, path.target) : matchPaymentEventChain(rule.eventChainRule!, path.target, path.sourceEvents);
+    if (eventMatch.status === 'no_match') return base;
+    if (eventMatch.status === 'unknown') return { ...base, status: 'unknown', ruleId: rule.id, ruleVersion: rule.version, unknownReasons: [...eventMatch.reasons], diagnostics: [diagnostic('missing_required_fact', 'context.paymentEvents', ['complete evidenced payment path'], 'ask_user')] };
+  }
   if (rule.status !== 'active') {
     return { ...base, status: rule.status === 'stale' ? 'stale' : 'needs_review', ruleId: rule.id, unknownReasons: [`rule status is ${rule.status}`], diagnostics: [diagnostic(rule.status === 'stale' ? 'stale_rule' : 'needs_review', 'rule.status', ['rule confirmation'], 'refresh_or_confirm_offer')] };
   }

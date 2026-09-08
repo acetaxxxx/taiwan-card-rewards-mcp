@@ -1,10 +1,10 @@
 import * as crypto from 'node:crypto';
 import { type LedgerStore, type RecordedTransaction, type StoredState } from './store.js';
 import { EventRewardLedger, convertMinor, createPaymentEventRewardCandidate, decidePaymentEventRewards, evaluateOffer, matchPaymentEvent, matchPaymentEventChain, rankCards, resolveCyclePeriodKey } from './evaluator.js';
-import type { CardDescriptor, CardSwitchInput, CardSwitchProjection, CardSwitchStatus, CapPeriod, CapPoolDefinition, EvaluationContext, MerchantIdentity, MerchantResolution, Money, OfferConfirmation, OfferRuleVersion, OfferSourceSnapshot, RankingEntry, RewardBreakdown, RewardComponentRecord, TransactionTuple, UserBenefitInput, UserBenefitStatus, RecommendationPreflight, RecommendationRequiredAction, RecommendationRequirement, Diagnostic, EvidenceRecord, PaymentRouteRecord, EventRewardLedgerRecord, EventRewardReversalRecord } from './types.js';
+import type { CardDescriptor, CardSwitchInput, CardSwitchProjection, CardSwitchStatus, CapPeriod, CapPoolDefinition, EvaluationContext, MerchantIdentity, MerchantResolution, Money, OfferConfirmation, OfferRuleVersion, OfferSourceSnapshot, RankingEntry, RewardBreakdown, RewardComponentRecord, TransactionTuple, UserBenefitInput, UserBenefitStatus, RecommendationPreflight, RecommendationRequiredAction, RecommendationRequirement, Diagnostic, EvidenceRecord, PaymentRouteRecord, PaymentAccountRecord, EventRewardLedgerRecord, EventRewardReversalRecord } from './types.js';
 import type { StartupConfig } from './startup.js';
 import { RewardServiceError } from './errors.js';
-import { validateCard, validateCapPool, validateConfirmation, validateMerchant, validateRecommendationTransaction, validateRule, validateSnapshot, validateTransaction, validateEvidence, validateFactCandidate, validatePaymentRouteRecord, validateEventRewardInput, validatePaymentEvent, validatePaymentEventChainRule, validatePaymentEventRule } from './validation.js';
+import { validateCard, validateCapPool, validateConfirmation, validateMerchant, validateRecommendationTransaction, validateRule, validateSnapshot, validateTransaction, validateEvidence, validateFactCandidate, validatePaymentRouteRecord, validatePaymentAccountRecord, validateEventRewardInput, validatePaymentEvent, validatePaymentEventChainRule, validatePaymentEventRule } from './validation.js';
 import { cardSwitchStatus, projectionFromInput } from './card-switch.js';
 
 export { RewardServiceError } from './errors.js';
@@ -24,7 +24,7 @@ function merchantId(): string {
   for (let i = 0; i < 16; i += 1) encoded += ULID_ALPHABET[bytes[i % bytes.length]! % 32];
   return `mch_${encoded}`;
 }
-function ownedId(prefix: 'ev' | 'fact' | 'route'): string {
+function ownedId(prefix: 'ev' | 'fact' | 'route' | 'acct'): string {
   let time = Date.now();
   let encoded = '';
   for (let i = 0; i < 10; i += 1) { encoded = ULID_ALPHABET[time % 32] + encoded; time = Math.floor(time / 32); }
@@ -33,6 +33,7 @@ function ownedId(prefix: 'ev' | 'fact' | 'route'): string {
   return `${prefix}_${encoded}`;
 }
 function routeId(): string { return ownedId('route'); }
+function accountId(): string { return ownedId('acct'); }
 function normalizedMerchantKey(value: string): string {
   return value.normalize('NFKC').toLocaleLowerCase('und').replace(/[\p{P}\p{S}]+/gu, ' ').replace(/\s+/gu, ' ').trim();
 }
@@ -101,6 +102,12 @@ export class RewardService {
     const parsed = validatePaymentRouteRecord({ ...source, id: 'route_input', ...(source.status === undefined ? { status: source.confirmation ? 'active' : 'candidate' } : {}), ...(source.ownerUser === undefined ? {} : { ownerUser: source.ownerUser }) });
     if (parsed.status === 'active' && !parsed.confirmation) throw new RewardServiceError('INVALID_CONFIRMATION', 'active payment routes require explicit user confirmation');
     const state = this.store.read();
+    const accountId = parsed.funding.kind === 'account' ? parsed.funding.accountId : undefined;
+    if (accountId !== undefined) {
+      const account = state.paymentAccounts.find((candidate) => candidate.id === accountId && (candidate.ownerUser === this.metadataUser || (candidate.ownerUser === undefined && this.metadataUser === undefined)));
+      if (!account) throw new RewardServiceError('INVALID_INPUT', 'payment route references an unknown payment account');
+      if (parsed.status === 'active' && account.status !== 'active') throw new RewardServiceError('NEEDS_REVIEW', 'active payment routes require an active payment account');
+    }
     const existing = state.paymentRoutes.find((route) => route.idempotencyKey === parsed.idempotencyKey && (route.ownerUser === this.metadataUser || (route.ownerUser === undefined && this.metadataUser === undefined)));
     const desired = { ...parsed, id: existing?.id ?? routeId(), ...(this.metadataUser === undefined ? {} : { ownerUser: this.metadataUser }) };
     if (existing) { if (JSON.stringify({ ...existing, id: parsed.id, ownerUser: parsed.ownerUser }) !== JSON.stringify({ ...desired, id: parsed.id, ownerUser: parsed.ownerUser })) throw new RewardServiceError('IDEMPOTENCY_CONFLICT', 'idempotencyKey already belongs to a different payment route'); return existing; }
@@ -109,6 +116,19 @@ export class RewardService {
   }
 
   listPaymentRoutes(): readonly PaymentRouteRecord[] { const state = this.store.read(); return state.paymentRoutes.filter((route) => route.ownerUser === this.metadataUser || (route.ownerUser === undefined && this.metadataUser === undefined)); }
+
+  upsertPaymentAccount(input: unknown): PaymentAccountRecord {
+    const source = typeof input === 'object' && input !== null ? input as Record<string, unknown> : {};
+    const parsed = validatePaymentAccountRecord({ ...source, id: 'account_input', ...(source.status === undefined ? { status: source.confirmation ? 'active' : 'candidate' } : {}), ...(source.ownerUser === undefined ? {} : { ownerUser: source.ownerUser }) });
+    const state = this.store.read();
+    const existing = state.paymentAccounts.find((account) => account.idempotencyKey === parsed.idempotencyKey && (account.ownerUser === this.metadataUser || (account.ownerUser === undefined && this.metadataUser === undefined)));
+    const desired = { ...parsed, id: existing?.id ?? accountId(), ...(this.metadataUser === undefined ? {} : { ownerUser: this.metadataUser }) };
+    if (existing) { if (JSON.stringify({ ...existing, id: parsed.id, ownerUser: parsed.ownerUser }) !== JSON.stringify({ ...desired, id: parsed.id, ownerUser: parsed.ownerUser })) throw new RewardServiceError('IDEMPOTENCY_CONFLICT', 'idempotencyKey already belongs to a different payment account'); return existing; }
+    this.store.update((next) => { next.paymentAccounts.push(desired); });
+    return desired;
+  }
+
+  listPaymentAccounts(): readonly PaymentAccountRecord[] { const state = this.store.read(); return state.paymentAccounts.filter((account) => account.ownerUser === this.metadataUser || (account.ownerUser === undefined && this.metadataUser === undefined)); }
 
   submitFactCandidate(input: unknown) {
     const parsed = validateFactCandidate(input);

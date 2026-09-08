@@ -82,6 +82,8 @@ activation is folded directly into `upsert_offer`.
 | `recommendation_preflight` | Read-only | Check typed transaction, merchant, offer, payment-route, FX, freshness, and conflict prerequisites without mutation or network access. | `INVALID_INPUT`, `INSUFFICIENT_FACTS`, `NEEDS_REVIEW`, `STALE` |
 | `upsert_payment_route` | Mutating | Register a confirmed or candidate payment route; MCP assigns its route identity and stores no credentials. | `INVALID_INPUT`, `IDEMPOTENCY_CONFLICT`, `SENSITIVE_FIELD_FORBIDDEN` |
 | `list_payment_routes` | Read-only | List the current user's registered payment routes as bounded projections. | `INVALID_INPUT`, `STORE_UNAVAILABLE` |
+| `register_payment_account` | Mutating | Register a wallet or linked bank account identity with evidence; never send credentials or account numbers. | `INVALID_CONFIRMATION`, `IDEMPOTENCY_CONFLICT`, `SENSITIVE_FIELD_FORBIDDEN` |
+| `list_payment_accounts` | Read-only | List user-scoped account identities before constructing payment routes. | `INVALID_INPUT`, `STORE_UNAVAILABLE` |
 | `search_active_offers` | Read-only | Search current active offers and return bounded canonical merchant/offer records; it never applies a reward. | `MISSING_REQUIRED_FACT`, `NOT_FOUND`, `STALE` |
 | `resolve_merchant` | Read-only | Validate an Agent-provided canonical merchant ID/name and return bounded merchant facts; it never interprets aliases or applies a reward. | `MERCHANT_AMBIGUOUS`, `MISSING_REQUIRED_FACT`, `NOT_FOUND` |
 | `record_transaction` | Mutating | Record an actual purchase (with `idempotencyKey`) or linked refund, updating durable cap usage. | `IDEMPOTENCY_CONFLICT`, `INVALID_REFUND`, `INSUFFICIENT_FACTS`, `NEEDS_REVIEW` |
@@ -174,7 +176,7 @@ infer a provider, issuer, or funding source that is not explicitly evidenced.
 1. Ask for the route facts: direction, provider/app, merchant, funding source,
    payment method, channel, amount, currency, timestamp, and whether the event
    is a top-up, purchase, refund, or reversal.
-2. Resolve or register the route with `list_payment_routes` and, when confirmed,
+2. Call `list_payment_accounts` first. If the user wants to add a wallet such as JKO PAY, call `register_payment_account` with the provider identity and evidence only; then resolve or register the route with `list_payment_routes` and, when confirmed,
    `upsert_payment_route`. Research official evidence outside MCP, then ingest
    the offer with `upsert_offer` only after the source and user confirmation
    requirements are satisfied.

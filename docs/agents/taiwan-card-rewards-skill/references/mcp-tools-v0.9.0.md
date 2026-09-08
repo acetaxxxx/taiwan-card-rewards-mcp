@@ -1,10 +1,10 @@
-# MCP Tools v0.9.0 合約規範 (15 Public Tools)
+# MCP Tools v0.9.0 合約規範 (20 Public Tools)
 
-本文件定義 `taiwan-card-rewards-mcp` (v0.9.0) 所提供的 15 項公開 MCP 工具簽名、參數結構與錯誤碼。
+本文件定義 `taiwan-card-rewards-mcp` (v0.9.0) 所提供的 20 項公開 MCP 工具簽名、參數結構與錯誤碼。
 
 ---
 
-## 工具總表 (Tool Matrix - 15 Public Tools)
+## 工具總表 (Tool Matrix - 20 Public Tools)
 
 | # | 工具名稱 (Tool Name) | 類型 | 說明 |
 |---|---|---|---|
@@ -18,11 +18,16 @@
 | 8 | `remaining_caps` | 唯讀 / 查詢 | 查詢指定卡片、月份或全期上限池之剩餘額度 |
 | 9 | `get_user_benefit_status` | 唯讀 / 查詢 | 查詢使用者已選擇之權益方案或登錄狀態 |
 | 10 | `list_payment_routes` | 唯讀 / 查詢 | 查詢目前使用者已註冊之支付路徑清冊（支援有界分頁） |
-| 11 | `register_card` | 寫入 / 管理 | 登記使用者持有的信用卡至個人資料庫 |
-| 12 | `upsert_offer` | 寫入 / 管理 | 新增或更新卡片優惠活動快照與規則定義；可在同一次呼叫原子建立一個 candidate merchant |
-| 13 | `upsert_payment_route` | 寫入 / 管理 | 登記或更新確認/候選支付路徑拓撲與扣款來源（絕不儲存敏感憑據） |
-| 14 | `upsert_user_benefit_status` | 寫入 / 管理 | 更新使用者權益方案選擇（如 CUBE 切換）或活動登錄紀錄 |
-| 15 | `record_transaction` | 寫入 / 記帳 | 記錄實際消費扣減上限池，或記錄退款以對沖額度 |
+| 11 | `register_payment_account` | 寫入 / 管理 | 登記街口等錢包或綁定銀行帳戶的匿名身分與證據（絕不儲存憑據） |
+| 12 | `list_payment_accounts` | 唯讀 / 查詢 | 列出目前使用者可供支付路徑引用的帳戶身分 |
+| 13 | `register_card` | 寫入 / 管理 | 登記使用者持有的信用卡至個人資料庫 |
+| 14 | `upsert_offer` | 寫入 / 管理 | 新增或更新卡片優惠活動快照與規則定義；可在同一次呼叫原子建立一個 candidate merchant |
+| 15 | `upsert_payment_route` | 寫入 / 管理 | 登記或更新確認/候選支付路徑拓撲與扣款來源（絕不儲存敏感憑據） |
+| 16 | `upsert_user_benefit_status` | 寫入 / 管理 | 更新使用者權益方案選擇（如 CUBE 切換）或活動登錄紀錄 |
+| 17 | `record_transaction` | 寫入 / 記帳 | 記錄實際消費扣減上限池，或記錄退款以對沖額度 |
+| 18 | `record_event_reward_v1` | 寫入 / 記帳 | 記錄已驗證的事件回饋候選 |
+| 19 | `record_event_reward_v2` | 寫入 / 記帳 | 伺服器重算明示跨事件資格後記帳 |
+| 20 | `reverse_event_reward_v1` | 寫入 / 記帳 | 依明示退款關係反轉事件回饋 |
 
 ---
 

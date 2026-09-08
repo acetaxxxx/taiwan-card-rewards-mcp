@@ -57,7 +57,7 @@ describe('Ticket 04 & Contract Convergence: 10 tools and Offer Confirmation in u
   };
 
   it('preserves the 15 existing tools and adds only versioned event reward tools', () => {
-    expect(mcpTools).toHaveLength(18);
+    expect(mcpTools).toHaveLength(20);
     const toolNames = mcpTools.map((t) => t.name);
     expect(toolNames).not.toContain('confirm_offer');
     expect(toolNames).toContain('upsert_offer');

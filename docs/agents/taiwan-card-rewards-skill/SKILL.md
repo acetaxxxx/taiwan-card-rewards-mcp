@@ -59,7 +59,7 @@ benefit_status      最佳推薦排序
 | **優惠發現與完整分頁** | 「查一下這張卡的所有有效電商活動」 | ➡️ [`workflows/offer-discovery-and-pagination.md`](workflows/offer-discovery-and-pagination.md) |
 | **外幣與通用支付通道** | 「去日本用 Apple Pay 刷 JCB」、「用街口/全支付跨境掃碼」 | ➡️ [`workflows/payment-route-and-fx.md`](workflows/payment-route-and-fx.md) |
 | **官方優惠與權益研究** | 「查一下富邦 J 卡 2026 年最新日韓回饋」、「這張卡下半年權益有改嗎？」 | ➡️ [`workflows/research-and-evidence-submission.md`](workflows/research-and-evidence-submission.md) |
-| **MCP 工具呼叫規範** | 查詢 15 項工具之標準 JSON 呼叫與參數定義 | ➡️ [`references/mcp-tool-call-playbook.md`](references/mcp-tool-call-playbook.md) |
+| **MCP 工具呼叫規範** | 查詢 20 項工具之標準 JSON 呼叫與參數定義 | ➡️ [`references/mcp-tool-call-playbook.md`](references/mcp-tool-call-playbook.md) |
 | **卡片清冊與上限查詢** | 「我有哪些卡？」、「我這月永豐大戶外幣上限還剩多少？」 | ➡️ [`references/mcp-tools-v0.9.0.md`](references/mcp-tools-v0.9.0.md) (`list_cards`, `remaining_caps`) |
 | **實際消費記帳與退款** | 「幫我記錄剛剛在 PChome 刷了 1,200 元」、「上週那筆退刷了」 | ➡️ [`examples/actual-transaction-and-refund.md`](examples/actual-transaction-and-refund.md) (`record_transaction`) |
 
@@ -71,8 +71,8 @@ benefit_status      最佳推薦排序
 
 - 📘 **架構與合約規範 (References)**
   - [`references/architecture-and-boundaries.md`](references/architecture-and-boundaries.md)：MCP 伺服器與 Agent Workspace 權責分工與資料隔離。
-  - [`references/mcp-tools-v0.9.0.md`](references/mcp-tools-v0.9.0.md)：15 項公開 MCP 工具之簽名、參數規格與錯誤碼清冊。
-  - [`references/mcp-tool-call-playbook.md`](references/mcp-tool-call-playbook.md)：15 項工具之標準實戰 JSON Payload 呼叫手冊。
+  - [`references/mcp-tools-v0.9.0.md`](references/mcp-tools-v0.9.0.md)：20 項公開 MCP 工具之簽名、參數規格與錯誤碼清冊。
+  - [`references/mcp-tool-call-playbook.md`](references/mcp-tool-call-playbook.md)：20 項工具之標準實戰 JSON Payload 呼叫手冊。
   - [`references/lifecycle-and-privacy.md`](references/lifecycle-and-privacy.md)：實體識別碼（`mch_`, `ev_`, `fact_`, `snap_`, `tx_`）生命週期與隱私脫敏守則。
 
 - ⚡ **標準作業流程 (Workflows)**

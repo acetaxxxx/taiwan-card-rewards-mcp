@@ -1,6 +1,6 @@
 # MCP 工具呼叫實戰手冊 (Tool-Call Playbook v0.9.0)
 
-本手冊提供 `taiwan-card-rewards-mcp` 15 項公開工具的標準 JSON-RPC 與 Tool-Call 規範範例。
+本手冊提供 `taiwan-card-rewards-mcp` 20 項公開工具的標準 JSON-RPC 與 Tool-Call 規範範例。
 
 ---
 
@@ -286,6 +286,13 @@
   "projection": "summary"
 }
 ```
+
+---
+
+### 1.11 `list_payment_accounts` / `register_payment_account`
+- **用途**：先查看使用者已有的帳戶身分；使用者明確要加入街口支付或綁定銀行帳戶時，再以官方證據登記匿名 provider/account identity。
+- **安全限制**：不得傳送帳號、卡號、密碼、OTP、token 或任何憑據；回傳的 `acct_<ULID>` 只能作為路徑引用。
+- **流程**：`list_payment_accounts` → `register_payment_account` → `upsert_payment_route`（`funding.accountId`）→ `recommend`。
 
 ---
 

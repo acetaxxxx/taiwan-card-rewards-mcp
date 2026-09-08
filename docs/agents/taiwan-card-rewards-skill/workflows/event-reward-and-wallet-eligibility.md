@@ -28,7 +28,8 @@ used earlier. A missing or ambiguous fact is not a zero reward.
 
 ## MCP sequence
 
-1. `list_payment_routes` to inspect known routes.
+1. `list_payment_accounts` to inspect user-scoped wallet and linked-account identities, then `list_payment_routes` to inspect known routes.
+2. If the user explicitly asks to add JKO PAY or another wallet, call `register_payment_account` with its provider identity and evidence. This does not invent a funding source or store credentials; a route must still reference the returned opaque account ID.
 2. `upsert_payment_route` only for a confirmed or clearly labelled candidate
    route; store no credentials.
 3. `upsert_offer` only after the Agent has supplied the official snapshot and,

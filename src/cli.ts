@@ -98,6 +98,8 @@ async function callTool(service: RewardService, params: Record<string, unknown>)
     case 'recommendation_preflight': return service.preflightRecommendation(validateRecommendationTransaction(args.transaction), { ...(args.context === undefined ? {} : { context: validateContext(args.context) }) });
     case 'upsert_payment_route': return service.upsertPaymentRoute(args.route);
     case 'list_payment_routes': { const rows = [...service.listPaymentRoutes()]; return (args.limit !== undefined || args.page !== undefined || args.projection !== undefined) ? paged(rows, typeof args.projection === 'string' ? args.projection : undefined, typeof args.page === 'number' ? args.page : undefined, typeof args.limit === 'number' ? args.limit : undefined, (item) => String((item as { id: string }).id)) : rows; }
+    case 'register_payment_account': return service.upsertPaymentAccount(args.account);
+    case 'list_payment_accounts': { const rows = [...service.listPaymentAccounts()]; return (args.limit !== undefined || args.page !== undefined || args.projection !== undefined) ? paged(rows, typeof args.projection === 'string' ? args.projection : undefined, typeof args.page === 'number' ? args.page : undefined, typeof args.limit === 'number' ? args.limit : undefined, (item) => String((item as { id: string }).id)) : rows; }
     case 'record_transaction': return service.recordTransaction(validateTransaction(args.transaction));
     case 'record_event_reward_v1': return service.recordEventReward(args);
     case 'record_event_reward_v2': return service.recordValidatedEventReward(args);
