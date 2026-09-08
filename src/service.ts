@@ -653,12 +653,28 @@ export class RewardService {
       }
       return true;
     }).sort((a, b) => `${a.id}:${a.edges?.map((edge) => edge.edgeId).sort().join(',') ?? ''}`.localeCompare(`${b.id}:${b.edges?.map((edge) => edge.edgeId).sort().join(',') ?? ''}`)).slice(0, input.limit ?? 20);
-    const candidates: PaymentPathCandidate[] = routes.map((route) => {
+    type PathOption = { route: PaymentRouteRecord; pathEdges?: readonly NonNullable<PaymentRouteRecord['edges']>[number][] };
+    const routePaths: PathOption[] = routes.flatMap((route): PathOption[] => {
+      if (!route.edges?.length || !route.nodes?.length) return [{ route }];
+      const adjacency = new Map<string, typeof route.edges>();
+      for (const edge of [...route.edges].sort((a, b) => a.edgeId.localeCompare(b.edgeId))) adjacency.set(edge.fromNodeId, [...(adjacency.get(edge.fromNodeId) ?? []), edge]);
+      const starts = route.nodes.filter((node) => node.kind === 'funding_source').map((node) => node.id).sort();
+      const paths: PathOption[] = [];
+      const visit = (nodeId: string, seen: Set<string>, path: NonNullable<PaymentRouteRecord['edges']>[number][]) => {
+        if (path.length > 6 || paths.length >= 20) return;
+        const node = route.nodes?.find((candidate) => candidate.id === nodeId);
+        if (node?.kind === 'merchant' && path.length) { paths.push({ route, pathEdges: path }); return; }
+        for (const edge of adjacency.get(nodeId) ?? []) { if (seen.has(edge.toNodeId)) continue; visit(edge.toNodeId, new Set([...seen, edge.toNodeId]), [...path, edge]); }
+      };
+      for (const start of starts) visit(start, new Set([start]), []);
+      return paths;
+    });
+    const candidates: PaymentPathCandidate[] = routePaths.map(({ route, pathEdges: selectedEdges }) => {
       const fundingId = route.funding.kind === 'credit_card' ? route.funding.cardId : route.funding.kind === 'account' ? route.funding.accountId : undefined;
       const fundingLabel = route.funding.kind === 'credit_card' ? `card:${fundingId ?? 'unknown'}` : route.funding.kind === 'account' ? `${route.funding.subtype}:${fundingId ?? 'unknown'}` : 'cash';
       const fundingNode = { id: 'funding', kind: route.funding.kind, displayName: fundingLabel };
       const nodes = (route.nodes?.length ? [...route.nodes] : [fundingNode, ...route.layers.map((layer, index) => ({ id: `node-${index + 1}`, kind: layer.kind, displayName: layer.displayName ?? layer.providerId ?? layer.appId ?? layer.kind }))]).sort((a, b) => a.id.localeCompare(b.id));
-      const pathEdges = route.edges ? [...route.edges].sort((a, b) => a.edgeId.localeCompare(b.edgeId)) : undefined;
+      const pathEdges = selectedEdges;
       const events = pathEdges?.length
         ? pathEdges.map((edge) => ({ kind: edge.transition === 'wallet_top_up' || edge.transition === 'account_debit' ? 'top_up' as const : 'purchase' as const, fromNodeId: edge.fromNodeId, toNodeId: edge.toNodeId }))
         : route.layers.length === 0

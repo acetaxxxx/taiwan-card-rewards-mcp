@@ -43,4 +43,11 @@ describe('proactive payment path recommendation', () => {
     const second = service.recommendPaymentPaths({ amount: { amountMinor: 1, currency: 'TWD' } });
     expect(second).toEqual(first);
   });
+  it('enumerates two terminal branches from one funding seed in stable order', () => {
+    const store = new MemoryStore(); const service = new RewardService(store, 'u1');
+    const evidence = service.submitEvidence({ id: 'graph', requirementId: 'route', sourceIdentity: 'graph', sourceType: 'official', authority: 'wallet', claim: { route: 'graph' }, observedAt: '2026-09-01T00:00:00Z', confidence: 'high', contentHash: 'graph-hash', reviewState: 'accepted', sourceUrl: 'https://wallet.example/terms' });
+    service.upsertPaymentRoute({ status: 'active', idempotencyKey: 'graph-route', layers: [], funding: { kind: 'cash' }, observedAt: '2026-09-01T00:00:00Z', sourceUrl: 'https://wallet.example/terms', authority: 'wallet', confidence: 'high', evidenceIds: [evidence.id], nodes: [{ id: 'source', kind: 'funding_source', displayName: 'source' }, { id: 'w1', kind: 'wallet_balance', displayName: 'W1' }, { id: 'w2', kind: 'wallet_balance', displayName: 'W2' }, { id: 'merchant', kind: 'merchant', displayName: 'merchant' }], edges: [{ edgeId: 'a', fromNodeId: 'source', toNodeId: 'w1', transition: 'wallet_top_up', evidenceIds: [evidence.id] }, { edgeId: 'b', fromNodeId: 'source', toNodeId: 'w2', transition: 'wallet_top_up', evidenceIds: [evidence.id] }, { edgeId: 'c', fromNodeId: 'w1', toNodeId: 'merchant', transition: 'merchant_settlement', evidenceIds: [evidence.id] }, { edgeId: 'd', fromNodeId: 'w2', toNodeId: 'merchant', transition: 'merchant_settlement', evidenceIds: [evidence.id] }], confirmation: { confirmedAt: '2026-09-01T00:00:00Z', confirmedBy: 'u1' } });
+    const result = service.recommendPaymentPaths({ amount: { amountMinor: 1, currency: 'TWD' } });
+    expect(result.candidates).toHaveLength(2); expect(result.candidates[0]?.pathSignature).not.toBe(result.candidates[1]?.pathSignature);
+  });
 });
