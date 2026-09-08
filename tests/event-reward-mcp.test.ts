@@ -30,11 +30,14 @@ describe('event reward MCP contract and authenticated service seam', () => {
     } finally { rmSync(dir, { recursive: true, force: true }); }
   });
 
-  it('publishes both versioned tools with closed nested schemas', () => {
-    for (const name of ['record_event_reward_v1', 'reverse_event_reward_v1']) {
+  it('publishes unversioned tools with closed nested schemas', () => {
+    for (const name of ['record_event_reward', 'reverse_event_reward']) {
       const tool = mcpTools.find((candidate) => candidate.name === name);
       expect(tool?.inputSchema).toMatchObject({ type: 'object', additionalProperties: false });
       expect(tool?.inputSchema).toHaveProperty('required');
     }
+    expect(mcpTools.some((candidate) => candidate.name === 'record_event_reward_v1')).toBe(false);
+    expect(mcpTools.some((candidate) => candidate.name === 'record_event_reward_v2')).toBe(false);
+    expect(mcpTools.some((candidate) => candidate.name === 'reverse_event_reward_v1')).toBe(false);
   });
 });

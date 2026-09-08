@@ -130,7 +130,7 @@ describe("MCP Contract and Agent Boundary", () => {
       // 2. tools/list
       const listRes = await client.send({ id: 2, method: "tools/list" });
       expect(listRes.result).toBeDefined();
-      expect(listRes.result.tools).toHaveLength(21);
+      expect(listRes.result.tools).toHaveLength(20);
 
       const toolNames = listRes.result.tools.map((t: any) => t.name).sort();
       const expectedNames = [
@@ -145,9 +145,8 @@ describe("MCP Contract and Agent Boundary", () => {
         "register_payment_account",
         "list_payment_accounts",
         "record_transaction",
-        "record_event_reward_v1",
-        "record_event_reward_v2",
-        "reverse_event_reward_v1",
+        "record_event_reward",
+        "reverse_event_reward",
         "register_card",
         "remaining_caps",
         "get_user_benefit_status",
@@ -157,7 +156,7 @@ describe("MCP Contract and Agent Boundary", () => {
         "upsert_offer",
       ].sort();
       expect(toolNames).toEqual(expectedNames);
-      expect(mcpTools).toHaveLength(21);
+      expect(mcpTools).toHaveLength(20);
 
       // Verify schema properties of all tools
       for (const tool of listRes.result.tools) {
@@ -195,6 +194,13 @@ describe("MCP Contract and Agent Boundary", () => {
         params: { name: "non_existent_tool", arguments: {} },
       });
       expect(unknownToolRes.error?.message).toBe("TOOL_NOT_FOUND");
+
+      const legacyEventRes = await client.send({
+        id: 12,
+        method: "tools/call",
+        params: { name: "record_event_reward_v1", arguments: { event: {}, candidate: {}, idempotencyKey: "legacy" } },
+      });
+      expect(legacyEventRes.error?.message).toBe("MIGRATION_REQUIRED");
     } finally {
       await client.close();
       rmSync(dir, { recursive: true, force: true });

@@ -35,15 +35,15 @@ used earlier. A missing or ambiguous fact is not a zero reward.
 3. `upsert_offer` only after the Agent has supplied the official snapshot and,
    when activation is required, user confirmation.
 4. For a planned action, call `recommendation_preflight` and/or `recommend`.
-5. For an actual event, call `record_event_reward_v2`. Provide exactly one of
+5. For an actual event, call `record_event_reward`. Provide exactly one of
    `eventRule` or `chainRule`. A chain requires bounded `sourceEvents` and one
    explicit `funded_by` relation.
-6. For a refund/reversal, call `reverse_event_reward_v1` with exactly one
+6. For a refund/reversal, call `reverse_event_reward` with exactly one
    validated refund relation to the original event.
 
-`record_event_reward_v1` is retained for already validated internal callers.
-An interactive Agent should prefer v2 because the server recomputes event
-eligibility instead of trusting a caller-provided eligibility status.
+Versioned names remain hidden compatibility aliases for older callers. The
+public tool always recomputes event eligibility instead of trusting a
+caller-provided eligibility status.
 
 ## Scenario: bank account → wallet top-up → wallet purchase
 

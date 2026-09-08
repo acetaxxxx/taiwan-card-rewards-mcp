@@ -25,9 +25,8 @@
 | 15 | `upsert_payment_route` | 寫入 / 管理 | 登記或更新確認/候選支付路徑拓撲與扣款來源（絕不儲存敏感憑據） |
 | 16 | `upsert_user_benefit_status` | 寫入 / 管理 | 更新使用者權益方案選擇（如 CUBE 切換）或活動登錄紀錄 |
 | 17 | `record_transaction` | 寫入 / 記帳 | 記錄實際消費扣減上限池，或記錄退款以對沖額度 |
-| 18 | `record_event_reward_v1` | 寫入 / 記帳 | 記錄已驗證的事件回饋候選 |
-| 19 | `record_event_reward_v2` | 寫入 / 記帳 | 伺服器重算明示跨事件資格後記帳 |
-| 20 | `reverse_event_reward_v1` | 寫入 / 記帳 | 依明示退款關係反轉事件回饋 |
+| 18 | `record_event_reward` | 寫入 / 記帳 | 伺服器重算事件或明示跨事件資格後記帳；必須提供 exactly one rule/chainRule |
+| 19 | `reverse_event_reward` | 寫入 / 記帳 | 依明示退款關係反轉事件回饋 |
 
 ---
 
