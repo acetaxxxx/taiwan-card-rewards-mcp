@@ -641,7 +641,7 @@ export class RewardService {
       if (route.validFrom && Date.parse(route.validFrom) > Date.parse(asOf)) return false;
       if (route.validTo && Date.parse(route.validTo) < Date.parse(asOf)) return false;
       return route.evidenceIds.every((id) => state.evidence.some((evidence) => evidence.id === id && evidence.sourceType === 'official' && evidence.reviewState === 'accepted' && (!evidence.validTo || Date.parse(evidence.validTo) >= Date.parse(asOf))));
-    }).filter((route) => route.layers.length === 0 || (route.layers.length === 1 && route.layers[0]?.kind === 'card_issuer')).slice(0, Math.min(input.limit ?? 20, 20));
+    }).slice(0, Math.min(input.limit ?? 20, 20));
     const candidates: PaymentPathCandidate[] = routes.map((route) => {
       const fundingId = route.funding.kind === 'credit_card' ? route.funding.cardId : route.funding.kind === 'account' ? route.funding.accountId : undefined;
       const fundingLabel = route.funding.kind === 'credit_card' ? `card:${fundingId ?? 'unknown'}` : route.funding.kind === 'account' ? `${route.funding.subtype}:${fundingId ?? 'unknown'}` : 'cash';

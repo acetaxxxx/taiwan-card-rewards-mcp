@@ -97,9 +97,11 @@ describe("MCP Contract and Agent Boundary", () => {
   });
   it("publishes the public contract distinctions that validators enforce", () => {
     const recommend = mcpTools.find((tool) => tool.name === "recommend")!.inputSchema as any;
-    expect(recommend.properties.transaction.required).not.toContain("cardId");
-    expect(recommend.properties.cardIds.items.type).toBe("string");
-    expect(recommend.properties.merchant.additionalProperties).toBe(false);
+    expect(recommend.oneOf).toHaveLength(2);
+    const cardBranch = recommend.oneOf.find((branch: any) => branch.properties?.transaction);
+    expect(cardBranch.properties.transaction.required).not.toContain("cardId");
+    expect(cardBranch.properties.cardIds.items.type).toBe("string");
+    expect(cardBranch.properties.merchant.additionalProperties).toBe(false);
 
     const calculate = mcpTools.find((tool) => tool.name === "calculate_reward")!.inputSchema as any;
     expect(calculate.properties.transaction.properties.fx.required).toEqual(expect.arrayContaining(["provider", "rateType"]));
@@ -130,7 +132,7 @@ describe("MCP Contract and Agent Boundary", () => {
       // 2. tools/list
       const listRes = await client.send({ id: 2, method: "tools/list" });
       expect(listRes.result).toBeDefined();
-      expect(listRes.result.tools).toHaveLength(20);
+      expect(listRes.result.tools).toHaveLength(19);
 
       const toolNames = listRes.result.tools.map((t: any) => t.name).sort();
       const expectedNames = [
@@ -138,7 +140,6 @@ describe("MCP Contract and Agent Boundary", () => {
         "list_cards",
         "rank_cards",
         "recommend",
-        "recommend_payment_paths_v1",
         "recommendation_preflight",
         "upsert_payment_route",
         "list_payment_routes",
@@ -156,14 +157,15 @@ describe("MCP Contract and Agent Boundary", () => {
         "upsert_offer",
       ].sort();
       expect(toolNames).toEqual(expectedNames);
-      expect(mcpTools).toHaveLength(20);
+      expect(mcpTools).toHaveLength(19);
 
       // Verify schema properties of all tools
       for (const tool of listRes.result.tools) {
         expect(tool.name).toBeTypeOf("string");
         expect(tool.description).toBeTypeOf("string");
         expect(tool.inputSchema).toBeTypeOf("object");
-        expect(tool.inputSchema.type).toBe("object");
+        if (tool.name === "recommend") expect(tool.inputSchema.oneOf).toHaveLength(2);
+        else expect(tool.inputSchema.type).toBe("object");
       }
     } finally {
       await client.close();

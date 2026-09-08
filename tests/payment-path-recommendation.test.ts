@@ -22,4 +22,12 @@ describe('proactive payment path recommendation', () => {
     expect(one.recommendPaymentPaths({ amount: { amountMinor: 1, currency: 'TWD' } }).candidates).toHaveLength(0);
     expect(two.recommendPaymentPaths({ amount: { amountMinor: 1, currency: 'TWD' } }).candidates).toHaveLength(0);
   });
+  it('generates a bounded multi-layer plan without mutating the ledger', () => {
+    const store = new MemoryStore(); const service = new RewardService(store, 'u1');
+    const evidence = service.submitEvidence({ id: 'multi', requirementId: 'route', sourceIdentity: 'wallet', sourceType: 'official', authority: 'wallet', claim: { route: 'account-wallet-merchant' }, observedAt: '2026-09-01T00:00:00Z', confidence: 'high', contentHash: 'multi-hash', reviewState: 'accepted', sourceUrl: 'https://wallet.example/terms' });
+    const account = service.upsertPaymentAccount({ providerId: 'bank', kind: 'linked_bank_account', displayName: 'Bank', status: 'active', observedAt: '2026-09-01T00:00:00Z', evidenceIds: [evidence.id], confirmation: { confirmedAt: '2026-09-01T00:00:00Z', confirmedBy: 'u1' }, idempotencyKey: 'account' });
+    service.upsertPaymentRoute({ status: 'active', idempotencyKey: 'multi-route', layers: [{ kind: 'wallet', providerId: 'wallet', evidenceIds: [evidence.id] }, { kind: 'merchant_acceptance', providerId: 'network', evidenceIds: [evidence.id] }], funding: { kind: 'account', subtype: 'linked_bank_account', accountId: account.id }, observedAt: '2026-09-01T00:00:00Z', sourceUrl: 'https://wallet.example/terms', authority: 'wallet', confidence: 'high', evidenceIds: [evidence.id], confirmation: { confirmedAt: '2026-09-01T00:00:00Z', confirmedBy: 'u1' } });
+    const before = store.read(); const result = service.recommendPaymentPaths({ amount: { amountMinor: 100, currency: 'TWD' }, limit: 20 });
+    expect(result.candidates[0]?.events).toHaveLength(2); expect(store.read()).toEqual(before);
+  });
 });
