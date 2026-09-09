@@ -6,6 +6,7 @@ export interface StartupConfig {
   dataDir: string;
   /** Display/metadata only; never an authorization or storage selector. */
   user?: string;
+  mode?: 'direct' | 'shared-owner' | 'shared-bridge';
 }
 
 export class StartupContractError extends Error {
@@ -46,6 +47,7 @@ function canonicalDataDir(raw: string): string {
 export function parseStartupArgs(argv: readonly string[]): StartupConfig {
   let dataDir: string | undefined;
   let user: string | undefined;
+  let mode: StartupConfig['mode'];
   for (let index = 0; index < argv.length; index += 1) {
     const flag = argv[index];
     if (flag === '--data-dir') {
@@ -58,12 +60,18 @@ export function parseStartupArgs(argv: readonly string[]): StartupConfig {
       if (!value || value.startsWith('--')) throw new StartupContractError('INVALID_USER', '--user requires a value');
       user = value;
       index += 1;
+    } else if (flag === '--shared-owner') {
+      if (mode !== undefined) throw new StartupContractError('INVALID_MODE', 'shared owner and bridge modes are mutually exclusive');
+      mode = 'shared-owner';
+    } else if (flag === '--shared-bridge') {
+      if (mode !== undefined) throw new StartupContractError('INVALID_MODE', 'shared owner and bridge modes are mutually exclusive');
+      mode = 'shared-bridge';
     } else {
       throw new StartupContractError('UNKNOWN_ARGUMENT', `unsupported startup argument: ${flag}`);
     }
   }
   if (!dataDir) throw new StartupContractError('MISSING_DATA_DIR', '--data-dir is required');
-  return { dataDir: canonicalDataDir(dataDir), ...(user ? { user } : {}) };
+  return { dataDir: canonicalDataDir(dataDir), ...(user ? { user } : {}), ...(mode ? { mode } : {}) };
 }
 
 /** Tool calls must use this startup-bound directory; arbitrary paths are forbidden. */

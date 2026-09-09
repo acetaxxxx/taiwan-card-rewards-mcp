@@ -10,6 +10,22 @@ const MAX_LINE_BYTES = 256 * 1024;
 export type SharedRpcRequest = { id: string | number | null; method: string; params?: unknown };
 export type SharedRpcResponse = { id: string | number | null; result?: unknown; error?: { code: number; message: string } };
 
+export type SharedBridgeInput = { dataDir: string; spawnOwner: () => void | Promise<void>; attempts?: number; delayMs?: number };
+
+export async function connectSharedBridge(options: SharedBridgeInput): Promise<SharedMcpClient> {
+  const client = new SharedMcpClient(options.dataDir);
+  const attempts = options.attempts ?? 40;
+  const delayMs = options.delayMs ?? 50;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try { await client.connect(); return client; } catch (error) {
+      if (!(error instanceof SharedMcpError) || (error.code !== 'ENDPOINT_UNAVAILABLE' && error.code !== 'HANDSHAKE_FAILED')) throw error;
+      if (attempt === 0) await options.spawnOwner();
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+  }
+  throw new SharedMcpError('ENDPOINT_UNAVAILABLE', 'owner did not become available');
+}
+
 export type OwnerMetadata = {
   protocol: typeof SHARED_MCP_PROTOCOL;
   pid: number;
@@ -131,7 +147,7 @@ export class SharedMcpOwner {
 export class SharedMcpClient {
   private socket: net.Socket | undefined;
   private buffer = '';
-  private readonly pending = new Map<string | number, { resolve: (response: SharedRpcResponse) => void; reject: (error: Error) => void }>();
+  private readonly pending = new Map<string | number, { id: string | number | null; resolve: (response: SharedRpcResponse) => void; reject: (error: Error) => void }>();
   private sequence = 0;
 
   constructor(private readonly dataDir: string) {}
@@ -144,7 +160,7 @@ export class SharedMcpClient {
     const socket = await new Promise<net.Socket>((resolve, reject) => {
       const candidate = net.createConnection(endpoint.socketPath);
       candidate.once('connect', () => resolve(candidate));
-      candidate.once('error', reject);
+      candidate.once('error', () => reject(new SharedMcpError('ENDPOINT_UNAVAILABLE', 'owner socket is unavailable')));
     });
     this.socket = socket;
     socket.setEncoding('utf8');
@@ -153,10 +169,10 @@ export class SharedMcpClient {
     return metadata;
   }
 
-  request(method: string, params?: unknown): Promise<SharedRpcResponse> {
+  request(method: string, params?: unknown, requestId?: string | number | null): Promise<SharedRpcResponse> {
     if (!this.socket || this.socket.destroyed) return Promise.reject(new SharedMcpError('ENDPOINT_UNAVAILABLE', 'client is not connected'));
     const id = `bridge-${++this.sequence}`;
-    return new Promise((resolve, reject) => { this.pending.set(id, { resolve, reject }); this.socket?.write(JSON.stringify({ id, method, ...(params === undefined ? {} : { params }) }) + '\n'); });
+    return new Promise((resolve, reject) => { this.pending.set(id, { id: requestId ?? null, resolve, reject }); this.socket?.write(JSON.stringify({ id, method, ...(params === undefined ? {} : { params }) }) + '\n'); });
   }
 
   close(): void { this.socket?.destroy(); this.socket = undefined; }
@@ -166,7 +182,7 @@ export class SharedMcpClient {
     for (;;) {
       const newline = this.buffer.indexOf('\n'); if (newline < 0) return;
       const line = this.buffer.slice(0, newline); this.buffer = this.buffer.slice(newline + 1);
-      try { const response = JSON.parse(line) as SharedRpcResponse; if (response.id === null) continue; const pending = this.pending.get(response.id); if (pending) { this.pending.delete(response.id); pending.resolve(response); } } catch { /* owner validates requests; malformed responses are ignored */ }
+      try { const response = JSON.parse(line) as SharedRpcResponse; if (response.id === null) continue; const pending = this.pending.get(response.id); if (pending) { this.pending.delete(response.id); pending.resolve({ ...response, id: pending.id }); } } catch { /* owner validates requests; malformed responses are ignored */ }
     }
   }
 }
