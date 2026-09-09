@@ -75,6 +75,34 @@ describe('proactive payment path recommendation', () => {
     const result = service.recommendPaymentPaths({ amount: { amountMinor: 1, currency: 'TWD' }, maxBranchesPerNode: 1 });
     expect(result.candidates).toHaveLength(1); expect(result.blocked?.some((item) => item.reason.includes('maxBranchesPerNode'))).toBe(true);
   });
+  it('requires exact outbound market direction in public route evidence', () => {
+    const store = new MemoryStore(); const service = new RewardService(store, 'u1');
+    const evidence = service.submitEvidence({ id: 'direction', requirementId: 'route', sourceIdentity: 'wallet', sourceType: 'official', authority: 'wallet', claim: { fromRole: 'funding_source', toRole: 'merchant', transition: 'direct_settlement', fromMarket: 'TW', toMarket: 'JP' }, observedAt: '2026-09-01T00:00:00Z', confidence: 'high', contentHash: 'direction-hash', reviewState: 'accepted', sourceUrl: 'https://wallet.example/terms' });
+    const base = { status: 'active' as const, layers: [], funding: { kind: 'cash' as const }, observedAt: '2026-09-01T00:00:00Z', sourceUrl: 'https://wallet.example/terms', authority: 'wallet' as const, confidence: 'high' as const, evidenceIds: [evidence.id], nodes: [{ id: 'source', kind: 'funding_source', displayName: 'source' }, { id: 'merchant', kind: 'merchant', displayName: 'merchant' }], confirmation: { confirmedAt: '2026-09-01T00:00:00Z', confirmedBy: 'u1' } };
+    const matching = service.upsertPaymentRoute({ ...base, idempotencyKey: 'direction-route-matching', edges: [{ edgeId: 'outbound', fromNodeId: 'source', toNodeId: 'merchant', transition: 'direct_settlement', evidenceIds: [evidence.id], fromMarket: 'TW', toMarket: 'JP', direction: 'outbound' }] });
+    const inbound = service.upsertPaymentRoute({ ...base, idempotencyKey: 'direction-route-inbound', edges: [{ edgeId: 'inbound', fromNodeId: 'source', toNodeId: 'merchant', transition: 'direct_settlement', evidenceIds: [evidence.id], fromMarket: 'JP', toMarket: 'TW', direction: 'inbound' }] });
+    const missingDirection = service.upsertPaymentRoute({ ...base, idempotencyKey: 'direction-route-missing', edges: [{ edgeId: 'missing', fromNodeId: 'source', toNodeId: 'merchant', transition: 'direct_settlement', evidenceIds: [evidence.id], direction: 'outbound' }] });
+    const result = service.recommendPaymentPaths({ amount: { amountMinor: 1, currency: 'TWD' }, asOf: '2026-09-01T00:00:00Z', routeIds: [matching.id] });
+    const rejected = service.recommendPaymentPaths({ amount: { amountMinor: 1, currency: 'TWD' }, asOf: '2026-09-01T00:00:00Z', routeIds: [inbound.id] });
+    const missing = service.recommendPaymentPaths({ amount: { amountMinor: 1, currency: 'TWD' }, asOf: '2026-09-01T00:00:00Z', routeIds: [missingDirection.id] });
+    expect(result.candidates).toHaveLength(1);
+    expect(rejected.candidates).toHaveLength(0);
+    expect(missing.candidates).toHaveLength(0);
+    expect(rejected.blocked?.some((item) => item.reason.includes('exact current evidence'))).toBe(true);
+  });
+  it('keeps candidate identity and ordering stable when public graph arrays are reversed', () => {
+    const store = new MemoryStore(); const service = new RewardService(store, 'u1');
+    const evidence = service.submitEvidence({ id: 'permutation', requirementId: 'route', sourceIdentity: 'wallet', sourceType: 'official', authority: 'wallet', claim: { route: 'permutation' }, observedAt: '2026-09-01T00:00:00Z', confidence: 'high', contentHash: 'permutation-hash', reviewState: 'accepted', sourceUrl: 'https://wallet.example/terms' });
+    const nodes = [{ id: 'source', kind: 'funding_source', displayName: 'source' }, { id: 'merchant', kind: 'merchant', displayName: 'merchant' }];
+    const edges = [{ edgeId: 'z', fromNodeId: 'source', toNodeId: 'merchant', transition: 'direct_settlement' as const, evidenceIds: [evidence.id] }];
+    const base = { status: 'active' as const, layers: [], funding: { kind: 'cash' as const }, observedAt: '2026-09-01T00:00:00Z', sourceUrl: 'https://wallet.example/terms', authority: 'wallet' as const, confidence: 'high' as const, evidenceIds: [evidence.id], confirmation: { confirmedAt: '2026-09-01T00:00:00Z', confirmedBy: 'u1' } };
+    const firstRoute = service.upsertPaymentRoute({ ...base, idempotencyKey: 'permutation-a', nodes, edges });
+    const secondRoute = service.upsertPaymentRoute({ ...base, idempotencyKey: 'permutation-b', nodes: [...nodes].reverse(), edges: [...edges].reverse() });
+    const first = service.recommendPaymentPaths({ amount: { amountMinor: 1, currency: 'TWD' }, asOf: '2026-09-01T00:00:00Z', routeIds: [firstRoute.id] });
+    const second = service.recommendPaymentPaths({ amount: { amountMinor: 1, currency: 'TWD' }, asOf: '2026-09-01T00:00:00Z', routeIds: [secondRoute.id] });
+    expect(first.candidates.map((candidate) => candidate.id)).toEqual(second.candidates.map((candidate) => candidate.id));
+    expect(first.candidates[0]?.events).toEqual(second.candidates[0]?.events);
+  });
   it.each([
     ['expired edge evidence', { validTo: '2026-08-01T00:00:00Z' }],
     ['conflicting edge evidence', { reviewState: 'conflict' as const }],

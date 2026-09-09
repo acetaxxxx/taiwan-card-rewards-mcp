@@ -115,6 +115,13 @@ describe("MCP Contract and Agent Boundary", () => {
     expect(upsertOffer.properties.merchant.additionalProperties).toBe(false);
     expect(upsertOffer.properties.merchant.properties.canonicalNameLocale.const).toBe("zh-Hant-TW");
     expect(upsertOffer.properties.merchant.properties.channels.items.enum).toEqual(["in_store", "online"]);
+
+    const upsertRoute = mcpTools.find((tool) => tool.name === "upsert_payment_route")!.inputSchema as any;
+    const edge = upsertRoute.properties.route.properties.edges.items;
+    expect(edge.additionalProperties).toBe(false);
+    expect(edge.properties.direction.enum).toEqual(["inbound", "outbound"]);
+    expect(edge.properties.fromMarket.type).toBe("string");
+    expect(edge.properties.toMarket.type).toBe("string");
   });
   it("exposes all approved MCP tools with valid schemas in tools/list", async () => {
     const dir = mkdtempSync(join(tmpdir(), "mcp-contract-list-"));
