@@ -723,6 +723,7 @@ export class RewardService {
             toNodeId: edge.toNodeId,
             planEventId: `plan:${JSON.stringify(route.funding)}:${edge.edgeId}`,
             ...(kind === 'purchase' ? { amount: input.amount } : {}),
+            ...(edge.fee === undefined ? {} : { fee: edge.fee }),
             transition: edge.transition,
             routeEdgeIds: [edge.edgeId],
             evidenceIds: edge.evidenceIds,
@@ -857,12 +858,28 @@ export class RewardService {
         });
       }
       const matchedRules = [...evaluations.filter(({ rule }) => rule.stacking !== 'possible').map(({ rule, result }) => ({ ruleId: rule.id, ruleVersion: rule.version, component: rule.componentKind ?? 'card_issuer', reward: result.cappedReward ?? zero })), ...plannedMatched];
+      const nativeUnits = new Set(matchedRules.map((item) => ('nativeUnit' in item && item.nativeUnit) ? item.nativeUnit : item.reward.currency));
+      const nativeUnitMismatch = nativeUnits.size > 1;
       const sum = (field: 'grossReward' | 'cappedReward') => matchedRules.reduce((amount, item) => amount + (item.reward.amountMinor), 0);
-      const cappedReward = matchedRules.length && !stackingAmbiguous ? { amountMinor: sum('cappedReward'), currency: input.amount.currency } : zero;
-      const grossReward = matchedRules.length && !stackingAmbiguous ? { amountMinor: sum('grossReward'), currency: input.amount.currency } : zero;
+      const cappedReward = matchedRules.length && !stackingAmbiguous && !nativeUnitMismatch ? { amountMinor: sum('cappedReward'), currency: input.amount.currency } : zero;
+      const grossReward = matchedRules.length && !stackingAmbiguous && !nativeUnitMismatch ? { amountMinor: sum('grossReward'), currency: input.amount.currency } : zero;
+      const feeValues = events.flatMap((event) => event.fee ? [event.fee] : []);
+      const feeCurrencies = new Set(feeValues.map((fee) => fee.currency));
+      const feeMismatch = feeCurrencies.size > 1 || (feeCurrencies.size === 1 && !feeCurrencies.has(input.amount.currency));
+      const feeTotal = feeMismatch || feeValues.length === 0 ? undefined : { amountMinor: feeValues.reduce((total, fee) => total + fee.amountMinor, 0), currency: input.amount.currency };
+      const netValue = feeMismatch || nativeUnitMismatch ? undefined : { amountMinor: cappedReward.amountMinor - (feeTotal?.amountMinor ?? 0), currency: input.amount.currency };
+      const blocked = stackingAmbiguous || feeMismatch || nativeUnitMismatch;
       const pathSignature = JSON.stringify({ version: 1, nodes, edges: pathEdges ?? events, funding: route.funding, merchant: input.merchant, currency: input.amount.currency });
-      return { id: `path:${pathSignature}`, routeId: route.id, nodes, events, fundingSource: route.funding, grossReward, netReward: cappedReward, cappedReward, matchedRules: stackingAmbiguous ? [] : matchedRules, pathSignature, status: stackingAmbiguous ? 'blocked' : 'ready', exclusionReasons: stackingAmbiguous ? ['ambiguous stacking policy'] : matchedRules.length ? evaluations.length === matchedRules.length ? [] : ['possible stacking policy excluded'] : ['no applicable verified card rule'] };
+      return { id: `path:${pathSignature}`, routeId: route.id, nodes, events, fundingSource: route.funding, grossReward, netReward: cappedReward, cappedReward, ...(feeTotal === undefined ? {} : { feeTotal }), ...(netValue === undefined ? {} : { netValue }), requiredActions: feeMismatch ? ['confirm fee currency or provide a validated FX snapshot'] : nativeUnitMismatch ? ['provide a validated valuation snapshot for each reward unit'] : [], userEffort: feeMismatch || nativeUnitMismatch ? 1 : 0, matchedRules: blocked ? [] : matchedRules, pathSignature, status: blocked ? 'blocked' : 'ready', exclusionReasons: stackingAmbiguous ? ['ambiguous stacking policy'] : feeMismatch ? ['fee currency cannot be compared without validated FX'] : nativeUnitMismatch ? ['reward units require validated valuation before comparison'] : matchedRules.length ? evaluations.length === matchedRules.length ? [] : ['possible stacking policy excluded'] : ['no applicable verified card rule'] };
     });
+    const statusRank = (status: PaymentPathCandidate['status']): number => status === 'ready' ? 0 : status === 'blocked' ? 2 : status === 'no_match' ? 3 : 1;
+    candidates.sort((a, b) => statusRank(a.status) - statusRank(b.status)
+      || (b.netValue?.amountMinor ?? Number.NEGATIVE_INFINITY) - (a.netValue?.amountMinor ?? Number.NEGATIVE_INFINITY)
+      || b.cappedReward.amountMinor - a.cappedReward.amountMinor
+      || b.grossReward.amountMinor - a.grossReward.amountMinor
+      || (a.feeTotal?.amountMinor ?? Number.POSITIVE_INFINITY) - (b.feeTotal?.amountMinor ?? Number.POSITIVE_INFINITY)
+      || (a.userEffort ?? 0) - (b.userEffort ?? 0)
+      || a.id.localeCompare(b.id));
     const accepted = new Set(routes.map((route) => route.id));
     const blocked = [...visibleRoutes.filter((route) => !accepted.has(route.id)).map((route) => ({ routeId: route.id, reason: route.status !== 'active' || !route.confirmation ? 'route is not active and confirmed' : 'route has no admissible terminal branch' })), ...branchBlocked];
     const diagnostics = [...new Set(branchBlocked.filter((item) => item.reason.startsWith('truncated_by_bound:')).map((item) => item.reason.split(':', 2)[0] ?? 'truncated_by_bound'))];

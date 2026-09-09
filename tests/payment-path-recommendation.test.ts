@@ -6,6 +6,19 @@ class MemoryStore implements LedgerStore { private state: StoredState = emptySta
 const route = { status: 'active' as const, idempotencyKey: 'path', layers: [{ kind: 'card_issuer' as const, providerId: 'bank', evidenceIds: ['official-route'] }], funding: { kind: 'credit_card' as const, cardId: 'card-1' }, observedAt: '2026-09-01T00:00:00Z', sourceUrl: 'https://bank.example/offer', authority: 'issuer' as const, confidence: 'high' as const, evidenceIds: ['official-route'], confirmation: { confirmedAt: '2026-09-01T00:00:00Z', confirmedBy: 'user' } };
 
 describe('proactive payment path recommendation', () => {
+  it('preserves explicit edge fees and marks fee currency mismatches blocked', () => {
+    const store = new MemoryStore(); const service = new RewardService(store, 'u1');
+    const evidence = service.submitEvidence({ id: 'fee', requirementId: 'route', sourceIdentity: 'merchant', sourceType: 'official', authority: 'merchant', claim: { route: 'fee' }, observedAt: '2026-09-01T00:00:00Z', confidence: 'high', contentHash: 'fee-hash', reviewState: 'accepted', sourceUrl: 'https://merchant.example/fees' });
+    const route = service.upsertPaymentRoute({ status: 'active', idempotencyKey: 'fee-route', layers: [], funding: { kind: 'cash' }, observedAt: '2026-09-01T00:00:00Z', sourceUrl: 'https://merchant.example/fees', authority: 'merchant', confidence: 'high', evidenceIds: [evidence.id], nodes: [{ id: 'cash', kind: 'funding_source', displayName: 'cash' }, { id: 'merchant', kind: 'merchant', displayName: 'merchant' }], edges: [{ edgeId: 'fee-edge', fromNodeId: 'cash', toNodeId: 'merchant', transition: 'direct_settlement', evidenceIds: [evidence.id], fee: { amountMinor: 5, currency: 'TWD' } }], confirmation: { confirmedAt: '2026-09-01T00:00:00Z', confirmedBy: 'u1' } });
+    const result = service.recommendPaymentPaths({ amount: { amountMinor: 100, currency: 'TWD' }, routeIds: [route.id] });
+    expect(result.candidates[0]?.events[0]).toEqual(expect.objectContaining({ fee: { amountMinor: 5, currency: 'TWD' } }));
+    expect(result.candidates[0]?.feeTotal).toEqual({ amountMinor: 5, currency: 'TWD' });
+    expect(result.candidates[0]?.netValue).toEqual({ amountMinor: -5, currency: 'TWD' });
+    const foreign = service.upsertPaymentRoute({ status: 'active', idempotencyKey: 'fee-route-usd', layers: [], funding: { kind: 'cash' }, observedAt: '2026-09-01T00:00:00Z', sourceUrl: 'https://merchant.example/fees', authority: 'merchant', confidence: 'high', evidenceIds: [evidence.id], nodes: [{ id: 'cash-usd', kind: 'funding_source', displayName: 'cash' }, { id: 'merchant-usd', kind: 'merchant', displayName: 'merchant' }], edges: [{ edgeId: 'fee-edge-usd', fromNodeId: 'cash-usd', toNodeId: 'merchant-usd', transition: 'direct_settlement', evidenceIds: [evidence.id], fee: { amountMinor: 5, currency: 'USD' } }], confirmation: { confirmedAt: '2026-09-01T00:00:00Z', confirmedBy: 'u1' } });
+    const blocked = service.recommendPaymentPaths({ amount: { amountMinor: 100, currency: 'TWD' }, routeIds: [foreign.id] });
+    expect(blocked.candidates[0]).toEqual(expect.objectContaining({ status: 'blocked', requiredActions: ['confirm fee currency or provide a validated FX snapshot'] }));
+    expect(blocked.candidates[0]).not.toHaveProperty('netValue');
+  });
   it('returns a bounded candidate with events and reward breakdown for an evidenced active route', () => {
     const store = new MemoryStore(); const service = new RewardService(store, 'u1');
     service.registerCard({ id: 'card-1', issuer: 'Bank', productName: 'Card' });

@@ -53,7 +53,7 @@ export interface PaymentRouteRecord {
 }
 export type PaymentPathNodeRole = 'funding_source' | 'wallet_balance' | 'payment_service' | 'acceptance_network' | 'merchant';
 export type PaymentPathTransition = 'card_authorization' | 'account_debit' | 'wallet_top_up' | 'wallet_debit' | 'service_to_acceptance' | 'merchant_settlement' | 'direct_settlement' | 'split_tender';
-export interface PaymentPathEdge { edgeId: string; fromNodeId: string; toNodeId: string; transition: PaymentPathTransition; evidenceIds: readonly string[]; provenance?: 'official' | 'model_fixture'; direction?: 'inbound' | 'outbound'; fromMarket?: string; toMarket?: string; market?: string; currency?: string; validFrom?: string; validTo?: string; }
+export interface PaymentPathEdge { edgeId: string; fromNodeId: string; toNodeId: string; transition: PaymentPathTransition; evidenceIds: readonly string[]; provenance?: 'official' | 'model_fixture'; direction?: 'inbound' | 'outbound'; fromMarket?: string; toMarket?: string; market?: string; currency?: string; validFrom?: string; validTo?: string; fee?: Money; }
 export type PaymentAccountKind = 'linked_bank_account' | 'wallet_balance' | 'foreign_currency_account';
 export interface PaymentAccountRecord {
   id: string;
@@ -564,6 +564,7 @@ export interface PaymentPathEvent {
   toNodeId: string;
   planEventId?: string;
   amount?: Money;
+  fee?: Money;
   transition?: PaymentPathTransition;
   routeEdgeIds?: readonly string[];
   evidenceIds?: readonly string[];
@@ -581,6 +582,10 @@ export interface PaymentPathCandidate {
   grossReward: Money;
   netReward: Money;
   cappedReward: Money;
+  feeTotal?: Money;
+  netValue?: Money;
+  requiredActions?: readonly string[];
+  userEffort?: number;
   matchedRules: readonly { ruleId: string; ruleVersion: string; component: string; sponsor?: string; benefitGroup?: string; nativeUnit?: string; reward: Money; capUses?: readonly PlannedRewardCapUse[] }[];
   exclusionReasons: readonly string[];
   status?: 'ready' | 'blocked' | 'no_match';
