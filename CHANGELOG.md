@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.11.0
+
+- Added shared MCP owner/stdio bridge auto-attach for agents using the same
+  `data-dir`, with bounded queues, stale-owner recovery, session isolation, and
+  different-directory tenant isolation.
+- Added automatic FX resolution requests, typed `FxRateObservation` provenance,
+  atomic cross-currency ingestion, fail-closed `fx_missing`, and frozen applied
+  rates for refunds.
+- Added the shared MCP and FX automation integration plan and completed the
+  Track A/B/C acceptance matrix.
+
 ## 0.10.1
 
 - Renamed the MCP protocol identity to `taiwan_card_rewards_mcp` for Codex and

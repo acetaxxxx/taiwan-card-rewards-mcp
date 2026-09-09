@@ -43,7 +43,7 @@ npx --yes github:acetaxxxx/taiwan-card-rewards-mcp#main \
 Pin a release tag for repeatable use:
 
 ```bash
-npx --yes github:acetaxxxx/taiwan-card-rewards-mcp#v0.10.1 \
+npx --yes github:acetaxxxx/taiwan-card-rewards-mcp#v0.11.0 \
   --data-dir /absolute/tenant-directory
 ```
 

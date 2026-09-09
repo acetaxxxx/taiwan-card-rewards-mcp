@@ -25,7 +25,7 @@ user question; no action requires the skill to calculate or persist ledger truth
 
 ## 2. Pin and validate the MCP connection
 
-Use the published immutable package version `0.10.1` (or a later reviewed release) in deployment configuration. Never
+Use the published immutable package version `0.11.0` (or a later reviewed release) in deployment configuration. Never
 use `latest`, a moving tag, an unbounded range, or a model-provided command
 path. Updates are deliberate: review the release notes, update the pinned
 version, run the host's handshake/tool smoke check, then deploy.
