@@ -1,98 +1,51 @@
 ---
 name: taiwan-card-rewards-assistant
-description: 協助使用者試算、比對、推薦台灣信用卡回饋，並透過官方查核 SOP 與 v0.9.0 (15-Tool) MCP 伺服器進行精確計算與帳本記錄。
+description: 協助試算、比較與記錄台灣信用卡回饋；路由至 canonical 19-tool MCP contract。觸發分支：卡片推薦/試算、payment_path 多層路徑、官方研究與證據、事件回饋/退款、錢包與外幣、權益狀態或帳本管理。
 ---
 
-# Taiwan Card Rewards Assistant (台灣信用卡回饋推薦與管理代理人)
+# Taiwan Card Rewards Assistant
 
-本技能為 **Canonical Taiwan Card Rewards Skill Bundle** 的主要入口。代理人與宿主系統應遵循本文件之決策樹進行意圖分流，並依據漸進式揭露（Progressive Disclosure）原則載入子模組，嚴格遵守計算與研究安全邊界。
+這是 Agent 直接載入的入口。詳細 JSON schema、錯誤與合法 payload 在
+[`references/mcp-tools.md`](references/mcp-tools.md)；不要從舊文章推導欄位。
 
----
+## 先守住的邊界
 
-## 1. 核心邊界與不變量 (Core Boundaries & Invariants)
+1. MCP 是計算與 user-scoped durable ledger 的唯一權威。planned evaluation 不寫帳本、不扣 cap；actual/event 寫入必須由 canonical tool 完成。
+2. Agent/UI 負責瀏覽銀行官網、PDF、圖片與 OCR，並提交可追溯的官方 evidence。MCP 不連網、不代替研究，也不接受猜測的優惠條款。
+3. 絕不傳送或儲存 PAN、CVV/CVC、OTP、密碼、cookie、token、帳號號碼，或把 `user_id` 當作 tool-level tenant selector。
+4. 啟動 MCP 時，`--data-dir` 才是持久化邊界；`--user` 只供 display/metadata，不能當授權或 storage selector。
+5. `unknown`、`stale`、`needs_review`、衝突或缺 evidence 一律 fail closed；不可把未知轉成零回饋或擅自選活動。
+6. 外幣必須提供通過驗證、未過期的 `fx`（含 provider/rateType）；不使用 1:1 fallback。費用或 reward valuation 無法換算時，net value 仍是 blocked/unknown。
+7. payment path 是有界圖，不是把卡片、wallet、支付服務壓平為一個交易。每個 top-up/purchase 是 planned event；不可對 fungible wallet 自動推 FIFO/LIFO 或把早先卡 top-up 推成後續 wallet purchase 的卡刷。
 
-1. **計算與帳本權威屬於 MCP**：MCP 伺服器負責所有幣別換算、上限池扣減、四捨五入/無條件捨去/進位、多組件回饋拆解與帳本持久化。代理人**嚴禁**自行實作估算或覆寫計算結果。
-2. **研究與網路檢索屬於 Agent Workspace**：MCP 伺服器為完全隔離的零網路環境（Zero Network）。代理人負責瀏覽銀行官網、解析條款與 PDF、量化匯率 PPM 並提交標準化結構。
-3. **安全與隱私防線**：嚴禁傳輸或儲存卡號（PAN）、CVV、OTP、密碼或連線 Token。
-4. **零模糊自動採納 (Zero Fuzzy Auto-Accept)**：商家或條款歧義時必須 Fail-Closed 轉為診斷狀態，絕不擅自猜測。
-5. **零 1:1 匯率回退 (Zero 1:1 FX Fallback)**：外幣交易必須具備明確的 `FxSnapshot` 與 `ratePpm`，嚴禁預設 1:1 匯率。
-6. **一般國內消費基礎規則不阻擋 (Non-Blocking Base Rules)**：未命中指定活動或商家時，優雅回退至一般基本回饋，不拋出中斷錯誤。
+## 意圖 router
 
----
-
-## 2. 意圖路由與決策樹 (Intent Router & Decision Tree)
-
-代理人收到使用者請求時，應依照以下決策樹分流至對應的標準作業程序（SOP）：
-
-```
-                               [使用者輸入/任務請求]
-                                         │
-       ┌───────────────────┬─────────────┴─────────────┬───────────────────┐
-       ▼                   ▼                           ▼                   ▼
-[初次持卡/登錄]    [消費試算/選卡推薦]         [官方規則/優惠調查]    [記帳/退款管理]
-       │                   │                           │                   │
-       ▼                   ▼                           ▼                   ▼
-Onboarding SOP      Pre-flight SOP              Research SOP        Ledger SOP
-(見 workflows/      (見 workflows/              (見 workflows/      (見 references/
- card-onboarding-    preflight-and-              research-and-       mcp-tools-
- and-benefit-        required-actions.md)        evidence-           v0.9.0.md)
- enrollment.md)            │                     submission.md)            │
-       │                   ▼                           │                   ▼
-       │            若遇商家歧義/外幣                  │           呼叫 record_
-       │            轉至 merchant/fx SOP               │           transaction
-       ▼                   │                           ▼           寫入帳本
-呼叫 register_card         ▼                    呼叫 upsert_offer
-與 upsert_user_     呼叫 recommend 輸出         提交事實快照
-benefit_status      最佳推薦排序
-       │
-       └─ 使用者要求查優惠時：先走官方研究、resolve_merchant，
-          再用 canonical merchant ID 或 atomic candidate merchant 寫入 rule
-```
-
-### 意圖對應表 (Intent Mapping)
-
-| 使用者意圖 | 觸發情境範例 | 導向作業程序 / 參考文件 |
+| 使用者要做的事 | 先做什麼 | 完成條件 |
 |---|---|---|
-| **初次持卡與方案登記** | 「我有富邦 J 卡和國泰 CUBE 卡」、「幫我設定 CUBE 卡玩數位」 | ➡️ [`workflows/card-onboarding-and-benefit-enrollment.md`](workflows/card-onboarding-and-benefit-enrollment.md)；若使用者要求查優惠，沿該流程的 merchant/research 分支 |
-| **消費選卡推薦** | 「我在 momo 買 3,000 元刷哪張卡最好？」、「這筆機票要用哪張卡刷？」 | ➡️ [`workflows/preflight-and-required-actions.md`](workflows/preflight-and-required-actions.md) |
-| **商家消歧義與辨識** | 「在 Uber 刷 500 元」、「高鐵 TGo 購票」 | ➡️ [`workflows/merchant-resolution-and-disambiguation.md`](workflows/merchant-resolution-and-disambiguation.md) |
-| **優惠發現與完整分頁** | 「查一下這張卡的所有有效電商活動」 | ➡️ [`workflows/offer-discovery-and-pagination.md`](workflows/offer-discovery-and-pagination.md) |
-| **外幣與通用支付通道** | 「去日本用 Apple Pay 刷 JCB」、「用街口/全支付跨境掃碼」 | ➡️ [`workflows/payment-route-and-fx.md`](workflows/payment-route-and-fx.md) |
-| **官方優惠與權益研究** | 「查一下富邦 J 卡 2026 年最新日韓回饋」、「這張卡下半年權益有改嗎？」 | ➡️ [`workflows/research-and-evidence-submission.md`](workflows/research-and-evidence-submission.md) |
-| **MCP 工具呼叫規範** | 查詢 20 項工具之標準 JSON 呼叫與參數定義 | ➡️ [`references/mcp-tool-call-playbook.md`](references/mcp-tool-call-playbook.md) |
-| **卡片清冊與上限查詢** | 「我有哪些卡？」、「我這月永豐大戶外幣上限還剩多少？」 | ➡️ [`references/mcp-tools-v0.9.0.md`](references/mcp-tools-v0.9.0.md) (`list_cards`, `remaining_caps`) |
-| **實際消費記帳與退款** | 「幫我記錄剛剛在 PChome 刷了 1,200 元」、「上週那筆退刷了」 | ➡️ [`examples/actual-transaction-and-refund.md`](examples/actual-transaction-and-refund.md) (`record_transaction`) |
+| 直接刷卡推薦/試算 | `list_cards`，必要時 `recommendation_preflight`，再 `recommend` 的 card branch | 回傳可解釋 ranking；未知條件與 required actions 原樣呈現 |
+| 多層 wallet/payment path | `list_payment_accounts`、`list_payment_routes`，再 `recommend` 的 `kind="payment_path"` branch | 只用該 user 的 active、confirmed、官方 HTTPS evidence route；events 有界且 planned 不寫 ledger |
+| 新卡/錢包/路徑 | `register_card`、`register_payment_account`、`upsert_payment_route` | 只存 opaque identity 與 evidence；不存 credential；官方 product path 未證實就留 candidate/blocked |
+| 官方優惠/商家研究 | Agent 取得官方來源，`resolve_merchant` / `upsert_offer` | snapshot、rule、期間、條件與 confirmation 可追溯；社群資料只能作線索 |
+| 實際交易/退款 | `record_transaction`（actual、stable `idempotencyKey`） | 重試同 payload 不重複；refund 必須 `refundOfId` 且 amount 不超過原交易 |
+| event-scoped reward | `record_event_reward`；退款用 `reverse_event_reward` | exactly one event rule 或 `funded_by` chain；server 重算 eligibility；明確 stacking/cap 才可記帳 |
+| Gold/會員/自動扣繳 | `get_user_benefit_status`，用 authoritative evidence 建立 fact | Gold 是 eligibility fact，不是 payment-path node；evidence/valuation/FX/fee 不完整就 recovery 或 blocked |
 
----
+每一分支都以 `workflows/` 的步驟為準；schema 與 19-tool 清單以
+[`references/mcp-tools.md`](references/mcp-tools.md) 為準。
 
-## 3. 系統模組架構導覽 (Skill Module Navigation)
+## 三個必讀入口
 
-本 Skill 套件由以下子模組構成，代理人應依需求動態查閱：
+- [`references/mcp-tools.md`](references/mcp-tools.md)：canonical 19 tools、closed input union、event/route schema。
+- [`references/mcp-tool-call-playbook.md`](references/mcp-tool-call-playbook.md)：實際 MCP 呼叫順序與合法 JSON 骨架。
+- [`workflows/payment-route-and-fx.md`](workflows/payment-route-and-fx.md) 與 [`workflows/event-reward-and-wallet-eligibility.md`](workflows/event-reward-and-wallet-eligibility.md)：多層路徑、planned events、跨事件資格與 fail-closed。
 
-- 📘 **架構與合約規範 (References)**
-  - [`references/architecture-and-boundaries.md`](references/architecture-and-boundaries.md)：MCP 伺服器與 Agent Workspace 權責分工與資料隔離。
-  - [`references/mcp-tools-v0.9.0.md`](references/mcp-tools-v0.9.0.md)：20 項公開 MCP 工具之簽名、參數規格與錯誤碼清冊。
-  - [`references/mcp-tool-call-playbook.md`](references/mcp-tool-call-playbook.md)：20 項工具之標準實戰 JSON Payload 呼叫手冊。
-  - [`references/lifecycle-and-privacy.md`](references/lifecycle-and-privacy.md)：實體識別碼（`mch_`, `ev_`, `fact_`, `snap_`, `tx_`）生命週期與隱私脫敏守則。
+完整 Agent→MCP 範例：
+[`examples/payment-path-recommendation.md`](examples/payment-path-recommendation.md)、
+[`examples/gold-evidence-and-fail-closed.md`](examples/gold-evidence-and-fail-closed.md)、
+[`examples/planned-recommendation.md`](examples/planned-recommendation.md)。
 
-- ⚡ **標準作業流程 (Workflows)**
-  - [`workflows/card-onboarding-and-benefit-enrollment.md`](workflows/card-onboarding-and-benefit-enrollment.md)：初次持卡安全登錄、優惠研究分流、merchant identity gate 與動態權益設定 SOP。
-  - [`workflows/preflight-and-required-actions.md`](workflows/preflight-and-required-actions.md)：Pre-flight 呼叫、歧義恢復循環與推薦輸出 SOP。
-  - [`workflows/merchant-resolution-and-disambiguation.md`](workflows/merchant-resolution-and-disambiguation.md)：商家實體確定性消歧義與候選比對 SOP。
-  - [`workflows/offer-discovery-and-pagination.md`](workflows/offer-discovery-and-pagination.md)：完整分頁遍歷與有界優惠發現 SOP。
-  - [`workflows/research-and-evidence-submission.md`](workflows/research-and-evidence-submission.md)：官方銀行條款查核、階層化證據鏈建立與規則提交 SOP。
-  - [`workflows/payment-route-and-fx.md`](workflows/payment-route-and-fx.md)：通用支付通道（`PaymentRouteContext`）判定與外幣匯率 PPM 量化 SOP。
+## 何時停止並詢問使用者
 
-- 📋 **模板與設定清單 (Templates)**
-  - [`templates/adapter-manifest.json`](templates/adapter-manifest.json)：Local Adapter 衍生 Manifest 與元資料格式標準。
-  - [`templates/user-config-checklist.md`](templates/user-config-checklist.md)：使用者個人化卡片、權益與偏好設定檢核清單。
+若 merchant、funding source、event relation、membership、cap policy、valuation、FX、fee 或官方適用期間缺失/矛盾，回傳 MCP 的 diagnostic/status，說明要補的 fact/evidence，停止寫入。只有使用者完成明確確認、且 server 能以官方 evidence 重算 matched 時，才可使用 mutating tool。
 
-- 💡 **完整端到端範例 (Examples)**
-  - [`examples/card-onboarding-and-benefit-setup.md`](examples/card-onboarding-and-benefit-setup.md)：初次持卡登記與 CUBE 權益方案設定實例。
-  - [`examples/planned-recommendation.md`](examples/planned-recommendation.md)：國內消費多卡多組件推薦實例。
-  - [`examples/ambiguous-merchant-and-exhaustive-discovery.md`](examples/ambiguous-merchant-and-exhaustive-discovery.md)：商家消歧義與分頁遍歷搜尋實例。
-  - [`examples/foreign-payment-route-and-fx.md`](examples/foreign-payment-route-and-fx.md)：通用跨國支付通道與匯率量化實例。
-  - [`examples/merchant-ambiguity-recovery.md`](examples/merchant-ambiguity-recovery.md)：商家名稱模糊之消歧義與候選確認修復流程。
-  - [`examples/stale-fx-recovery.md`](examples/stale-fx-recovery.md)：日幣外幣交易過期匯率之即時查核與快照補齊流程。
-  - [`examples/no-active-offer-base-rule.md`](examples/no-active-offer-base-rule.md)：無專屬活動時自動套用一般基礎回饋之優雅回退實例。
-  - [`examples/actual-transaction-and-refund.md`](examples/actual-transaction-and-refund.md)：實際刷卡記帳、上限扣減與逆向退款對沖實例。
+完成任一流程的標準是：payload 通過 closed schema、回應狀態未被誤解、planned/actual 邊界清楚、所有未知與外部未驗證範圍已明示。

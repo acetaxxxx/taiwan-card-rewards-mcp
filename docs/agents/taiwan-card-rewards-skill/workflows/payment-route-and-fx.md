@@ -8,7 +8,7 @@
 
 ## 1. 循序支付路徑層級與最終扣款工具 (Payment-Route Layers & Funding Instruments)
 
-依據 [ADR 0005](../../adr/0005-payment-route-opportunity-stacking.md) 與 [ADR 0006](../../adr/0006-multi-component-reward-ledger-and-cap-attribution.md)，一筆消費可能同時產出多個獨立的 `RewardComponent`。系統將交易拆解為 **(A) 循序支付路徑層級** 與 **(B) 最終實體扣款工具**：
+依據 [ADR 0005](../../../adr/0005-payment-route-opportunity-stacking.md) 與 [ADR 0006](../../../adr/0006-multi-component-reward-ledger-and-cap-attribution.md)，一筆消費可能同時產出多個獨立的 `RewardComponent`。系統將交易拆解為 **(A) 循序支付路徑層級** 與 **(B) 最終實體扣款工具**：
 
 ### (A) 可疊加之循序支付路徑層級 (Ordered Payment-Route Layers)
 

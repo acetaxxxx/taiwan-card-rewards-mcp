@@ -1,6 +1,6 @@
 # 實體識別碼生命週期與隱私保護規範
 
-**規範版本**：v0.9.0
+**規範範圍**：canonical MCP contract；詳細工具 schema 見 [`mcp-tools.md`](mcp-tools.md)
 **標準格式**：ULID (Universally Unique Lexicographically Sortable Identifier)
 
 ---

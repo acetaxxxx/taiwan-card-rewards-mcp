@@ -195,31 +195,39 @@ The Agent must represent the two economic events separately:
 
 ```json
 {
-  "targetEvent": {
-    "eventId": "E2",
+  "event": {
+    "id": "evt_purchase_illustrative",
     "kind": "purchase",
-    "amountMinor": 10000,
-    "currency": "TWD",
-    "funding": { "kind": "account", "subtype": "wallet_balance" },
-    "relations": { "funded_by": ["E1"] },
-    "channel": "wallet",
-    "paymentMethod": "wallet_balance"
+    "amount": { "amountMinor": 10000, "currency": "TWD" },
+    "occurredAt": "2026-09-06T07:10:00Z",
+    "funding": { "kind": "account", "subtype": "wallet_balance", "accountId": "wallet_illustrative" },
+    "relations": { "funded_by": ["evt_topup_illustrative"] }
   },
   "sourceEvents": [{
-    "eventId": "E1",
+    "id": "evt_topup_illustrative",
     "kind": "top_up",
-    "amountMinor": 10000,
-    "currency": "TWD",
-    "funding": { "kind": "account", "subtype": "linked_bank_account" },
-    "channel": "wallet",
-    "paymentMethod": "linked_bank_account"
+    "amount": { "amountMinor": 10000, "currency": "TWD" },
+    "occurredAt": "2026-09-06T07:00:00Z",
+    "funding": { "kind": "account", "subtype": "linked_bank_account", "accountId": "bank_illustrative" }
   }],
   "chainRule": {
-    "sourceRule": { "eventKind": "top_up", "fundingKind": "account", "fundingSubtype": "linked_bank_account" },
-    "targetRule": { "eventKind": "purchase", "fundingKind": "account", "fundingSubtype": "wallet_balance" },
+    "id": "chain_illustrative",
+    "version": "evidence-version-1",
+    "relation": "funded_by",
+    "sourceRule": { "id": "source-rule", "version": "1", "eventKind": "top_up", "fundingKind": "account", "fundingSubtype": "linked_bank_account" },
+    "targetRule": { "id": "target-rule", "version": "1", "eventKind": "purchase", "fundingKind": "account", "fundingSubtype": "wallet_balance" },
     "windowSeconds": 2592000
   },
-  "idempotencyKey": "event-reward-E2-v1"
+  "candidate": {
+    "eventId": "evt_purchase_illustrative",
+    "ruleId": "rule_illustrative",
+    "ruleVersion": "evidence-version-1",
+    "evidenceId": "ev_official_illustrative",
+    "sponsor": "sponsor_illustrative",
+    "benefitGroup": "benefit_illustrative",
+    "eligibility": { "status": "matched", "reasons": [] }
+  },
+  "idempotencyKey": "event-reward-illustrative"
 }
 ```
 
@@ -230,7 +238,7 @@ or `needs_review`; the Agent must not allocate the balance automatically.
 
 #### PayPay, EasyWallet, and card-funded wallet routes
 
-For proactive route selection, call `recommend_payment_paths_v1` with the amount and optional merchant facts. It considers only the current user's active, confirmed routes with accepted official HTTPS evidence and returns bounded nodes, transitions, funding source, reward totals, matched rules, and explicit exclusions. It never invents mixed wallet funding, unregistered routes, or unverified cross-border paths; absent or expired evidence yields no candidate.
+For proactive route selection, call `recommend` with the closed `{ "kind": "payment_path", "payment_path": { ... } }` envelope. It considers only the current user's active, confirmed routes with accepted official HTTPS evidence and returns bounded nodes, transitions, funding source, reward totals, matched rules, and explicit exclusions. It never invents mixed wallet funding, unregistered routes, or unverified cross-border paths; absent or expired evidence yields no candidate. The current CLI dispatcher does not forward `payment_path.eligibilityFacts`; treat Gold/member-dependent path recommendations as a parity gap until runtime is aligned.
 
 Do not collapse these into one card purchase:
 

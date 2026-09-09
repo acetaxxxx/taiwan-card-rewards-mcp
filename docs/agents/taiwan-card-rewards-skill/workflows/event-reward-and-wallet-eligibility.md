@@ -1,87 +1,97 @@
-# Event Reward and Wallet Eligibility Workflow
+# Event reward and wallet eligibility workflow
 
-This workflow tells an Agent how to turn an evidenced payment route into
-event-scoped MCP calls. It complements the payment-route workflow; it does not
-replace official-source research.
+這個 workflow 處理 top-up、purchase、refund、reversal 與跨事件 eligibility。MCP 不瀏覽銀行頁面、不呼叫 wallet API，也不從 wallet balance 猜 funding provenance；Agent/UI 先取得官方 evidence，再交給 MCP 驗證、matching、stacking、cap、idempotency 與 ledger。
 
-## Boundary
+## 1. 先分清經濟事件
 
-The Agent/UI retrieves and interprets bank pages, PDFs, screenshots, and OCR.
-The stdio MCP does not browse, call bank APIs, or discover hidden wallet
-funding. The MCP validates the structured facts supplied by the Agent and owns
-matching, idempotency, caps, stacking, and ledger writes.
-
-## Required facts before writing
-
-Collect, or explicitly mark unknown:
-
-- event kind: `top_up`, `purchase`, `refund`, or `reversal`;
-- direction and provider/app, including inbound versus outbound route;
-- merchant and channel/payment method;
-- funding kind/subtype, such as `credit_card`, `linked_bank_account`, or
-  `wallet_balance`;
-- amount, currency, event time, and official source/evidence identity;
-- explicit event relation when one event funds another.
-
-Never infer issuer rewards from a wallet purchase merely because a card was
-used earlier. A missing or ambiguous fact is not a zero reward.
-
-## MCP sequence
-
-1. `list_payment_accounts` to inspect user-scoped wallet and linked-account identities, then `list_payment_routes` to inspect known routes.
-2. If the user explicitly asks to add JKO PAY or another wallet, call `register_payment_account` with its provider identity and evidence. This does not invent a funding source or store credentials; a route must still reference the returned opaque account ID.
-2. `upsert_payment_route` only for a confirmed or clearly labelled candidate
-   route; store no credentials.
-3. `upsert_offer` only after the Agent has supplied the official snapshot and,
-   when activation is required, user confirmation.
-4. For a planned action, call `recommendation_preflight` and/or `recommend`.
-5. For an actual event, call `record_event_reward`. Provide exactly one of
-   `eventRule` or `chainRule`. A chain requires bounded `sourceEvents` and one
-   explicit `funded_by` relation.
-6. For a refund/reversal, call `reverse_event_reward` with exactly one
-   validated refund relation to the original event.
-
-Versioned names remain hidden compatibility aliases for older callers. The
-public tool always recomputes event eligibility instead of trusting a
-caller-provided eligibility status.
-
-## Scenario: bank account → wallet top-up → wallet purchase
-
-Represent the route as two events:
+一筆「帳戶儲值 wallet，再用 wallet 消費」至少是兩個 planned/actual event：
 
 ```text
-E1 top_up:
-  funding = account / linked_bank_account
-  channel = wallet
-
-E2 purchase:
-  funding = account / wallet_balance
-  relations.funded_by = [E1]
+E1 top_up:  account / linked_bank_account → wallet_balance
+E2 purchase: wallet_balance → payment service/acceptance → merchant
+E2.relations.funded_by = [E1.id] 只有在條款與事實明確支持時才提供
 ```
 
-The chain rule must identify the source and target event-local facts and a
-bounded time window. If E1 is absent, the relation is missing or ambiguous, or
-the wallet balance has multiple possible sources, return `unknown` or
-`needs_review` and do not write a reward.
+卡片儲值也是 `top_up`；後續 wallet purchase 不會自動繼承信用卡 issuer reward。PayPay inbound acceptance、PayPay outbound top-up、bank account top-up 是不同方向/事件，不能因名稱相近而合併。
 
-## Scenario: PayPay or card-funded wallet
+Fungible wallet 混合多筆來源時，不自動 FIFO/LIFO 或比例配對。只有官方條款要求資金追溯，且 Agent 能提供 bounded source events、唯一 relation、時間窗與金額證據時，才建立 chain eligibility；否則回傳 unknown/needs_review。
 
-Separate card top-up, wallet settlement, and merchant purchase events. Confirm
-whether the route is PayPay inbound TWQR, PayPay outbound top-up, or another
-wallet route. These are not interchangeable. A credit-card top-up does not
-automatically make the later wallet purchase a credit-card purchase for reward
-purposes.
+## 2. Planned path 與 actual event 的分界
 
-## Result handling
+`recommend` payment_path branch 只產生 bounded path candidates 與 planned events：它不寫 event ledger、不扣 cap、不預約回饋。top-up 金額或 membership fact 不明時，保留 `unknown`/undefined 及 required action；不能用 purchase amount 或使用者猜測補值。
 
-| Result | Agent action |
-|---|---|
-| `matched`/eligible | Record only through v2 with idempotency and explicit evidence. |
-| `no_match` | Explain the proven failed condition. |
-| `unknown` | Ask for the missing fact or evidence; do not guess. |
-| `needs_review` | Ask the user to resolve ambiguity or stacking policy. |
-| stale source | Refresh official evidence before recording. |
+只有實際發生且 evidence 齊全時，才呼叫 `record_event_reward`。它要求：
 
-The event ledger is user-scoped and durable through the configured data
-directory. Reusing an idempotency key with the same payload replays the prior
-decision; a conflicting payload fails closed.
+- `event`（`id`、`kind`、正數 `amount`、`occurredAt`、`funding`）；
+- `candidate`（event/rule/evidence identity、sponsor、benefitGroup、eligibility）；
+- exactly one `rule` 或 `chainRule`；
+- chain 必須提供最多 16 個 `sourceEvents`，且 target event 明確有 `relations.funded_by`；
+- stable `idempotencyKey`。
+
+Server 會依 user scope 與 stored evidence 重新 match。即使 caller 傳 `eligibility.status: matched`，也不能繞過該 gate。
+
+## 3. 呼叫順序
+
+1. `list_payment_accounts` 確認 wallet/bank opaque IDs，再 `list_payment_routes` 確認同 user route。
+2. Agent 在 MCP 外查官方頁面/PDF，保存 evidence identity、URL、期間、hash、excerpt 與 source type。
+3. 需要新增 identity 時，使用 `register_payment_account`；需要 route graph 時，使用 `upsert_payment_route`。禁止帳號號碼、credential、token。
+4. planned 行動呼叫 `recommend` payment_path；只呈現 ready/blocked/unknown 與 bounded events。
+5. actual event 呼叫 `record_event_reward`。同一 sponsor/benefit group 若沒有明確 combination mode（`additive`、`replace`、`best_of`、`exclusive`、`prerequisite` 等），停止並 needs_review；不可假定同 owner 互斥或不同 owner 必疊加。
+6. refund/reversal 呼叫 `reverse_event_reward`，用一個 explicit relation 指向已記錄 event。不要以 merchant 名稱、金額或猜測 id 尋找原 reward。
+
+## 4. 合法 chain payload 骨架
+
+下列 ID 與 evidence 都是 illustrative，不能聲稱任何真實銀行/PayPay 路徑：
+
+```json
+{
+  "event": {
+    "id": "evt_purchase_illustrative",
+    "kind": "purchase",
+    "amount": { "amountMinor": 10000, "currency": "TWD" },
+    "occurredAt": "2026-09-06T07:10:00Z",
+    "funding": { "kind": "account", "subtype": "wallet_balance", "accountId": "wallet_illustrative" },
+    "relations": { "funded_by": ["evt_topup_illustrative"] }
+  },
+  "sourceEvents": [
+    {
+      "id": "evt_topup_illustrative",
+      "kind": "top_up",
+      "amount": { "amountMinor": 10000, "currency": "TWD" },
+      "occurredAt": "2026-09-06T07:00:00Z",
+      "funding": { "kind": "account", "subtype": "linked_bank_account", "accountId": "bank_illustrative" }
+    }
+  ],
+  "chainRule": {
+    "id": "chain_illustrative",
+    "version": "evidence-version-1",
+    "relation": "funded_by",
+    "windowSeconds": 2592000,
+    "sourceRule": { "id": "source-rule", "version": "1", "eventKind": "top_up", "fundingKind": "account", "fundingSubtype": "linked_bank_account" },
+    "targetRule": { "id": "target-rule", "version": "1", "eventKind": "purchase", "fundingKind": "account", "fundingSubtype": "wallet_balance" }
+  },
+  "candidate": {
+    "eventId": "evt_purchase_illustrative",
+    "ruleId": "rule_illustrative",
+    "ruleVersion": "evidence-version-1",
+    "evidenceId": "ev_official_illustrative",
+    "sponsor": "sponsor_illustrative",
+    "benefitGroup": "benefit_illustrative",
+    "eligibility": { "status": "matched", "reasons": [] }
+  },
+  "idempotencyKey": "event-reward-illustrative"
+}
+```
+
+`eventRule` and `chainRule` are mutually exclusive. A chain rule must use relation `funded_by`, a 1..31-day bounded `windowSeconds`, and source/target event rules. `reverse_event_reward` input is `{ "event": <refund-or-reversal-event>, "idempotencyKey": "..." }`.
+
+## 5. Status handling
+
+| Status | Meaning | Agent action |
+|---|---|---|
+| `matched` | Server found eligible event rule/chain | Record only after actual event and confirmation |
+| `no_match` | Explicit event fact fails rule | Explain failed condition; do not retry with guessed facts |
+| `unknown`/`needs_facts` | Missing amount, relation, membership, evidence, or source | Ask for fact/evidence; do not make it zero |
+| `needs_review` | Ambiguous stacking, duplicate source, conflict, stale evidence | Resolve policy/evidence before writing |
+
+同一 idempotency key + same payload replays the prior durable decision；different payload fails with conflict。所有 mutation 都在 current user 的 configured data directory 內持久化。

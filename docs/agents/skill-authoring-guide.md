@@ -33,7 +33,7 @@ version, run the host's handshake/tool smoke check, then deploy.
 At startup, validate the MCP handshake and tool list before business calls:
 
 1. Confirm the expected protocol and server identity.
-2. Confirm all 15 public tools exist, including `recommendation_preflight` and payment-route onboarding/listing, with the expected nested input schemas;
+2. Confirm all 19 canonical public tools exist, including `recommendation_preflight`, payment-path recommendation, and payment-route/account onboarding/listing, with the expected closed input schemas;
    check required fields, enums/bounds, and `additionalProperties: false` at
    every object level, not only the top-level tool object.
 3. Confirm the process is bound by the trusted host to the intended user scope.

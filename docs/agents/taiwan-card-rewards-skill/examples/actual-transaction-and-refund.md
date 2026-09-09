@@ -1,66 +1,56 @@
-# 範例：實際消費記帳與退款對沖 (Actual Transaction & Refund)
+# Example: actual transaction and linked refund
 
-**情境**：
-1. 使用者在 2026-09-06 於 PChome 刷國泰 CUBE 卡 NT$ 2,000，請求記帳以扣減上限。
-2. 三天後因退貨辦理全額退刷，請求記錄退款以還原額度。
+以下只示範 payload shape；`card_illustrative`、reward amount 與 merchant label 不是 production evidence。
 
----
+## 1. Record actual purchase
 
-## Part A: 記錄實際消費 (`record_transaction`)
+使用者確認消費已發生後，以 nested `transaction` 呼叫 `record_transaction`：
 
-### 1. 取得使用者確認
-Agent 提示：「即將為您記錄 2026-09-06 於 PChome 消費 NT$ 2,000 (國泰 CUBE 卡)，預估扣減本月上限，請確認是否記錄？」
-使用者：「確認」。
-
-### 2. 呼叫 `record_transaction`
 ```json
 {
-  "idempotencyKey": "tx_req_20260906_pchome_2000",
-  "cardId": "cathay_cube",
-  "amount": 2000,
-  "currency": "TWD",
-  "transactionDate": "2026-09-06T14:30:00+08:00",
-  "merchantName": "PChome 24h購物"
+  "transaction": {
+    "idempotencyKey": "purchase-illustrative-20260906",
+    "cardId": "card_illustrative",
+    "kind": "purchase",
+    "mode": "actual",
+    "occurredAt": "2026-09-06T14:30:00+08:00",
+    "amount": { "amountMinor": 200000, "currency": "TWD" },
+    "merchant": "PChome",
+    "country": "TW",
+    "channel": "online",
+    "paymentMethod": "direct_card"
+  }
 }
 ```
 
-**MCP 回傳**：
+`record_transaction` 只接受 actual transaction，會以 user-scoped rules/evidence
+重算並持久化結果。相同 idempotency key + 相同 payload 是 replay；同 key 不同
+payload 會 `IDEMPOTENCY_CONFLICT`。回應是 `RewardBreakdown`，不是自訂
+`success/transactionId/recordedReward` wrapper。
+
+## 2. Record a partial/full refund
+
+退款金額是正數，並以 `refundOfId` 指向原 purchase 的 idempotency key：
+
 ```json
 {
-  "success": true,
-  "transactionId": "tx_01JXXXX009A",
-  "recordedReward": 60,
-  "status": "confirmed"
+  "transaction": {
+    "idempotencyKey": "refund-illustrative-20260909",
+    "cardId": "card_illustrative",
+    "kind": "refund",
+    "mode": "actual",
+    "occurredAt": "2026-09-09T10:00:00+08:00",
+    "amount": { "amountMinor": 200000, "currency": "TWD" },
+    "merchant": "PChome",
+    "refundOfId": "purchase-illustrative-20260906"
+  }
 }
 ```
 
----
+Server 會驗證原 purchase 存在、card 相同、累計退款不超額，並按比例反轉 reward/cap usage。若要處理 top-up/purchase 的 event relation 或 event-specific campaign，改用 [`workflows/event-reward-and-wallet-eligibility.md`](../workflows/event-reward-and-wallet-eligibility.md) 的 `reverse_event_reward`，不要把兩種 ledger API 混用。
 
-## Part B: 記錄退款對沖
+## 3. Agent 回覆界線
 
-### 1. 取得使用者確認
-使用者：「我把 PChome 2,000 那筆退掉了，幫我記退款」。
-
-### 2. 呼叫 `record_transaction` 帶入負數金額與關聯交易 ID
-```json
-{
-  "idempotencyKey": "refund_req_20260909_pchome_2000",
-  "cardId": "cathay_cube",
-  "amount": -2000,
-  "currency": "TWD",
-  "transactionDate": "2026-09-09T10:00:00+08:00",
-  "merchantName": "PChome 24h購物",
-  "refundReferenceTxId": "tx_01JXXXX009A"
-}
-```
-
-**MCP 回傳**：
-```json
-{
-  "success": true,
-  "transactionId": "tx_01JXXXX009B",
-  "recordedReward": -60,
-  "status": "refunded",
-  "message": "已成功對沖原始交易 tx_01JXXXX009A，回饋金與上限已正確還原。"
-}
-```
+只展示實際 MCP 回應中的 reward、cap、status 與 warning。若回應是
+`INSUFFICIENT_FACTS`、`NEEDS_REVIEW`、stale 或 invalid refund，說明缺失/衝突
+並停止重試；不可用估算值補寫帳本。
