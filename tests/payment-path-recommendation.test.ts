@@ -19,6 +19,22 @@ describe('proactive payment path recommendation', () => {
     expect(blocked.candidates[0]).toEqual(expect.objectContaining({ status: 'blocked', requiredActions: ['confirm fee currency or provide a validated FX snapshot'] }));
     expect(blocked.candidates[0]).not.toHaveProperty('netValue');
   });
+  it('converts an explicit USD edge fee only with a matching FX snapshot', () => {
+    const store = new MemoryStore(); const service = new RewardService(store, 'u1');
+    const evidence = service.submitEvidence({ id: 'fx-fee', requirementId: 'route', sourceIdentity: 'merchant', sourceType: 'official', authority: 'merchant', claim: { route: 'fx-fee' }, observedAt: '2026-09-01T00:00:00Z', confidence: 'high', contentHash: 'fx-fee-hash', reviewState: 'accepted', sourceUrl: 'https://merchant.example/fees' });
+    const route = service.upsertPaymentRoute({ status: 'active', idempotencyKey: 'fx-fee-route', layers: [], funding: { kind: 'cash' }, observedAt: '2026-09-01T00:00:00Z', sourceUrl: 'https://merchant.example/fees', authority: 'merchant', confidence: 'high', evidenceIds: [evidence.id], nodes: [{ id: 'cash', kind: 'funding_source', displayName: 'cash' }, { id: 'merchant', kind: 'merchant', displayName: 'merchant' }], edges: [{ edgeId: 'usd-fee', fromNodeId: 'cash', toNodeId: 'merchant', transition: 'direct_settlement', evidenceIds: [evidence.id], fee: { amountMinor: 100, currency: 'USD' }, fx: { id: 'fx-32', baseCurrency: 'USD', quoteCurrency: 'TWD', ratePpm: 32_000_000, capturedAt: '2026-09-01T00:00:00Z', provider: 'official', rateType: 'card_scheme' } }], confirmation: { confirmedAt: '2026-09-01T00:00:00Z', confirmedBy: 'u1' } });
+    const result = service.recommendPaymentPaths({ amount: { amountMinor: 1000, currency: 'TWD' }, routeIds: [route.id] });
+    expect(result.candidates[0]?.feeTotal).toEqual({ amountMinor: 3200, currency: 'TWD' });
+    expect(result.candidates[0]?.netValue).toEqual({ amountMinor: -3200, currency: 'TWD' });
+  });
+  it('accepts valuation only when the official evidence claim matches and is user scoped', () => {
+    const store = new MemoryStore(); const service = new RewardService(store, 'u1');
+    const evidence = service.submitEvidence({ id: 'points-value', requirementId: 'valuation', sourceIdentity: 'issuer', sourceType: 'official', authority: 'issuer', claim: { nativeUnit: 'points', targetCurrency: 'TWD', rateNumerator: 15, rateDenominator: 100, version: '2026-09' }, observedAt: '2026-09-01T00:00:00Z', confidence: 'high', contentHash: 'points-value-hash', reviewState: 'accepted', sourceUrl: 'https://issuer.example/points' });
+    const snapshot = service.submitRewardValuationSnapshot({ id: 'caller-id-is-not-authoritative', nativeUnit: 'points', rateNumerator: 15, rateDenominator: 100, targetCurrency: 'TWD', asOf: '2026-09-01T00:00:00Z', version: '2026-09', evidenceId: evidence.id });
+    expect(snapshot.id).not.toBe('caller-id-is-not-authoritative');
+    expect(service.listRewardValuationSnapshots()).toEqual([expect.objectContaining({ nativeUnit: 'points', targetCurrency: 'TWD', evidenceId: evidence.id, ownerUser: 'u1' })]);
+    expect(() => service.submitRewardValuationSnapshot({ id: 'bad-rate', nativeUnit: 'points', rateNumerator: 16, rateDenominator: 100, targetCurrency: 'TWD', asOf: '2026-09-01T00:00:00Z', version: '2026-09', evidenceId: evidence.id })).toThrow(/does not match/);
+  });
   it('returns a bounded candidate with events and reward breakdown for an evidenced active route', () => {
     const store = new MemoryStore(); const service = new RewardService(store, 'u1');
     service.registerCard({ id: 'card-1', issuer: 'Bank', productName: 'Card' });

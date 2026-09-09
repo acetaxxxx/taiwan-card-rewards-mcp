@@ -1,10 +1,10 @@
 import * as crypto from 'node:crypto';
 import { type LedgerStore, type RecordedTransaction, type StoredState } from './store.js';
 import { EventRewardLedger, convertMinor, createPaymentEventRewardCandidate, decidePaymentEventRewards, evaluateOffer, evaluatePredicate, matchPaymentEvent, matchPaymentEventChain, rankCards, resolveCyclePeriodKey } from './evaluator.js';
-import type { CardDescriptor, CardSwitchInput, CardSwitchProjection, CardSwitchStatus, CapPeriod, CapPoolDefinition, EvaluationContext, MerchantIdentity, MerchantResolution, Money, OfferConfirmation, OfferRuleVersion, OfferSourceSnapshot, RankingEntry, RewardBreakdown, RewardComponentRecord, TransactionTuple, UserBenefitInput, UserBenefitStatus, RecommendationPreflight, RecommendationRequiredAction, RecommendationRequirement, Diagnostic, EvidenceRecord, PaymentRouteRecord, PaymentAccountRecord, EventRewardLedgerRecord, EventRewardReversalRecord, PaymentPathRequest, PaymentPathRecommendation, PaymentPathCandidate, PaymentPathEvent, EligibilityFact } from './types.js';
+import type { CardDescriptor, CardSwitchInput, CardSwitchProjection, CardSwitchStatus, CapPeriod, CapPoolDefinition, EvaluationContext, MerchantIdentity, MerchantResolution, Money, OfferConfirmation, OfferRuleVersion, OfferSourceSnapshot, RankingEntry, RewardBreakdown, RewardComponentRecord, TransactionTuple, UserBenefitInput, UserBenefitStatus, RecommendationPreflight, RecommendationRequiredAction, RecommendationRequirement, Diagnostic, EvidenceRecord, PaymentRouteRecord, PaymentAccountRecord, EventRewardLedgerRecord, EventRewardReversalRecord, PaymentPathRequest, PaymentPathRecommendation, PaymentPathCandidate, PaymentPathEvent, EligibilityFact, RewardValuationSnapshot } from './types.js';
 import type { StartupConfig } from './startup.js';
 import { RewardServiceError } from './errors.js';
-import { validateCard, validateCapPool, validateConfirmation, validateEligibilityFact, validateMerchant, validateRecommendationTransaction, validateRule, validateSnapshot, validateTransaction, validateEvidence, validateFactCandidate, validatePaymentRouteRecord, validatePaymentAccountRecord, validateEventRewardInput, validatePaymentEvent, validatePaymentEventChainRule, validatePaymentEventRule } from './validation.js';
+import { validateCard, validateCapPool, validateConfirmation, validateEligibilityFact, validateMerchant, validateRecommendationTransaction, validateRule, validateSnapshot, validateTransaction, validateEvidence, validateFactCandidate, validatePaymentRouteRecord, validatePaymentAccountRecord, validateEventRewardInput, validatePaymentEvent, validatePaymentEventChainRule, validatePaymentEventRule, validateRewardValuationSnapshot } from './validation.js';
 import { cardSwitchStatus, projectionFromInput } from './card-switch.js';
 
 export { RewardServiceError } from './errors.js';
@@ -24,7 +24,7 @@ function merchantId(): string {
   for (let i = 0; i < 16; i += 1) encoded += ULID_ALPHABET[bytes[i % bytes.length]! % 32];
   return `mch_${encoded}`;
 }
-function ownedId(prefix: 'ev' | 'fact' | 'route' | 'acct'): string {
+function ownedId(prefix: 'ev' | 'fact' | 'route' | 'acct' | 'valuation'): string {
   let time = Date.now();
   let encoded = '';
   for (let i = 0; i < 10; i += 1) { encoded = ULID_ALPHABET[time % 32] + encoded; time = Math.floor(time / 32); }
@@ -96,6 +96,28 @@ export class RewardService {
   }
 
   listEvidence(): readonly EvidenceRecord[] { return this.store.read().evidence; }
+
+  submitRewardValuationSnapshot(input: unknown): RewardValuationSnapshot {
+    if (!this.metadataUser) throw new RewardServiceError('UNAUTHENTICATED', 'reward valuation requires an authenticated user');
+    const parsed = validateRewardValuationSnapshot(input);
+    const state = this.store.read();
+    const evidence = state.evidence.find((candidate) => candidate.id === parsed.evidenceId && candidate.ownerUser === this.metadataUser);
+    if (!evidence || evidence.reviewState !== 'accepted' || evidence.sourceType !== 'official' || evidence.authority === 'user') throw new RewardServiceError('NEEDS_REVIEW', 'valuation requires accepted official owned evidence');
+    const now = Date.now();
+    if (Date.parse(evidence.observedAt) > now || (evidence.validTo !== undefined && Date.parse(evidence.validTo) <= now) || (evidence.refreshAfter !== undefined && Date.parse(evidence.refreshAfter) <= now)) throw new RewardServiceError('NEEDS_REVIEW', 'valuation evidence is stale or invalid');
+    const claim = evidence.claim;
+    if (claim.nativeUnit !== parsed.nativeUnit || claim.targetCurrency !== parsed.targetCurrency || claim.rateNumerator !== parsed.rateNumerator || claim.rateDenominator !== parsed.rateDenominator || (claim.version !== undefined && claim.version !== parsed.version)) throw new RewardServiceError('NEEDS_REVIEW', 'valuation does not match its evidence claim');
+    const existing = (state.valuationSnapshots ?? []).find((candidate) => candidate.ownerUser === this.metadataUser && candidate.evidenceId === parsed.evidenceId && candidate.version === parsed.version);
+    if (existing) return existing;
+    const snapshot = { ...parsed, id: ownedId('valuation'), ownerUser: this.metadataUser };
+    this.store.update((next) => { next.valuationSnapshots = [...(next.valuationSnapshots ?? []), snapshot]; });
+    return snapshot;
+  }
+
+  listRewardValuationSnapshots(): readonly RewardValuationSnapshot[] {
+    if (!this.metadataUser) return [];
+    return (this.store.read().valuationSnapshots ?? []).filter((snapshot) => snapshot.ownerUser === this.metadataUser);
+  }
 
   upsertPaymentRoute(input: unknown): PaymentRouteRecord {
     const source = typeof input === 'object' && input !== null ? input as Record<string, unknown> : {};
@@ -724,6 +746,10 @@ export class RewardService {
             planEventId: `plan:${JSON.stringify(route.funding)}:${edge.edgeId}`,
             ...(kind === 'purchase' ? { amount: input.amount } : {}),
             ...(edge.fee === undefined ? {} : { fee: edge.fee }),
+            ...(edge.markup === undefined ? {} : { markup: edge.markup }),
+            ...(edge.foreignTransactionFee === undefined ? {} : { foreignTransactionFee: edge.foreignTransactionFee }),
+            ...(edge.fx === undefined ? {} : { fx: edge.fx }),
+            ...(edge.dcc === undefined ? {} : { dcc: edge.dcc }),
             transition: edge.transition,
             routeEdgeIds: [edge.edgeId],
             evidenceIds: edge.evidenceIds,
@@ -858,19 +884,32 @@ export class RewardService {
         });
       }
       const matchedRules = [...evaluations.filter(({ rule }) => rule.stacking !== 'possible').map(({ rule, result }) => ({ ruleId: rule.id, ruleVersion: rule.version, component: rule.componentKind ?? 'card_issuer', reward: result.cappedReward ?? zero })), ...plannedMatched];
-      const nativeUnits = new Set(matchedRules.map((item) => ('nativeUnit' in item && item.nativeUnit) ? item.nativeUnit : item.reward.currency));
-      const nativeUnitMismatch = nativeUnits.size > 1;
-      const sum = (field: 'grossReward' | 'cappedReward') => matchedRules.reduce((amount, item) => amount + (item.reward.amountMinor), 0);
+      const nativeUnits = new Set(matchedRules.map((item) => ('nativeUnit' in item && typeof item.nativeUnit === 'string') ? item.nativeUnit : item.reward.currency));
+      const valuationSnapshots = state.valuationSnapshots ?? [];
+      const valuedRules = matchedRules.map((item) => {
+        const nativeUnit = ('nativeUnit' in item && typeof item.nativeUnit === 'string') ? item.nativeUnit : item.reward.currency;
+        if (nativeUnit === item.reward.currency || nativeUnit === input.amount.currency || nativeUnit === 'cash' || nativeUnit === 'cashback') return { ...item, nativeUnit };
+        const snapshot = valuationSnapshots.find((candidate) => candidate.ownerUser === this.metadataUser && candidate.nativeUnit === nativeUnit && candidate.targetCurrency === input.amount.currency && Date.parse(candidate.asOf) <= Date.parse(asOf) && (candidate.validTo === undefined || Date.parse(candidate.validTo) > Date.parse(asOf)) && state.evidence.some((evidence) => evidence.id === candidate.evidenceId && evidence.ownerUser === this.metadataUser && evidence.sourceType === 'official' && evidence.reviewState === 'accepted'));
+        if (!snapshot) return { ...item, nativeUnit, valuationMissing: true as const };
+        return { ...item, nativeUnit, nativeReward: item.reward, reward: { amountMinor: Math.floor(item.reward.amountMinor * snapshot.rateNumerator / snapshot.rateDenominator), currency: snapshot.targetCurrency }, valuationSnapshotId: snapshot.id };
+      });
+      const valuationMissing = valuedRules.some((item) => 'valuationMissing' in item && item.valuationMissing);
+      const nativeUnitMismatch = valuationMissing;
+      const sum = (field: 'grossReward' | 'cappedReward') => valuedRules.reduce((amount, item) => amount + (item.reward.amountMinor), 0);
       const cappedReward = matchedRules.length && !stackingAmbiguous && !nativeUnitMismatch ? { amountMinor: sum('cappedReward'), currency: input.amount.currency } : zero;
       const grossReward = matchedRules.length && !stackingAmbiguous && !nativeUnitMismatch ? { amountMinor: sum('grossReward'), currency: input.amount.currency } : zero;
-      const feeValues = events.flatMap((event) => event.fee ? [event.fee] : []);
-      const feeCurrencies = new Set(feeValues.map((fee) => fee.currency));
-      const feeMismatch = feeCurrencies.size > 1 || (feeCurrencies.size === 1 && !feeCurrencies.has(input.amount.currency));
-      const feeTotal = feeMismatch || feeValues.length === 0 ? undefined : { amountMinor: feeValues.reduce((total, fee) => total + fee.amountMinor, 0), currency: input.amount.currency };
+      const convertCost = (cost: Money, fx: NonNullable<PaymentPathEvent['fx']> | undefined): number | undefined => {
+        if (cost.currency === input.amount.currency) return cost.amountMinor;
+        if (!fx || fx.baseCurrency !== cost.currency || fx.quoteCurrency !== input.amount.currency) return undefined;
+        return Math.floor(cost.amountMinor * fx.ratePpm / 1_000_000);
+      };
+      const costValues = events.flatMap((event) => [event.fee, event.markup, event.foreignTransactionFee, event.dcc?.selected ? event.dcc.fee : undefined].filter((value): value is Money => value !== undefined).map((value) => ({ value, converted: convertCost(value, event.fx) })));
+      const feeMismatch = costValues.some((cost) => cost.converted === undefined);
+      const feeTotal = feeMismatch || costValues.length === 0 ? undefined : { amountMinor: costValues.reduce((total, cost) => total + cost.converted!, 0), currency: input.amount.currency };
       const netValue = feeMismatch || nativeUnitMismatch ? undefined : { amountMinor: cappedReward.amountMinor - (feeTotal?.amountMinor ?? 0), currency: input.amount.currency };
       const blocked = stackingAmbiguous || feeMismatch || nativeUnitMismatch;
       const pathSignature = JSON.stringify({ version: 1, nodes, edges: pathEdges ?? events, funding: route.funding, merchant: input.merchant, currency: input.amount.currency });
-      return { id: `path:${pathSignature}`, routeId: route.id, nodes, events, fundingSource: route.funding, grossReward, netReward: cappedReward, cappedReward, ...(feeTotal === undefined ? {} : { feeTotal }), ...(netValue === undefined ? {} : { netValue }), requiredActions: feeMismatch ? ['confirm fee currency or provide a validated FX snapshot'] : nativeUnitMismatch ? ['provide a validated valuation snapshot for each reward unit'] : [], userEffort: feeMismatch || nativeUnitMismatch ? 1 : 0, matchedRules: blocked ? [] : matchedRules, pathSignature, status: blocked ? 'blocked' : 'ready', exclusionReasons: stackingAmbiguous ? ['ambiguous stacking policy'] : feeMismatch ? ['fee currency cannot be compared without validated FX'] : nativeUnitMismatch ? ['reward units require validated valuation before comparison'] : matchedRules.length ? evaluations.length === matchedRules.length ? [] : ['possible stacking policy excluded'] : ['no applicable verified card rule'] };
+      return { id: `path:${pathSignature}`, routeId: route.id, nodes, events, fundingSource: route.funding, grossReward, netReward: cappedReward, cappedReward, ...(feeTotal === undefined ? {} : { feeTotal }), ...(netValue === undefined ? {} : { netValue }), requiredActions: feeMismatch ? ['confirm fee currency or provide a validated FX snapshot'] : nativeUnitMismatch ? ['provide a validated valuation snapshot for each reward unit'] : [], userEffort: feeMismatch || nativeUnitMismatch ? 1 : 0, matchedRules: blocked ? [] : valuedRules, pathSignature, status: blocked ? 'blocked' : 'ready', exclusionReasons: stackingAmbiguous ? ['ambiguous stacking policy'] : feeMismatch ? ['fee currency cannot be compared without validated FX'] : nativeUnitMismatch ? ['provide a fresh authoritative valuation for each reward unit'] : matchedRules.length ? evaluations.length === matchedRules.length ? [] : ['possible stacking policy excluded'] : ['no applicable verified card rule'] };
     });
     const statusRank = (status: PaymentPathCandidate['status']): number => status === 'ready' ? 0 : status === 'blocked' ? 2 : status === 'no_match' ? 3 : 1;
     candidates.sort((a, b) => statusRank(a.status) - statusRank(b.status)
