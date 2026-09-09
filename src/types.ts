@@ -269,7 +269,7 @@ export interface CapPoolDefinition {
 
 export interface OfferRuleVersion {
   id: string;
-  cardId: string;
+  cardId?: string;
   version: string;
   sourceSnapshotId: string;
   status: 'candidate' | 'active' | 'stale' | 'superseded' | 'needs_review' | 'unknown';
@@ -549,7 +549,22 @@ export interface PaymentPathRequest {
   maxBranchesPerNode?: number;
 }
 export interface PaymentPathNode { id: string; kind: string; displayName: string; }
-export interface PaymentPathEvent { kind: 'top_up' | 'purchase' | 'account_debit' | 'card_authorization'; fromNodeId: string; toNodeId: string; }
+export interface PaymentPathEventEligibility { status: 'ready' | 'unknown' | 'no_match' | 'needs_facts'; reasons: readonly string[]; }
+export interface PlannedRewardComponent { ruleId: string; ruleVersion: string; component: RewardComponentKind; status: 'ready' | 'unknown' | 'no_match'; reward?: Money; reasons: readonly string[]; }
+export interface PaymentPathEvent {
+  kind: 'top_up' | 'purchase' | 'account_debit' | 'card_authorization';
+  fromNodeId: string;
+  toNodeId: string;
+  planEventId?: string;
+  amount?: Money;
+  transition?: PaymentPathTransition;
+  routeEdgeIds?: readonly string[];
+  evidenceIds?: readonly string[];
+  provenance?: 'official' | 'model_fixture';
+  relations?: readonly { type: 'planned_precedes' | 'planned_enables'; eventId: string }[];
+  eligibility?: PaymentPathEventEligibility;
+  rewards?: readonly PlannedRewardComponent[];
+}
 export interface PaymentPathCandidate {
   id: string;
   routeId: string;

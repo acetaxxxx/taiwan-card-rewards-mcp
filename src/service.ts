@@ -1,7 +1,7 @@
 import * as crypto from 'node:crypto';
 import { type LedgerStore, type RecordedTransaction, type StoredState } from './store.js';
 import { EventRewardLedger, convertMinor, createPaymentEventRewardCandidate, decidePaymentEventRewards, evaluateOffer, matchPaymentEvent, matchPaymentEventChain, rankCards, resolveCyclePeriodKey } from './evaluator.js';
-import type { CardDescriptor, CardSwitchInput, CardSwitchProjection, CardSwitchStatus, CapPeriod, CapPoolDefinition, EvaluationContext, MerchantIdentity, MerchantResolution, Money, OfferConfirmation, OfferRuleVersion, OfferSourceSnapshot, RankingEntry, RewardBreakdown, RewardComponentRecord, TransactionTuple, UserBenefitInput, UserBenefitStatus, RecommendationPreflight, RecommendationRequiredAction, RecommendationRequirement, Diagnostic, EvidenceRecord, PaymentRouteRecord, PaymentAccountRecord, EventRewardLedgerRecord, EventRewardReversalRecord, PaymentPathRequest, PaymentPathRecommendation, PaymentPathCandidate } from './types.js';
+import type { CardDescriptor, CardSwitchInput, CardSwitchProjection, CardSwitchStatus, CapPeriod, CapPoolDefinition, EvaluationContext, MerchantIdentity, MerchantResolution, Money, OfferConfirmation, OfferRuleVersion, OfferSourceSnapshot, RankingEntry, RewardBreakdown, RewardComponentRecord, TransactionTuple, UserBenefitInput, UserBenefitStatus, RecommendationPreflight, RecommendationRequiredAction, RecommendationRequirement, Diagnostic, EvidenceRecord, PaymentRouteRecord, PaymentAccountRecord, EventRewardLedgerRecord, EventRewardReversalRecord, PaymentPathRequest, PaymentPathRecommendation, PaymentPathCandidate, PaymentPathEvent } from './types.js';
 import type { StartupConfig } from './startup.js';
 import { RewardServiceError } from './errors.js';
 import { validateCard, validateCapPool, validateConfirmation, validateMerchant, validateRecommendationTransaction, validateRule, validateSnapshot, validateTransaction, validateEvidence, validateFactCandidate, validatePaymentRouteRecord, validatePaymentAccountRecord, validateEventRewardInput, validatePaymentEvent, validatePaymentEventChainRule, validatePaymentEventRule } from './validation.js';
@@ -456,7 +456,7 @@ export class RewardService {
     }
 
     if (!snapshot.id || !snapshot.url || !snapshot.contentHash || !snapshot.parserVersion) throw new RewardServiceError('INVALID_OFFER', 'source snapshot metadata is incomplete');
-    if (rule.sourceSnapshotId !== snapshot.id || !rule.id || !rule.cardId) throw new RewardServiceError('INVALID_OFFER', 'rule must reference its source snapshot');
+    if (rule.sourceSnapshotId !== snapshot.id || !rule.id || (!rule.cardId && (!rule.componentKind || rule.componentKind === 'card_issuer'))) throw new RewardServiceError('INVALID_OFFER', 'rule must reference its source snapshot and a card or non-card component');
     let onboardedMerchant: MerchantIdentity | undefined;
     let storedRule = rule;
     this.store.update((state) => {
@@ -697,17 +697,62 @@ export class RewardService {
       const fundingNode = { id: 'funding', kind: route.funding.kind, displayName: fundingLabel };
       const nodes = (route.nodes?.length ? [...route.nodes] : [fundingNode, ...route.layers.map((layer, index) => ({ id: `node-${index + 1}`, kind: layer.kind, displayName: layer.displayName ?? layer.providerId ?? layer.appId ?? layer.kind }))]).sort((a, b) => a.id.localeCompare(b.id));
       const pathEdges = selectedEdges;
-      const events = pathEdges?.length
-        ? pathEdges.map((edge) => ({ kind: edge.transition === 'wallet_top_up' || edge.transition === 'account_debit' ? 'top_up' as const : 'purchase' as const, fromNodeId: edge.fromNodeId, toNodeId: edge.toNodeId }))
+      const events: PaymentPathEvent[] = pathEdges?.length
+        ? pathEdges.map((edge) => {
+          const kind = edge.transition === 'wallet_top_up' || edge.transition === 'account_debit' ? 'top_up' as const : 'purchase' as const;
+          return {
+            kind,
+            fromNodeId: edge.fromNodeId,
+            toNodeId: edge.toNodeId,
+            planEventId: `plan:${JSON.stringify(route.funding)}:${edge.edgeId}`,
+            ...(kind === 'purchase' ? { amount: input.amount } : {}),
+            transition: edge.transition,
+            routeEdgeIds: [edge.edgeId],
+            evidenceIds: edge.evidenceIds,
+            provenance: edge.provenance ?? 'official',
+            eligibility: kind === 'top_up' ? { status: 'unknown' as const, reasons: ['top-up amount policy is not evidenced'] } : { status: 'ready' as const, reasons: ['wallet purchase can be evaluated independently of aggregate balance provenance'] },
+            rewards: [],
+          };
+        })
+        : route.funding.kind === 'account' && route.funding.subtype === 'wallet_balance'
+        ? [{ kind: 'purchase' as const, fromNodeId: 'funding', toNodeId: 'merchant', planEventId: `plan:${JSON.stringify(route.funding)}:purchase`, amount: input.amount, eligibility: { status: 'ready' as const, reasons: ['wallet purchase can be evaluated independently of aggregate balance provenance'] }, rewards: [] }]
         : route.layers.length === 0
-        ? [{ kind: route.funding.kind === 'credit_card' ? 'card_authorization' as const : 'account_debit' as const, fromNodeId: 'funding', toNodeId: 'funding' }]
-        : route.layers.map((_, index) => ({ kind: index < route.layers.length - 1 ? 'top_up' as const : 'purchase' as const, fromNodeId: index === 0 ? 'funding' : `node-${index}`, toNodeId: `node-${index + 1}` }));
+        ? [{ kind: route.funding.kind === 'credit_card' ? 'card_authorization' as const : 'account_debit' as const, fromNodeId: 'funding', toNodeId: 'funding', planEventId: `plan:${JSON.stringify(route.funding)}:purchase`, amount: input.amount, eligibility: { status: 'ready' as const, reasons: [] }, rewards: [] }]
+        : route.layers.map((_, index) => ({ kind: index < route.layers.length - 1 ? 'top_up' as const : 'purchase' as const, fromNodeId: index === 0 ? 'funding' : `node-${index}`, toNodeId: `node-${index + 1}`, planEventId: `plan:${JSON.stringify(route.funding)}:layer-${index + 1}`, ...(index === route.layers.length - 1 ? { amount: input.amount } : {}), eligibility: { status: index < route.layers.length - 1 ? 'unknown' as const : 'ready' as const, reasons: index < route.layers.length - 1 ? ['top-up amount policy is not evidenced'] : [] }, rewards: [] }));
+      for (let index = 0; index < events.length - 1; index += 1) {
+        const event = events[index]; const next = events[index + 1];
+        if (event && next) event.relations = [{ type: 'planned_precedes', eventId: next.planEventId! }, { type: 'planned_enables', eventId: next.planEventId! }];
+      }
+      const plannedRewards: { ruleId: string; ruleVersion: string; component: NonNullable<OfferRuleVersion['componentKind']>; reward?: Money; reasons: readonly string[] }[] = [];
+      events.forEach((event, index) => {
+        const edge = pathEdges?.[index];
+        const funding = index === 0 ? route.funding : { kind: 'account' as const, subtype: 'wallet_balance' as const, ...(route.funding.kind === 'account' && route.funding.accountId ? { accountId: route.funding.accountId } : {}) };
+        const plannedEvent = { id: event.planEventId!, kind: event.kind === 'top_up' ? 'top_up' as const : 'purchase' as const, amount: event.amount ?? input.amount, occurredAt: asOf, funding, routeId: route.id, ...(input.channel === undefined ? {} : { channel: input.channel }), ...(input.paymentMethod === undefined ? {} : { paymentMethod: input.paymentMethod }) };
+        if (event.kind === 'top_up' && event.amount === undefined) return;
+        for (const rule of state.rules) {
+          if (rule.status !== 'active' || !rule.eventRule || !rule.componentKind || (rule.routeId !== undefined && rule.routeId !== route.id)) continue;
+          const match = matchPaymentEvent(rule.eventRule, plannedEvent);
+          if (match.status !== 'matched') {
+            if (match.status === 'unknown') plannedRewards.push({ ruleId: rule.id, ruleVersion: rule.version, component: rule.componentKind, reasons: match.reasons });
+            continue;
+          }
+          const reward = rule.reward.amountMinor !== undefined
+            ? { amountMinor: rule.reward.amountMinor, currency: rule.reward.currency ?? input.amount.currency }
+            : rule.reward.rateBps !== undefined && event.amount
+            ? { amountMinor: Math.floor(event.amount.amountMinor * rule.reward.rateBps / 10_000), currency: rule.reward.currency ?? input.amount.currency }
+            : undefined;
+          plannedRewards.push({ ruleId: rule.id, ruleVersion: rule.version, component: rule.componentKind, ...(reward === undefined ? {} : { reward }), reasons: reward === undefined ? ['reward spec is not calculable'] : [] });
+          if (event.rewards) event.rewards = [...event.rewards, { ruleId: rule.id, ruleVersion: rule.version, component: rule.componentKind, status: reward === undefined ? 'unknown' : 'ready', ...(reward === undefined ? {} : { reward }), reasons: reward === undefined ? ['reward spec is not calculable'] : [] }];
+        }
+        if (edge && event.kind === 'top_up' && event.amount === undefined) event.eligibility = { status: 'unknown', reasons: ['top-up amount policy is not evidenced'] };
+      });
       const transaction: TransactionTuple = { cardId: route.funding.kind === 'credit_card' ? (route.funding.cardId ?? '') : '', routeId: route.id, kind: 'purchase', mode: 'planned', occurredAt: asOf, amount: input.amount, ...(input.merchant === undefined ? {} : { merchant: input.merchant }), ...(input.mcc === undefined ? {} : { mcc: input.mcc }), ...(input.country === undefined ? {} : { country: input.country }), ...(input.channel === undefined ? {} : { channel: input.channel }), ...(input.paymentMethod === undefined ? {} : { paymentMethod: input.paymentMethod }) };
       const card = state.cards.find((candidate) => candidate.id === transaction.cardId);
-      const evaluations = card ? state.rules.filter((rule) => rule.cardId === card.id).map((rule) => ({ rule, result: evaluateOffer(rule, transaction, this.context(state, asOf, transaction)) })).filter(({ result }) => result.status === 'ok') : [];
+      const hasPlannedTopUp = events.some((event) => event.kind === 'top_up');
+      const evaluations = card && !hasPlannedTopUp ? state.rules.filter((rule) => rule.cardId === card.id).map((rule) => ({ rule, result: evaluateOffer(rule, transaction, this.context(state, asOf, transaction)) })).filter(({ result }) => result.status === 'ok') : [];
       const ranking = evaluations.length ? evaluations[0]?.result : undefined;
       const zero = { amountMinor: 0, currency: input.amount.currency };
-      const matchedRules = evaluations.filter(({ rule }) => rule.stacking !== 'possible').map(({ rule, result }) => ({ ruleId: rule.id, ruleVersion: rule.version, component: rule.componentKind ?? 'card_issuer', reward: result.cappedReward ?? zero }));
+      const matchedRules = [...evaluations.filter(({ rule }) => rule.stacking !== 'possible').map(({ rule, result }) => ({ ruleId: rule.id, ruleVersion: rule.version, component: rule.componentKind ?? 'card_issuer', reward: result.cappedReward ?? zero })), ...plannedRewards.filter((item) => item.reward !== undefined).map((item) => ({ ruleId: item.ruleId, ruleVersion: item.ruleVersion, component: item.component, reward: item.reward! }))];
       const sum = (field: 'grossReward' | 'cappedReward') => matchedRules.reduce((amount, item) => amount + (item.reward.amountMinor), 0);
       const cappedReward = matchedRules.length ? { amountMinor: sum('cappedReward'), currency: input.amount.currency } : zero;
       const grossReward = matchedRules.length ? { amountMinor: sum('grossReward'), currency: input.amount.currency } : zero;
