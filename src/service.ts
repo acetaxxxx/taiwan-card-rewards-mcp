@@ -86,11 +86,11 @@ export class RewardService {
   submitEvidence(input: unknown): EvidenceRecord {
     const parsed = validateEvidence(input);
     const state = this.store.read();
-    const existing = state.evidence.filter((candidate) => candidate.requirementId === parsed.requirementId && candidate.reviewState === 'accepted');
+    const existing = state.evidence.filter((candidate) => candidate.requirementId === parsed.requirementId && candidate.reviewState === 'accepted' && (candidate.ownerUser === this.metadataUser || (candidate.ownerUser === undefined && this.metadataUser === undefined)));
     if (existing.some((candidate) => JSON.stringify(candidate.claim) !== JSON.stringify(parsed.claim))) throw new RewardServiceError('NEEDS_REVIEW', `conflict for evidence requirement ${parsed.requirementId}`);
     const retry = existing.find((candidate) => JSON.stringify(candidate.claim) === JSON.stringify(parsed.claim) && candidate.sourceIdentity === parsed.sourceIdentity);
     if (retry) return retry;
-    const evidence = { ...parsed, id: ownedId('ev') };
+    const evidence = { ...parsed, id: ownedId('ev'), ...(this.metadataUser === undefined ? {} : { ownerUser: this.metadataUser }) };
     this.store.update((next) => { next.evidence.push(evidence); });
     return evidence;
   }
@@ -640,6 +640,22 @@ export class RewardService {
     if (![maxHops, maxEvents, maxBranchesPerNode].every((value) => Number.isSafeInteger(value) && value >= 1 && value <= 20)) throw new RewardServiceError('INVALID_INPUT', 'payment path bounds are invalid');
     const state = this.store.read();
     const requested = input.routeIds === undefined ? undefined : new Set(input.routeIds);
+    const verifiedFacts: EligibilityFact[] = [];
+    let invalidEligibilityEvidence = false;
+    const factValues = new Map<string, string>();
+    for (const fact of eligibilityFacts) {
+      const evidence = fact.evidenceId === undefined ? undefined : state.evidence.find((candidate) => candidate.id === fact.evidenceId);
+      const claim = evidence?.claim;
+      const validWindow = evidence !== undefined && (!evidence.validFrom || Date.parse(evidence.validFrom) <= Date.parse(asOf)) && (!evidence.validTo || Date.parse(evidence.validTo) >= Date.parse(asOf)) && (!evidence.refreshAfter || Date.parse(evidence.refreshAfter) >= Date.parse(asOf));
+      const owned = evidence?.ownerUser === this.metadataUser;
+      const exact = claim?.factKey === fact.factKey && JSON.stringify(claim.value) === JSON.stringify(fact.value) && (fact.version === undefined || claim.version === fact.version);
+      if (fact.validFrom !== undefined || fact.validTo !== undefined || !evidence || !owned || evidence.sourceType !== 'official' || evidence.reviewState !== 'accepted' || !validWindow || !exact) { invalidEligibilityEvidence = true; continue; }
+      const key = `${fact.cardId ?? ''}|${fact.factKey}`;
+      const value = JSON.stringify(fact.value);
+      if (factValues.has(key) && factValues.get(key) !== value) { invalidEligibilityEvidence = true; continue; }
+      factValues.set(key, value);
+      verifiedFacts.push(fact);
+    }
     const visibleRoutes = this.listPaymentRoutes().filter((route) => requested === undefined || requested.has(route.id));
     const routes = visibleRoutes.filter((route) => {
       if (route.status !== 'active' || !route.confirmation) return false;
@@ -725,7 +741,7 @@ export class RewardService {
         if (event && next) event.relations = [{ type: 'planned_precedes', eventId: next.planEventId! }, { type: 'planned_enables', eventId: next.planEventId! }];
       }
       const plannedRewards: { ruleId: string; ruleVersion: string; component: NonNullable<OfferRuleVersion['componentKind']>; sponsor: string; benefitGroup: string; nativeUnit: string; combination?: OfferRuleVersion['combination']; capPoolRefs?: readonly string[]; reward?: Money; reasons: readonly string[] }[] = [];
-      let eligibilityUncertain = false;
+      let eligibilityUncertain = invalidEligibilityEvidence;
       events.forEach((event, index) => {
         const edge = pathEdges?.[index];
         const funding = index === 0 ? route.funding : { kind: 'account' as const, subtype: 'wallet_balance' as const, ...(route.funding.kind === 'account' && route.funding.accountId ? { accountId: route.funding.accountId } : {}) };
@@ -739,7 +755,7 @@ export class RewardService {
             continue;
           }
           if (rule.predicate) {
-            const predicateContext = { ...this.context(state, asOf), eligibilityFacts };
+            const predicateContext = { ...this.context(state, asOf), eligibilityFacts: verifiedFacts };
             const outcome = evaluatePredicate(rule.predicate, { cardId: '', routeId: route.id, kind: 'purchase', mode: 'planned', occurredAt: asOf, amount: input.amount }, predicateContext);
             if (!outcome.matched) {
               eligibilityUncertain = true;

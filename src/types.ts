@@ -411,6 +411,7 @@ export interface EvidenceRecord {
   contentHash: string;
   reviewState: EvidenceReviewState;
   sourceUrl?: string | undefined;
+  ownerUser?: string | undefined;
 }
 export interface FactCandidate {
   id: string;
