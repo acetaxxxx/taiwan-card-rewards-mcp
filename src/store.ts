@@ -1,7 +1,7 @@
 import * as crypto from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import type { CardDescriptor, CardSwitchCampaign, CardSwitchEnrollment, CardSwitchProjection, CapPoolDefinition, MerchantIdentity, OfferRuleVersion, OfferSourceSnapshot, RewardBreakdown, RewardComponentRecord, TransactionTuple, EvidenceRecord, FactCandidate, PaymentRouteRecord, PaymentAccountRecord, EventRewardLedgerRecord, EventRewardReversalRecord, EventRewardCapUsageRecord, RewardValuationSnapshot } from './types.js';
+import type { CardDescriptor, CardSwitchCampaign, CardSwitchEnrollment, CardSwitchProjection, CapPoolDefinition, MerchantIdentity, OfferRuleVersion, OfferSourceSnapshot, RewardBreakdown, RewardComponentRecord, TransactionTuple, EvidenceRecord, FactCandidate, PaymentRouteRecord, PaymentAccountRecord, EventRewardLedgerRecord, EventRewardReversalRecord, EventRewardCapUsageRecord, RewardValuationSnapshot, AppliedFxRate } from './types.js';
 import type { StartupConfig } from './startup.js';
 import { validateStoredState } from './validation.js';
 
@@ -10,6 +10,7 @@ export interface RecordedTransaction {
   reward: RewardBreakdown;
   /** User scope is stamped by the workspace; absent is legacy/unscoped data. */
   ownerUser?: string;
+  appliedFx?: AppliedFxRate | undefined;
 }
 
 export interface StoredState {

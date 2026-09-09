@@ -9,3 +9,5 @@ export * from './errors.js';
 export * from './projections.js';
 export * from './card-switch.js';
 export * from './shared-mcp.js';
+export * from './shared-cli.js';
+export * from './fx.js';

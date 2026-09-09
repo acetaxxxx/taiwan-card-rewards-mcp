@@ -15,14 +15,14 @@ export interface PaymentRouteContext {
 export type PaymentEventKind = 'top_up' | 'purchase' | 'refund' | 'reversal' | 'reward_issuance' | 'reward_redemption';
 export type PaymentEventFunding = { kind: 'credit_card'; cardId?: string } | { kind: 'account'; subtype: 'linked_bank_account' | 'wallet_balance' | 'foreign_currency_account'; accountId?: string } | { kind: 'cash' };
 export interface PaymentEventRelations { funded_by?: readonly string[]; caused_by?: readonly string[]; refunds?: readonly string[]; }
-export interface PaymentEvent { id: string; kind: PaymentEventKind; amount: Money; occurredAt: string; funding: PaymentEventFunding; cardId?: string; routeId?: string; channel?: string; paymentMethod?: string; relations?: PaymentEventRelations; }
+export interface PaymentEvent { id: string; kind: PaymentEventKind; amount: Money; occurredAt: string; funding: PaymentEventFunding; cardId?: string; routeId?: string; channel?: string; paymentMethod?: string; relations?: PaymentEventRelations; fx?: FxSnapshot | undefined; }
 export interface PaymentEventRule { id: string; version: string; eventKind: PaymentEventKind; fundingKind?: PaymentEventFunding['kind']; fundingSubtype?: Extract<PaymentEventFunding, { kind: 'account' }>['subtype']; channel?: string; paymentMethod?: string; }
 export interface PaymentEventMatch { status: 'matched' | 'no_match' | 'unknown'; reasons: readonly string[]; }
 export interface PaymentEventChainRule { id: string; version: string; relation: 'funded_by'; windowSeconds: number; sourceRule: PaymentEventRule; targetRule: PaymentEventRule; }
 export interface PaymentEventRewardCandidate { eventId: string; ruleId: string; ruleVersion: string; evidenceId: string; sponsor: string; benefitGroup: string; reward?: RewardSpec; combination?: RewardCombinationPolicy; capPoolId?: string; }
 export interface PaymentEventRewardCandidateInput extends PaymentEventRewardCandidate { eligibility: PaymentEventMatch; }
 export interface PaymentEventRewardDecision { status: 'matched' | 'no_match' | 'needs_review'; candidates: readonly PaymentEventRewardCandidate[]; reasons: readonly string[]; }
-export interface EventRewardLedgerRecord { idempotencyKey: string; ownerUser: string; eventId: string; eventAmount: Money; ruleId: string; ruleVersion: string; evidenceId: string; sponsor: string; benefitGroup: string; reward: Money; rewardSpecFingerprint: string; capUsage?: { poolId: string; periodKey: string; consumedAmount: number }; }
+export interface EventRewardLedgerRecord { idempotencyKey: string; ownerUser: string; eventId: string; eventAmount: Money; ruleId: string; ruleVersion: string; evidenceId: string; sponsor: string; benefitGroup: string; reward: Money; rewardSpecFingerprint: string; capUsage?: { poolId: string; periodKey: string; consumedAmount: number }; appliedFx?: AppliedFxRate | undefined; }
 export interface EventRewardReversalRecord { idempotencyKey: string; ownerUser: string; eventId: string; originalEventId: string; refundedAmount: Money; ruleId: string; ruleVersion: string; evidenceId: string; sponsor: string; benefitGroup: string; reward: Money; capUsage?: { poolId: string; periodKey: string; consumedAmount: number }; }
 export interface EventRewardCapUsageRecord { ownerUser: string; poolId: string; periodKey: string; consumedAmount: number; }
 export type PaymentRouteLayerKind = 'merchant_loyalty' | 'merchant_acceptance' | 'consumer_app' | 'payment_provider' | 'wallet' | 'interoperability_scheme' | 'intermediate_provider' | 'card_network' | 'card_issuer';
@@ -318,6 +318,26 @@ export interface FxSnapshot {
   issuerScope?: string | undefined;
 }
 
+export interface FxRateObservation extends FxSnapshot {
+  conversionOwner?: 'card_scheme' | 'issuer' | 'wallet' | 'merchant_dcc' | 'unknown' | undefined;
+  effectiveAt?: string | undefined;
+  confidence?: 'high' | 'medium' | 'low' | undefined;
+}
+
+export interface AppliedFxRate {
+  snapshotId: string;
+  baseCurrency: Currency;
+  quoteCurrency: Currency;
+  ratePpm: number;
+  capturedAt: string;
+  provider: string;
+  rateType: FxRateType;
+  sourceUrl?: string | undefined;
+  contentHash?: string | undefined;
+  conversionOwner?: string | undefined;
+  appliedAtUtc: string;
+}
+
 export interface RewardValuationSnapshot {
   id: string;
   nativeUnit: string;
@@ -396,6 +416,19 @@ export interface RecommendationRequiredAction {
   path: string;
   requiredFacts: readonly string[];
 }
+export interface FxResolutionRequest {
+  baseCurrency: string;
+  quoteCurrency: string;
+  asOf?: string | undefined;
+  transactionKind: 'planned' | 'actual';
+  conversionOwner?: 'card_scheme' | 'issuer' | 'wallet' | 'merchant_dcc' | 'unknown' | undefined;
+  suggestedRateTypes: Array<'cash_selling' | 'spot_selling' | 'mid_market' | 'card_scheme'>;
+  requiredFacts: string[];
+  sourceSelectionReason: string;
+  retryAction: 'query_approved_fx_source' | 'ask_user' | 'refresh_external_data';
+  userQuestion?: string | undefined;
+}
+
 export interface RecommendationPreflight {
   ready: boolean;
   knownFacts: readonly string[];
@@ -404,6 +437,7 @@ export interface RecommendationPreflight {
   diagnostics: readonly Diagnostic[];
   evaluatedAt: string;
   dataVersion: string;
+  fxResolutionRequest?: FxResolutionRequest | undefined;
 }
 
 export type EvidenceSourceType = 'official' | 'trusted_secondary' | 'community' | 'user_provided';

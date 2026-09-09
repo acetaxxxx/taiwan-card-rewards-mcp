@@ -1,11 +1,12 @@
 import * as crypto from 'node:crypto';
 import { type LedgerStore, type RecordedTransaction, type StoredState } from './store.js';
 import { EventRewardLedger, convertMinor, createPaymentEventRewardCandidate, decidePaymentEventRewards, evaluateOffer, evaluatePredicate, matchPaymentEvent, matchPaymentEventChain, rankCards, resolveCyclePeriodKey } from './evaluator.js';
-import type { CardDescriptor, CardSwitchInput, CardSwitchProjection, CardSwitchStatus, CapPeriod, CapPoolDefinition, EvaluationContext, MerchantIdentity, MerchantResolution, Money, OfferConfirmation, OfferRuleVersion, OfferSourceSnapshot, RankingEntry, RewardBreakdown, RewardComponentRecord, TransactionTuple, UserBenefitInput, UserBenefitStatus, RecommendationPreflight, RecommendationRequiredAction, RecommendationRequirement, Diagnostic, EvidenceRecord, PaymentRouteRecord, PaymentAccountRecord, EventRewardLedgerRecord, EventRewardReversalRecord, PaymentPathRequest, PaymentPathRecommendation, PaymentPathCandidate, PaymentPathEvent, EligibilityFact, RewardValuationSnapshot } from './types.js';
+import type { CardDescriptor, CardSwitchInput, CardSwitchProjection, CardSwitchStatus, CapPeriod, CapPoolDefinition, EvaluationContext, MerchantIdentity, MerchantResolution, Money, OfferConfirmation, OfferRuleVersion, OfferSourceSnapshot, RankingEntry, RewardBreakdown, RewardComponentRecord, TransactionTuple, UserBenefitInput, UserBenefitStatus, RecommendationPreflight, RecommendationRequiredAction, RecommendationRequirement, Diagnostic, EvidenceRecord, PaymentRouteRecord, PaymentAccountRecord, EventRewardLedgerRecord, EventRewardReversalRecord, PaymentPathRequest, PaymentPathRecommendation, PaymentPathCandidate, PaymentPathEvent, EligibilityFact, RewardValuationSnapshot, FxResolutionRequest, FxRateObservation, AppliedFxRate } from './types.js';
 import type { StartupConfig } from './startup.js';
 import { RewardServiceError } from './errors.js';
 import { validateCard, validateCapPool, validateConfirmation, validateEligibilityFact, validateMerchant, validateRecommendationTransaction, validateRule, validateSnapshot, validateTransaction, validateEvidence, validateFactCandidate, validatePaymentRouteRecord, validatePaymentAccountRecord, validateEventRewardInput, validatePaymentEvent, validatePaymentEventChainRule, validatePaymentEventRule, validateRewardValuationSnapshot } from './validation.js';
 import { cardSwitchStatus, projectionFromInput } from './card-switch.js';
+import { buildFxResolutionRequest, freezeAppliedFxRate, deriveConversionOwner } from './fx.js';
 
 export { RewardServiceError } from './errors.js';
 
@@ -45,7 +46,30 @@ export class RewardService {
     if (!this.metadataUser) throw new RewardServiceError('UNAUTHENTICATED', 'event reward recording requires an authenticated user');
     const parsed = validateEventRewardInput(input);
     const state = this.store.read();
-    return new EventRewardLedger(this.metadataUser, state.capPools, this.store).record(createPaymentEventRewardCandidate(parsed.candidate), parsed.event, parsed.idempotencyKey);
+    const candidate = createPaymentEventRewardCandidate(parsed.candidate);
+    const rewardCurrency = candidate?.reward?.currency;
+    const isCrossCurrency = rewardCurrency !== undefined && rewardCurrency !== parsed.event.amount.currency;
+    let appliedFx: AppliedFxRate | undefined;
+    if (isCrossCurrency) {
+      if (!parsed.event.fx) {
+        const fxReq = buildFxResolutionRequest({
+          transaction: { amount: parsed.event.amount, occurredAt: parsed.event.occurredAt, mode: 'actual' },
+          targetCurrency: rewardCurrency,
+        });
+        throw new RewardServiceError('fx_missing', 'missing FX snapshot for event reward', {
+          code: 'fx_missing',
+          path: 'event.fx',
+          requiredFacts: fxReq.requiredFacts,
+          retryAction: fxReq.retryAction,
+          fxResolutionRequest: fxReq,
+        });
+      }
+      if (parsed.event.fx.rateType === 'mid_market') {
+        throw new RewardServiceError('NEEDS_REVIEW', 'mid_market rate cannot be used for actual event reward settlement');
+      }
+      appliedFx = freezeAppliedFxRate(parsed.event.fx, nowIso());
+    }
+    return new EventRewardLedger(this.metadataUser, state.capPools, this.store).record(candidate, parsed.event, parsed.idempotencyKey, appliedFx);
   }
 
   recordValidatedEventReward(input: unknown): EventRewardLedgerRecord {
@@ -70,7 +94,29 @@ export class RewardService {
       const decision = decidePaymentEventRewards([candidate]);
       if (decision.status !== 'matched') throw new RewardServiceError('NEEDS_REVIEW', 'event reward combination policy requires review');
     }
-    return ledger.record(candidate, event, String(source.idempotencyKey));
+    const rewardCurrency = candidate?.reward?.currency;
+    const isCrossCurrency = rewardCurrency !== undefined && rewardCurrency !== event.amount.currency;
+    let appliedFx: AppliedFxRate | undefined;
+    if (isCrossCurrency) {
+      if (!event.fx) {
+        const fxReq = buildFxResolutionRequest({
+          transaction: { amount: event.amount, occurredAt: event.occurredAt, mode: 'actual' },
+          targetCurrency: rewardCurrency,
+        });
+        throw new RewardServiceError('fx_missing', 'missing FX snapshot for event reward', {
+          code: 'fx_missing',
+          path: 'event.fx',
+          requiredFacts: fxReq.requiredFacts,
+          retryAction: fxReq.retryAction,
+          fxResolutionRequest: fxReq,
+        });
+      }
+      if (event.fx.rateType === 'mid_market') {
+        throw new RewardServiceError('NEEDS_REVIEW', 'mid_market rate cannot be used for actual event reward settlement');
+      }
+      appliedFx = freezeAppliedFxRate(event.fx, nowIso());
+    }
+    return ledger.record(candidate, event, String(source.idempotencyKey), appliedFx);
   }
 
   reverseEventReward(input: unknown): EventRewardReversalRecord {
@@ -617,23 +663,35 @@ export class RewardService {
       }
     }
     const foreignRule = rules.some((rule) => rule.settlementCurrency !== parsed.amount.currency);
-    if (foreignRule && parsed.routeContext && !parsed.routeContext.conversionOwner) {
-      requirements.push({ id: 'route', category: 'payment_route', path: 'transaction.routeContext.conversionOwner', status: 'missing', retryAction: 'ask_user' });
-      diagnostics.push({ code: 'missing_required_fact', path: 'transaction.routeContext.conversionOwner', requiredFacts: ['transaction.routeContext.conversionOwner'], retryAction: 'ask_user' });
-      requiredActions.push({ action: 'ask_user', path: 'transaction.routeContext.conversionOwner', requiredFacts: ['transaction.routeContext.conversionOwner'] });
-    }
-    if (foreignRule && !parsed.fx) {
-      requirements.push({ id: 'fx', category: 'fx_rate', path: 'transaction.fx', status: 'missing', retryAction: 'query_approved_fx_source' });
-      diagnostics.push({ code: 'fx_missing', path: 'transaction.fx', requiredFacts: ['transaction.fx'], retryAction: 'query_approved_fx_source' });
-      requiredActions.push({ action: 'refresh_external_data', path: 'transaction.fx', requiredFacts: ['transaction.fx'] });
-    } else if (foreignRule && parsed.fx && parsed.fx.baseCurrency !== parsed.amount.currency) {
-      requirements.push({ id: 'fx', category: 'fx_rate', path: 'transaction.fx.baseCurrency', status: 'invalid', retryAction: 'rebuild_snapshot' });
-      diagnostics.push({ code: 'fx_pair_mismatch', path: 'transaction.fx.baseCurrency', requiredFacts: [`base currency ${parsed.amount.currency}`], retryAction: 'rebuild_snapshot' });
-      requiredActions.push({ action: 'refresh_external_data', path: 'transaction.fx', requiredFacts: [`base currency ${parsed.amount.currency}`] });
+    let fxResolutionRequest: FxResolutionRequest | undefined;
+    if (foreignRule) {
+      fxResolutionRequest = buildFxResolutionRequest({
+        transaction: parsed,
+        rules,
+        card,
+      });
+      if (parsed.routeContext && !parsed.routeContext.conversionOwner) {
+        requirements.push({ id: 'route', category: 'payment_route', path: 'transaction.routeContext.conversionOwner', status: 'missing', retryAction: 'ask_user' });
+        diagnostics.push({ code: 'missing_required_fact', path: 'transaction.routeContext.conversionOwner', requiredFacts: ['transaction.routeContext.conversionOwner'], retryAction: 'ask_user' });
+        requiredActions.push({ action: 'ask_user', path: 'transaction.routeContext.conversionOwner', requiredFacts: ['transaction.routeContext.conversionOwner'] });
+      }
+      if (!parsed.fx) {
+        requirements.push({ id: 'fx', category: 'fx_rate', path: 'transaction.fx', status: 'missing', retryAction: fxResolutionRequest.retryAction });
+        diagnostics.push({ code: 'fx_missing', path: 'transaction.fx', requiredFacts: fxResolutionRequest.requiredFacts, retryAction: fxResolutionRequest.retryAction });
+        requiredActions.push({ action: fxResolutionRequest.retryAction === 'ask_user' ? 'ask_user' : 'refresh_external_data', path: 'transaction.fx', requiredFacts: fxResolutionRequest.requiredFacts });
+      } else if (parsed.fx.baseCurrency !== parsed.amount.currency) {
+        requirements.push({ id: 'fx', category: 'fx_rate', path: 'transaction.fx.baseCurrency', status: 'invalid', retryAction: 'rebuild_snapshot' });
+        diagnostics.push({ code: 'fx_pair_mismatch', path: 'transaction.fx.baseCurrency', requiredFacts: [`base currency ${parsed.amount.currency}`], retryAction: 'rebuild_snapshot' });
+        requiredActions.push({ action: 'refresh_external_data', path: 'transaction.fx', requiredFacts: [`base currency ${parsed.amount.currency}`] });
+      } else if (parsed.mode === 'actual' && parsed.fx.rateType === 'mid_market') {
+        requirements.push({ id: 'fx', category: 'fx_rate', path: 'transaction.fx.rateType', status: 'needs_review', retryAction: 'query_approved_fx_source' });
+        diagnostics.push({ code: 'needs_review', path: 'transaction.fx.rateType', requiredFacts: ['transaction.fx.rateType'], retryAction: 'query_approved_fx_source' });
+        requiredActions.push({ action: 'refresh_external_data', path: 'transaction.fx.rateType', requiredFacts: ['transaction.fx.rateType'] });
+      }
     }
     const dataVersion = crypto.createHash('sha256').update(JSON.stringify(state)).digest('hex').slice(0, 16);
     const blocking = diagnostics.some((diagnostic) => diagnostic.code !== 'no_active_offer');
-    return { ready: !blocking, knownFacts, requirements, requiredActions, diagnostics, evaluatedAt, dataVersion };
+    return { ready: !blocking, knownFacts, requirements, requiredActions, diagnostics, evaluatedAt, dataVersion, ...(fxResolutionRequest ? { fxResolutionRequest } : {}) };
   }
 
   recommend(transaction: unknown, limit = 10, options: { cardIds?: readonly string[]; context?: EvaluationContext } = {}): RankingEntry[] {
@@ -937,6 +995,7 @@ export class RewardService {
     const requestedTransaction = transaction;
     const state = this.store.read();
     let originalRecord: RecordedTransaction | undefined;
+    let appliedFx: AppliedFxRate | undefined;
     const visibleTransactions = this.visibleTransactions(state);
     const duplicate = visibleTransactions.find((record) => record.transaction.idempotencyKey === transaction.idempotencyKey);
     if (duplicate) {
@@ -962,15 +1021,50 @@ export class RewardService {
         .filter((record) => record.ownerUser === this.metadataUser && record.transaction.kind === 'refund' && record.transaction.refundOfId === transaction.refundOfId)
         .reduce((sum, record) => sum + Math.max(0, -(record.reward.cappedReward?.amountMinor ?? 0)), 0);
       const rewardToReverse = Math.min(originalReward - rewardAlreadyRefunded, Math.floor((originalReward * refundAmount) / originalAmount));
-      transaction = { ...original.transaction, ...transaction, amount: { ...transaction.amount, amountMinor: refundAmount }, originalRewardMinor: rewardToReverse };
+      transaction = { ...original.transaction, ...transaction, amount: { ...transaction.amount, amountMinor: refundAmount }, originalRewardMinor: rewardToReverse, ...(original.transaction.fx ? { fx: original.transaction.fx } : {}) };
+      if (original.appliedFx) {
+        appliedFx = { ...original.appliedFx, appliedAtUtc: nowIso() };
+      } else if (original.transaction.fx) {
+        appliedFx = freezeAppliedFxRate(original.transaction.fx, nowIso());
+      }
+    }
+    const card = state.cards.find((item) => item.id === transaction.cardId);
+    const rules = state.rules.filter((rule) => rule.status === 'active' && (!card || rule.cardId === card.id));
+    const foreignRule = rules.some((rule) => rule.settlementCurrency !== transaction.amount.currency);
+    if (transaction.kind !== 'refund' && foreignRule) {
+      if (!transaction.fx) {
+        const fxResolutionRequest = buildFxResolutionRequest({
+          transaction,
+          rules,
+          card,
+        });
+        throw new RewardServiceError('fx_missing', 'missing FX snapshot for settlement currency', {
+          code: 'fx_missing',
+          path: 'transaction.fx',
+          requiredFacts: fxResolutionRequest.requiredFacts,
+          retryAction: fxResolutionRequest.retryAction,
+          fxResolutionRequest,
+        });
+      }
+      if (transaction.fx.baseCurrency !== transaction.amount.currency) {
+        throw new RewardServiceError('INVALID_INPUT', 'transaction.fx.baseCurrency does not match transaction amount currency');
+      }
+      if (transaction.mode === 'actual' && transaction.fx.rateType === 'mid_market') {
+        throw new RewardServiceError('NEEDS_REVIEW', 'mid_market rate cannot be used for actual transaction settlement; use card_scheme or cash_selling rate');
+      }
+      appliedFx = freezeAppliedFxRate(transaction.fx, nowIso(), deriveConversionOwner({ routeContext: transaction.routeContext, route: transaction.route, card }));
     }
     const evaluationTransaction = transaction.kind === 'refund'
       ? { ...transaction, occurredAt: visibleTransactions.find((record) => record.transaction.idempotencyKey === transaction.refundOfId)?.transaction.occurredAt ?? transaction.occurredAt }
       : transaction;
-    const card = state.cards.find((item) => item.id === transaction.cardId);
     const context = this.context(state, evaluationTransaction.occurredAt, evaluationTransaction);
     const reward = card ? rankCards([card], state.rules, evaluationTransaction, context, 1)[0] : undefined;
     if (!reward || reward.status !== 'ok') {
+      const isFxMissing = reward?.diagnostics?.some((d) => d.code === 'fx_missing') || reward?.unknownReasons?.some((r) => r.includes('missing FX snapshot'));
+      if (isFxMissing) {
+        const fxResolutionRequest = buildFxResolutionRequest({ transaction: evaluationTransaction, rules, card });
+        throw new RewardServiceError('fx_missing', 'missing FX snapshot for settlement currency', { code: 'fx_missing', path: 'transaction.fx', requiredFacts: fxResolutionRequest.requiredFacts, retryAction: fxResolutionRequest.retryAction, fxResolutionRequest });
+      }
       const code = reward?.status === 'unknown' ? 'INSUFFICIENT_FACTS' : 'NEEDS_REVIEW';
       const reason = reward?.unknownReasons?.join('; ') || 'no usable offer rule';
       throw new RewardServiceError(code, reason);
@@ -1006,7 +1100,10 @@ export class RewardService {
         });
         return { componentId: componentId(requestedTransaction.idempotencyKey!, component.ruleId, component.ruleVersion), transactionId: requestedTransaction.idempotencyKey!, ruleId: component.ruleId, ruleVersion: component.ruleVersion, route: component.kind === 'merchant_loyalty' ? 'merchant' : component.kind === 'payment_provider' ? 'payment_provider' : 'card_issuer', ...(component.kind === 'payment_provider' ? { provider: requestedTransaction.route?.providerId } : {}), reward: { value: component.reward?.amountMinor ?? 0, unitType: 'currency', unitName: component.unit, ...(component.reward?.currency ? { currency: component.reward.currency } : {}) }, capUsages, appliedAtUtc };
       });
-    const record: RecordedTransaction = { transaction: requestedTransaction, reward: { ...reward, transaction: requestedTransaction }, ...(this.metadataUser === undefined ? {} : { ownerUser: this.metadataUser }) };
+    const storedTransaction: TransactionTuple = transaction.kind === 'refund' && originalRecord?.transaction.fx
+      ? { ...requestedTransaction, fx: originalRecord.transaction.fx }
+      : requestedTransaction;
+    const record: RecordedTransaction = { transaction: storedTransaction, reward: { ...reward, transaction: storedTransaction }, ...(appliedFx ? { appliedFx } : {}), ...(this.metadataUser === undefined ? {} : { ownerUser: this.metadataUser }) };
     this.store.update((next) => { next.transactions.push(record); next.rewardComponents.push(...componentRecords); });
     return record.reward;
   }

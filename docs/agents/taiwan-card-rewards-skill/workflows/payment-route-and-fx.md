@@ -148,3 +148,69 @@ $$\text{ratePpm} = \text{匯率 (1 單位外幣折合新台幣金額)} \times 1,
 
 > [!CAUTION]
 > **嚴禁 1:1 匯率回退**：若交易幣別非 `TWD` 且未注入有效 `FxSnapshot`，Pre-flight 必須回傳 `ready: false` 並標註 `requiredActions: ["refresh_external_data"]`。
+
+---
+
+## 6. FX 自動化解析合約與匯率來源仲裁流程 (FX Resolution Contract & Provenance Automation)
+
+為消除 Host Agent 與 MCP 核心之間的外幣資訊落差，同時恪守「核心零直接網路 I/O、失敗即關閉 (Fail-Closed)」之架構承諾，系統建立標準化 `FxResolutionRequest` 與原子匯率觀測值攝入流程。
+
+### 6.1 `FxResolutionRequest` 合約架構
+
+當交易幣別與回饋規則／清算幣別不一致（即跨幣別消費）時，Pre-flight 與 Mutation 錯誤均會附帶結構化的 `FxResolutionRequest`：
+
+```typescript
+export interface FxResolutionRequest {
+  baseCurrency: Currency;
+  quoteCurrency: Currency;
+  asOf: string; // ISO 8601 UTC
+  transactionKind: 'planned' | 'actual';
+  conversionOwner: 'card_scheme' | 'issuer' | 'wallet' | 'merchant_dcc' | 'unknown';
+  suggestedRateTypes: Array<'card_scheme' | 'cash_selling' | 'spot_selling' | 'mid_market'>;
+  requiredFacts: readonly string[];
+  sourceSelectionReason: string;
+  retryAction: 'query_approved_fx_source' | 'ask_user';
+  userQuestion?: string;
+}
+```
+
+### 6.2 換匯主導者與建議匯率種類矩陣 (Policy Matrix)
+
+系統依據支付路徑拓撲與交易屬性自動推導換匯主導者 (`conversionOwner`) 與建議匯率種類 (`suggestedRateTypes`)：
+
+| 換匯主導者 (`conversionOwner`) | 判定情境條件 | 建議匯率種類 (`suggestedRateTypes`) | 說明與來源仲裁依據 |
+|---|---|---|---|
+| **`card_scheme`** | 實體卡或 Apple/Google Pay 直刷、`card_network`、`acquirer` | `card_scheme` | 國際卡組織（Visa/Mastercard/JCB）官方公布結算匯率 |
+| **`issuer`** | 銀行端結匯或雙幣卡請款、`bank`、`issuer` | `cash_selling` | 發卡銀行當日現鈔／現金賣出牌告匯率 |
+| **`wallet`** | 電子錢包跨境掃碼結帳、`wallet`、`payment_provider` | `spot_selling`, `mid_market` | 錢包合作銀行即時即期賣出匯率或錢包公告中價 |
+| **`merchant_dcc`** | 觸發動態貨幣轉換（DCC）、`dcc: true`、`merchant` | `spot_selling`, `cash_selling` | 商家端 POS 即時加價換匯匯率 |
+| **`unknown`** | 尚未指定路徑或缺乏換匯主體事實 | `mid_market`, `spot_selling` (planned)<br>`card_scheme`, `cash_selling` (actual) | 規劃試算階段允許使用中價參考匯率；實際入帳嚴禁猜測 |
+
+> [!CAUTION]
+> **實際入帳交易嚴禁 `mid_market`**：`mid_market` 僅允許用於 `planned` 試算推薦。若 `record_transaction` 或 `record_event_reward` 在 `mode: 'actual'` 下傳入 `rateType: 'mid_market'`，系統將強制拒絕並拋出 `NEEDS_REVIEW`。
+
+### 6.3 寫入操作原子性保證與 Fail-Closed 機制
+
+1. **強制原子攝入**：
+   在呼叫 `record_transaction` 或 `record_event_reward` 時，跨幣別交易必須在 payload 中原子性傳入驗證過的 `fx: FxSnapshot` 或 `event.fx: FxSnapshot`。
+2. **`fx_missing` 結構化錯誤回傳**：
+   若未提供匯率觀測值，核心引擎立即拋出 `fx_missing` 錯誤，並在 `error.details` 中完整附帶 `fxResolutionRequest`，引導外部 Agent 透過核可管道查詢補齊後重試。
+3. **歷史入帳凍結與退款匯率豁免 (Frozen Provenance & Refund Immunity)**：
+   - 交易成功入帳時，核心將當下採納之匯率快照永久凍結於 `AppliedFxRate`（包含 `ratePpm`, `capturedAt`, `rateType`, `conversionOwner`, `appliedAtUtc`）。
+   - 當發起後續退款交易 (`kind: 'refund'`) 時，系統自動繼承原始交易之 `appliedFx` 與 `fx` 快照，退款金額與回饋沖銷完全按原始入帳匯率等比例折算，免於後續匯率波動或匯率快照過期之影響。
+
+### 6.4 外部匯率候選值仲裁與衝突偵測 (Candidate Selection & Conflict Detection)
+
+外部 Agent 在抓取多個資料源匯率時，需依據以下規則評分與仲裁：
+1. **幣別對完全吻合**：`baseCurrency` 與 `quoteCurrency` 必須與交易相符。
+2. **時間視窗判定**：觀測時間 `capturedAt` 必須落於交易發生日之合理有效期內。
+3. **權威來源優先級**：`central_bank` / `card_scheme` (權重 100) > `issuer` / `wallet` (權重 80) > `merchant` (權重 60) > `secondary` (權重 40)。
+4. **顯著分歧衝突阻斷**：當兩個具備相同權重之同級權威來源之間匯率差異超過 5% 時，系統判定為 `conflict`，要求 Agent 提交審查或詢問使用者，不得擅自採納或折衷。
+
+### 6.5 最少詢問原則 (Minimal Question Strategy)
+
+為確保使用者體驗不被打擾，系統遵循嚴格的提問策略：
+- 在 `mode: 'planned'` 階段，若換匯主導者不明，系統自動選用 `mid_market` 或 `spot_selling` 生成試算推薦，**不中斷提問**。
+- 僅在 `mode: 'actual'` 且換匯主導者完全未知時，才觸發單一精確提問：
+  > 「這筆交易是由商店做 DCC 換成台幣，還是由發卡行／卡組織換匯？若不確定，我可以先用中價匯率做 planned estimate，但不會直接當成實際入帳匯率。」
+- 一旦使用者或資料源給定事實，系統即刻推導並固化，絕不就匯率問題進行重複對話。
