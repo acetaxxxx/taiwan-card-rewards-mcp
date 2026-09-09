@@ -154,6 +154,8 @@ export interface HeldCard {
 
 export interface EligibilityFact {
   id?: string | undefined;
+  evidenceId?: string | undefined;
+  version?: string | undefined;
   cardId?: string | undefined;
   factKey: string;
   value: PredicateValue;
@@ -549,6 +551,7 @@ export interface PaymentPathRequest {
   maxHops?: number;
   maxEvents?: number;
   maxBranchesPerNode?: number;
+  eligibilityFacts?: readonly EligibilityFact[] | undefined;
 }
 export interface PaymentPathNode { id: string; kind: string; displayName: string; }
 export interface PaymentPathEventEligibility { status: 'ready' | 'unknown' | 'no_match' | 'needs_facts'; reasons: readonly string[]; }

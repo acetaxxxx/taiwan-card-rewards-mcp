@@ -1,10 +1,10 @@
 import * as crypto from 'node:crypto';
 import { type LedgerStore, type RecordedTransaction, type StoredState } from './store.js';
-import { EventRewardLedger, convertMinor, createPaymentEventRewardCandidate, decidePaymentEventRewards, evaluateOffer, matchPaymentEvent, matchPaymentEventChain, rankCards, resolveCyclePeriodKey } from './evaluator.js';
-import type { CardDescriptor, CardSwitchInput, CardSwitchProjection, CardSwitchStatus, CapPeriod, CapPoolDefinition, EvaluationContext, MerchantIdentity, MerchantResolution, Money, OfferConfirmation, OfferRuleVersion, OfferSourceSnapshot, RankingEntry, RewardBreakdown, RewardComponentRecord, TransactionTuple, UserBenefitInput, UserBenefitStatus, RecommendationPreflight, RecommendationRequiredAction, RecommendationRequirement, Diagnostic, EvidenceRecord, PaymentRouteRecord, PaymentAccountRecord, EventRewardLedgerRecord, EventRewardReversalRecord, PaymentPathRequest, PaymentPathRecommendation, PaymentPathCandidate, PaymentPathEvent } from './types.js';
+import { EventRewardLedger, convertMinor, createPaymentEventRewardCandidate, decidePaymentEventRewards, evaluateOffer, evaluatePredicate, matchPaymentEvent, matchPaymentEventChain, rankCards, resolveCyclePeriodKey } from './evaluator.js';
+import type { CardDescriptor, CardSwitchInput, CardSwitchProjection, CardSwitchStatus, CapPeriod, CapPoolDefinition, EvaluationContext, MerchantIdentity, MerchantResolution, Money, OfferConfirmation, OfferRuleVersion, OfferSourceSnapshot, RankingEntry, RewardBreakdown, RewardComponentRecord, TransactionTuple, UserBenefitInput, UserBenefitStatus, RecommendationPreflight, RecommendationRequiredAction, RecommendationRequirement, Diagnostic, EvidenceRecord, PaymentRouteRecord, PaymentAccountRecord, EventRewardLedgerRecord, EventRewardReversalRecord, PaymentPathRequest, PaymentPathRecommendation, PaymentPathCandidate, PaymentPathEvent, EligibilityFact } from './types.js';
 import type { StartupConfig } from './startup.js';
 import { RewardServiceError } from './errors.js';
-import { validateCard, validateCapPool, validateConfirmation, validateMerchant, validateRecommendationTransaction, validateRule, validateSnapshot, validateTransaction, validateEvidence, validateFactCandidate, validatePaymentRouteRecord, validatePaymentAccountRecord, validateEventRewardInput, validatePaymentEvent, validatePaymentEventChainRule, validatePaymentEventRule } from './validation.js';
+import { validateCard, validateCapPool, validateConfirmation, validateEligibilityFact, validateMerchant, validateRecommendationTransaction, validateRule, validateSnapshot, validateTransaction, validateEvidence, validateFactCandidate, validatePaymentRouteRecord, validatePaymentAccountRecord, validateEventRewardInput, validatePaymentEvent, validatePaymentEventChainRule, validatePaymentEventRule } from './validation.js';
 import { cardSwitchStatus, projectionFromInput } from './card-switch.js';
 
 export { RewardServiceError } from './errors.js';
@@ -634,6 +634,7 @@ export class RewardService {
     if (!input || !input.amount || !Number.isSafeInteger(input.amount.amountMinor) || input.amount.amountMinor < 0 || !input.amount.currency) throw new RewardServiceError('INVALID_INPUT', 'payment path amount is invalid');
     const asOf = input.asOf ?? nowIso();
     if (Number.isNaN(Date.parse(asOf))) throw new RewardServiceError('INVALID_INPUT', 'payment path asOf is invalid');
+    const eligibilityFacts: readonly EligibilityFact[] = (input.eligibilityFacts ?? []).map(validateEligibilityFact);
     if (input.limit !== undefined && (!Number.isSafeInteger(input.limit) || input.limit < 1 || input.limit > 20)) throw new RewardServiceError('INVALID_INPUT', 'payment path limit must be 1..20');
     const maxHops = input.maxHops ?? 6; const maxEvents = input.maxEvents ?? 4; const maxBranchesPerNode = input.maxBranchesPerNode ?? 8;
     if (![maxHops, maxEvents, maxBranchesPerNode].every((value) => Number.isSafeInteger(value) && value >= 1 && value <= 20)) throw new RewardServiceError('INVALID_INPUT', 'payment path bounds are invalid');
@@ -724,6 +725,7 @@ export class RewardService {
         if (event && next) event.relations = [{ type: 'planned_precedes', eventId: next.planEventId! }, { type: 'planned_enables', eventId: next.planEventId! }];
       }
       const plannedRewards: { ruleId: string; ruleVersion: string; component: NonNullable<OfferRuleVersion['componentKind']>; sponsor: string; benefitGroup: string; nativeUnit: string; combination?: OfferRuleVersion['combination']; capPoolRefs?: readonly string[]; reward?: Money; reasons: readonly string[] }[] = [];
+      let eligibilityUncertain = false;
       events.forEach((event, index) => {
         const edge = pathEdges?.[index];
         const funding = index === 0 ? route.funding : { kind: 'account' as const, subtype: 'wallet_balance' as const, ...(route.funding.kind === 'account' && route.funding.accountId ? { accountId: route.funding.accountId } : {}) };
@@ -733,8 +735,17 @@ export class RewardService {
           if (rule.status !== 'active' || !rule.eventRule || !rule.componentKind || (rule.routeId !== undefined && rule.routeId !== route.id)) continue;
           const match = matchPaymentEvent(rule.eventRule, plannedEvent);
           if (match.status !== 'matched') {
-            if (match.status === 'unknown') plannedRewards.push({ ruleId: rule.id, ruleVersion: rule.version, component: rule.componentKind, sponsor: rule.sponsor ?? rule.componentKind, benefitGroup: rule.benefitGroup ?? rule.combination?.groupId ?? 'default', nativeUnit: rule.reward.kind, ...(rule.combination === undefined ? {} : { combination: rule.combination }), ...(rule.capPoolRefs === undefined ? {} : { capPoolRefs: rule.capPoolRefs }), reasons: match.reasons });
+            if (match.status === 'unknown') { eligibilityUncertain = true; plannedRewards.push({ ruleId: rule.id, ruleVersion: rule.version, component: rule.componentKind, sponsor: rule.sponsor ?? rule.componentKind, benefitGroup: rule.benefitGroup ?? rule.combination?.groupId ?? 'default', nativeUnit: rule.reward.kind, ...(rule.combination === undefined ? {} : { combination: rule.combination }), ...(rule.capPoolRefs === undefined ? {} : { capPoolRefs: rule.capPoolRefs }), reasons: match.reasons }); }
             continue;
+          }
+          if (rule.predicate) {
+            const predicateContext = { ...this.context(state, asOf), eligibilityFacts };
+            const outcome = evaluatePredicate(rule.predicate, { cardId: '', routeId: route.id, kind: 'purchase', mode: 'planned', occurredAt: asOf, amount: input.amount }, predicateContext);
+            if (!outcome.matched) {
+              eligibilityUncertain = true;
+              plannedRewards.push({ ruleId: rule.id, ruleVersion: rule.version, component: rule.componentKind, sponsor: rule.sponsor ?? rule.componentKind, benefitGroup: rule.benefitGroup ?? rule.combination?.groupId ?? 'default', nativeUnit: rule.reward.kind, ...(rule.combination === undefined ? {} : { combination: rule.combination }), ...(rule.capPoolRefs === undefined ? {} : { capPoolRefs: rule.capPoolRefs }), reasons: [...outcome.missing, ...outcome.conflicts, ...(outcome.missing.length || outcome.conflicts.length ? [] : ['eligibility fact does not match'])] });
+              continue;
+            }
           }
           const reward = rule.reward.amountMinor !== undefined
             ? { amountMinor: rule.reward.amountMinor, currency: rule.reward.currency ?? input.amount.currency }
@@ -766,7 +777,7 @@ export class RewardService {
       const zero = { amountMinor: 0, currency: input.amount.currency };
       const rewardGroups = new Map<string, typeof plannedRewards>();
       for (const item of plannedRewards.filter((candidate) => candidate.reward !== undefined)) rewardGroups.set(`${item.sponsor}|${item.benefitGroup}`, [...(rewardGroups.get(`${item.sponsor}|${item.benefitGroup}`) ?? []), item]);
-      let stackingAmbiguous = false;
+      let stackingAmbiguous = eligibilityUncertain;
       const acceptedPlanned: typeof plannedRewards = [];
       for (const group of rewardGroups.values()) {
         if (group.length === 1) { if (group[0]) acceptedPlanned.push(group[0]); continue; }
@@ -777,6 +788,28 @@ export class RewardService {
         if (modes.every((mode) => mode === 'replace' || mode === 'best_of' || mode === 'exclusive')) { if (ranked[0]) acceptedPlanned.push(ranked[0]); }
         else stackingAmbiguous = true;
       }
+      const acceptedByRule = new Map(acceptedPlanned.map((item) => [item.ruleId, item]));
+      const prerequisiteMemo = new Map<string, boolean>();
+      const prerequisiteReady = (item: (typeof plannedRewards)[number], visiting = new Set<string>()): boolean => {
+        const cached = prerequisiteMemo.get(item.ruleId);
+        if (cached !== undefined) return cached;
+        const refs = item.combination?.mode === 'prerequisite' ? item.combination.prerequisiteRuleIds : undefined;
+        if (item.combination?.mode !== 'prerequisite') { prerequisiteMemo.set(item.ruleId, true); return true; }
+        if (!refs?.length || visiting.has(item.ruleId)) { prerequisiteMemo.set(item.ruleId, false); return false; }
+        const nextVisiting = new Set(visiting).add(item.ruleId);
+        const ready = refs.every((ref) => {
+          const prerequisite = acceptedByRule.get(ref);
+          return prerequisite !== undefined && prerequisiteReady(prerequisite, nextVisiting);
+        });
+        prerequisiteMemo.set(item.ruleId, ready);
+        return ready;
+      };
+      for (const item of [...acceptedPlanned]) {
+        if (item.combination?.mode === 'prerequisite' && !prerequisiteReady(item)) {
+          stackingAmbiguous = true;
+          acceptedByRule.delete(item.ruleId);
+        }
+      }
       const allExplicit = [...rewardGroups.values()].flat().every((item) => item.combination?.mode !== undefined);
       if (rewardGroups.size > 1 && !allExplicit) stackingAmbiguous = true;
       for (const item of acceptedPlanned) {
@@ -785,10 +818,10 @@ export class RewardService {
           if (!pool || pool.metric !== 'reward' || pool.timezone === undefined || (pool.currency !== undefined && pool.currency !== item.reward?.currency)) stackingAmbiguous = true;
         }
       }
-      const acceptedIds = new Set(acceptedPlanned.map((item) => item.ruleId));
+      const acceptedIds = new Set(acceptedByRule.keys());
       for (const event of events) if (event.rewards) event.rewards = event.rewards.filter((reward) => acceptedIds.has(reward.ruleId));
       const capUsed = new Map<string, number>();
-      const plannedMatched = acceptedPlanned.map((item) => {
+      const plannedMatched = acceptedPlanned.filter((item) => acceptedByRule.has(item.ruleId)).map((item) => {
         const capUses = (item.capPoolRefs ?? []).map((poolId) => {
           const pool = state.capPools.find((candidate) => candidate.id === poolId);
           const previous = capUsed.get(poolId) ?? 0;

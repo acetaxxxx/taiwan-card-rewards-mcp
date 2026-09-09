@@ -181,7 +181,7 @@ export function validateHeldCard(value: unknown): HeldCard {
 
 export function validateEligibilityFact(value: unknown): EligibilityFact {
   const item = object(value, 'eligibilityFact');
-  keys(item, ['id', 'cardId', 'factKey', 'value', 'validFrom', 'validTo'], 'eligibilityFact');
+  keys(item, ['id', 'evidenceId', 'version', 'cardId', 'factKey', 'value', 'validFrom', 'validTo'], 'eligibilityFact');
   const factKey = requiredString(item.factKey, 'eligibilityFact.factKey');
   if (!/^(user\.)?[A-Za-z][A-Za-z0-9_.]{0,127}$/.test(factKey)) throw new RewardServiceError('INVALID_INPUT', 'eligibilityFact.factKey is invalid');
   if (item.value === undefined) throw new RewardServiceError('INVALID_INPUT', 'eligibilityFact.value is required');
@@ -194,6 +194,8 @@ export function validateEligibilityFact(value: unknown): EligibilityFact {
   if (validTo && (!Number.isFinite(Date.parse(validTo)) || !validTo.includes('T'))) throw new RewardServiceError('INVALID_INPUT', 'eligibilityFact.validTo must be an ISO date-time');
   return {
     ...(optionalString(item.id, 'eligibilityFact.id', true) ? { id: optionalString(item.id, 'eligibilityFact.id', true) } : {}),
+    ...(optionalString(item.evidenceId, 'eligibilityFact.evidenceId', true) ? { evidenceId: optionalString(item.evidenceId, 'eligibilityFact.evidenceId', true) } : {}),
+    ...(optionalString(item.version, 'eligibilityFact.version') ? { version: optionalString(item.version, 'eligibilityFact.version') } : {}),
     ...(optionalString(item.cardId, 'eligibilityFact.cardId', true) ? { cardId: optionalString(item.cardId, 'eligibilityFact.cardId', true) } : {}),
     factKey,
     value: item.value as PredicateValue,
@@ -751,7 +753,7 @@ function validateRewardComponentRecord(value: unknown, index: number): RewardCom
 
 export function validateToolArgs(name: string, value: unknown): Record<string, unknown> {
   const args = object(value, 'tool arguments');
-  const allowed: Record<string, string[]> = { register_card: ['card'], list_cards: ['limit', 'page', 'projection'], upsert_offer: ['snapshot', 'rule', 'confirmation', 'capPools', 'merchant'], recommend: ['transaction', 'cardIds', 'merchant', 'context', 'limit', 'page', 'projection', 'kind', 'payment_path'], recommendation_preflight: ['transaction', 'context'], upsert_payment_route: ['route'], list_payment_routes: ['limit', 'page', 'projection'], register_payment_account: ['account'], list_payment_accounts: ['limit', 'page', 'projection'], recommend_payment_paths_v1: ['amount', 'merchant', 'mcc', 'country', 'channel', 'paymentMethod', 'asOf', 'routeIds', 'limit'], record_transaction: ['transaction'], record_event_reward: ['event', 'sourceEvents', 'rule', 'chainRule', 'candidate', 'idempotencyKey'], record_event_reward_v1: ['event', 'candidate', 'idempotencyKey'], record_event_reward_v2: ['event', 'sourceEvents', 'rule', 'chainRule', 'candidate', 'idempotencyKey'], reverse_event_reward: ['event', 'idempotencyKey'], reverse_event_reward_v1: ['event', 'idempotencyKey'], remaining_caps: ['cardId', 'asOf', 'limit', 'page', 'projection'], calculate_reward: ['rule', 'transaction', 'context'], rank_cards: ['cards', 'rules', 'transaction', 'context'], get_user_benefit_status: ['kind', 'cardId', 'asOfUtc', 'projection'], upsert_user_benefit_status: ['input'], resolve_merchant: ['rawQuery', 'country', 'market', 'mcc', 'channel'], search_active_offers: ['rawQuery', 'cardId', 'canonicalMerchantId', 'country', 'market', 'mcc', 'channel', 'asOf', 'limit', 'page', 'projection'] };
+  const allowed: Record<string, string[]> = { register_card: ['card'], list_cards: ['limit', 'page', 'projection'], upsert_offer: ['snapshot', 'rule', 'confirmation', 'capPools', 'merchant'], recommend: ['transaction', 'cardIds', 'merchant', 'context', 'limit', 'page', 'projection', 'kind', 'payment_path'], recommendation_preflight: ['transaction', 'context'], upsert_payment_route: ['route'], list_payment_routes: ['limit', 'page', 'projection'], register_payment_account: ['account'], list_payment_accounts: ['limit', 'page', 'projection'], recommend_payment_paths_v1: ['amount', 'merchant', 'mcc', 'country', 'channel', 'paymentMethod', 'asOf', 'routeIds', 'limit', 'eligibilityFacts'], record_transaction: ['transaction'], record_event_reward: ['event', 'sourceEvents', 'rule', 'chainRule', 'candidate', 'idempotencyKey'], record_event_reward_v1: ['event', 'candidate', 'idempotencyKey'], record_event_reward_v2: ['event', 'sourceEvents', 'rule', 'chainRule', 'candidate', 'idempotencyKey'], reverse_event_reward: ['event', 'idempotencyKey'], reverse_event_reward_v1: ['event', 'idempotencyKey'], remaining_caps: ['cardId', 'asOf', 'limit', 'page', 'projection'], calculate_reward: ['rule', 'transaction', 'context'], rank_cards: ['cards', 'rules', 'transaction', 'context'], get_user_benefit_status: ['kind', 'cardId', 'asOfUtc', 'projection'], upsert_user_benefit_status: ['input'], resolve_merchant: ['rawQuery', 'country', 'market', 'mcc', 'channel'], search_active_offers: ['rawQuery', 'cardId', 'canonicalMerchantId', 'country', 'market', 'mcc', 'channel', 'asOf', 'limit', 'page', 'projection'] };
   if (!allowed[name]) throw new RewardServiceError('TOOL_NOT_FOUND', `unknown tool: ${name}`);
   keys(args, allowed[name], `tool ${name}`);
   return args;

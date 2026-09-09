@@ -60,4 +60,24 @@ describe('planned reward stacking and cap preview', () => {
     expect(result.candidates[0]?.matchedRules.map((item) => item.reward.amountMinor)).toEqual([10, 5]);
     expect(JSON.stringify(store.read().eventRewardLedger)).toBe(before);
   });
+
+  it('requires a current user eligibility fact before accepting a prerequisite component', () => {
+    const { service, route } = setup();
+    const eligible = { ...rule(route.id, 'gold-wallet', 'wallet', 'gold', 10, { mode: 'additive', groupId: 'gold', version: '1' }), predicate: { op: 'EQUALS', field: 'user.membership', value: 'gold' } };
+    addRule(service, eligible);
+    const missing = service.recommendPaymentPaths({ amount: { amountMinor: 100, currency: 'TWD' }, routeIds: [route.id], eligibilityFacts: [] });
+    expect(missing.status).toBe('needs_review');
+    expect(missing.candidates[0]?.matchedRules).toHaveLength(0);
+    const present = service.recommendPaymentPaths({ amount: { amountMinor: 100, currency: 'TWD' }, routeIds: [route.id], eligibilityFacts: [{ factKey: 'user.membership', value: 'gold', validFrom: '2026-09-01T00:00:00Z', validTo: '2026-09-30T23:59:59Z' }] });
+    expect(present.status).toBe('ok');
+    expect(present.candidates[0]?.matchedRules).toHaveLength(1);
+  });
+
+  it('fails closed when a prerequisite rule is missing from the same candidate', () => {
+    const { service, route } = setup();
+    addRule(service, rule(route.id, 'dependent', 'wallet', 'dependent', 10, { mode: 'prerequisite', groupId: 'dependent', version: '1', prerequisiteRuleIds: ['gold-member'] }));
+    const result = service.recommendPaymentPaths({ amount: { amountMinor: 100, currency: 'TWD' }, routeIds: [route.id] });
+    expect(result.status).toBe('needs_review');
+    expect(result.candidates[0]?.matchedRules).toHaveLength(0);
+  });
 });

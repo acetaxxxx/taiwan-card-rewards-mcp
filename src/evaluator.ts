@@ -336,13 +336,13 @@ function resolveFieldFact(field: string, tx: TransactionTuple, context: Evaluati
   return { kind: 'missing', reason: `unsupported field ${field}` };
 }
 
-type PredicateOutcome = {
+export type PredicateOutcome = {
   matched: boolean;
   missing: string[];
   conflicts: string[];
 };
 
-function evaluatePredicate(predicate: Predicate, tx: TransactionTuple, context: EvaluationContext): PredicateOutcome {
+export function evaluatePredicate(predicate: Predicate, tx: TransactionTuple, context: EvaluationContext): PredicateOutcome {
   if (predicate.op === 'NOT') {
     const child = evaluatePredicate(predicate.rule, tx, context);
     if (child.conflicts.length) return { matched: false, missing: [], conflicts: child.conflicts };
