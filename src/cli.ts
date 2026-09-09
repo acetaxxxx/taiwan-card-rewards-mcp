@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import * as readline from 'node:readline';
+import { createRequire } from 'node:module';
 import { parseStartupArgs, StartupContractError } from './startup.js';
 import { FileStore, contentHash, type LedgerStore } from './store.js';
 import { RewardService } from './service.js';
@@ -9,6 +10,8 @@ import { evaluateOffer, rankCards } from './evaluator.js';
 import { validateUserBenefitInput, validateContext, validateToolArgs, validateRecommendationTransaction, validateTransaction, validateCard, validateCapPool, validateConfirmation, validateRule, validateSnapshot } from './validation.js';
 import { projectPage, ProjectionTooLargeError } from './projections.js';
 import type { CardDescriptor, RankingEntry, PaymentPathRequest } from './types.js';
+
+const packageJson = createRequire(import.meta.url)('../package.json') as { version: string };
 
 type JsonRpc = { jsonrpc?: string; id?: string | number | null; method?: string; params?: Record<string, unknown> };
 type Reply = { jsonrpc: '2.0'; id: string | number | null; result?: unknown; error?: { code: number; message: string; data?: unknown } };
@@ -61,7 +64,7 @@ async function main(): Promise<void> {
     try { request = JSON.parse(line) as JsonRpc; } catch { failure(null, -32700, 'Parse error'); continue; }
     if (request.method === 'notifications/initialized' || request.method?.startsWith('notifications/')) continue;
     try {
-      if (request.method === 'initialize') reply(request.id, { protocolVersion: '2024-11-05', capabilities: { tools: {} }, serverInfo: { name: 'taiwan-card-rewards-mcp', version: '0.9.0' }, instructions: mcpInstructions });
+      if (request.method === 'initialize') reply(request.id, { protocolVersion: '2024-11-05', capabilities: { tools: {} }, serverInfo: { name: 'taiwan-card-rewards-mcp', version: packageJson.version }, instructions: mcpInstructions });
       else if (request.method === 'tools/list') reply(request.id, { tools: mcpTools.map((tool) => ({ name: tool.name, description: tool.description, inputSchema: tool.inputSchema })) });
       else if (request.method === 'tools/call') reply(request.id, toolResult(await callTool(service, request.params ?? {})));
       else failure(request.id, -32601, `Method not found: ${request.method ?? ''}`);

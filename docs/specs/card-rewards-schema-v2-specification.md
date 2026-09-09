@@ -320,27 +320,17 @@ The system MUST return explicit non-confident statuses when conditions are unres
 
 ---
 
-## 7. Public MCP Tool Surface (15-Tool Contract)
+## 7. Public MCP Tool Surface (19-Tool Contract)
 
-Schema v2 defines exactly **15 tools** on the public MCP surface, including the read-only `recommendation_preflight` prerequisite checker and payment-route onboarding/listing. Outbound network fetching is handled externally by the host/agent, not by the MCP server. Merchant catalog registration remains a controlled service/catalog-ingestion operation and is not an additional public MCP tool.
+Schema v2 defines exactly **19 tools** on the public MCP surface, including the read-only `recommendation_preflight` prerequisite checker, payment-account and payment-route onboarding/listing, the closed card/payment_path `recommend` union, and canonical event tools. Outbound network fetching is handled externally by the host/agent, not by the MCP server. Merchant catalog registration remains a controlled service/catalog-ingestion operation and is not an additional public MCP tool.
 
-| # | Tool Name | Read-Only | Description |
-|---|---|:---:|---|
-| 1 | `calculate_reward` | Yes | Pure calculation of supplied rule AST against transaction and context without persistence. |
-| 2 | `rank_cards` | Yes | Pure ranking of multiple cards for a transaction using uncertainty-aware sorting. |
-| 3 | `register_card` | No | Registers or updates a user's Held Card descriptor and billing cycle. |
-| 4 | `list_cards` | Yes | Lists registered Held Cards for the tenant. |
-| 5 | `upsert_offer` | No | Ingests snapshot and versioned rule; atomically confirms and activates candidate rules if `confirmation` is supplied. |
-| 6 | `recommend` | Yes | Uncertainty-aware bounded card recommendation (default 10 results; Agent may select five) using stored active rules, benefit statuses, and ledger caps. |
-| 7 | `recommendation_preflight` | Yes | Read-only prerequisite, freshness, evidence, payment-route, and FX check with actionable diagnostics. |
-| 8 | `upsert_payment_route` | No | Registers a candidate or confirmed route with an MCP-owned identity. |
-| 9 | `list_payment_routes` | Yes | Lists the user's bounded persisted routes. |
-| 10 | `record_transaction` | No | Durably records actual purchase or refund with idempotency and multi-pool cap updates. |
-| 11 | `remaining_caps` | Yes | Queries real-time remaining cap balances across all active cap pools for a card. |
-| 12 | `get_user_benefit_status` | Yes | Queries user's active benefit state (`card_switch`, `campaign_registration`). |
-| 13 | `upsert_user_benefit_status` | No | Records or updates user's confirmed benefit state for a plan selection or campaign enrollment. |
-| 14 | `resolve_merchant` | Yes | Resolves an exact canonical merchant ID or official alias with bounded deterministic candidates; it never writes aliases or applies a reward. |
-| 15 | `search_active_offers` | Yes | Searches active, verified, in-window offers with bounded 1-based pagination; it never activates rules. |
+The authoritative 19-tool matrix, including read/write status and closed input
+schemas, lives in
+[`docs/agents/taiwan-card-rewards-skill/references/mcp-tools.md`](../agents/taiwan-card-rewards-skill/references/mcp-tools.md).
+It includes card calculation/ranking, account and route onboarding, the closed
+card/payment_path `recommend` union, canonical event recording/reversal,
+benefit status, merchant resolution, and active-offer search. This specification
+does not duplicate that table so the two documents cannot drift.
 
 ---
 
@@ -390,7 +380,7 @@ Schema v2 is a breaking format change:
 
 ## 10. Target Specification & Implementation Status
 
-This document defines the **target normative specification** for Schema v2. Package/server version 0.9.0 implements the canonical top-level cap-pool registry, shared multi-metric aggregation, current benefit projections, fail-closed combination resolution, complete nested public schemas, typed evidence/payment-route context, and the fifteen-tool MCP surface described above.
+This document defines the **target normative specification** for Schema v2. Package/server version 0.10.0 implements the canonical top-level cap-pool registry, shared multi-metric aggregation, current benefit projections, fail-closed combination resolution, complete nested public schemas, typed evidence/payment-route context, and the nineteen-tool MCP surface described above.
 
 The persisted/runtime compatibility shape has a few deliberate differences from the illustrative v2 interfaces in Sections 3 and 4:
 1. Runtime rules use `combination.mode` and `prerequisiteRuleIds`; the normative `type` and singular `prerequisiteRuleId` names describe the same policy concepts.

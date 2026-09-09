@@ -9,7 +9,7 @@ integration contract for `taiwan-card-rewards-mcp`.
 - [Agent skill-authoring guide](agents/skill-authoring-guide.md)
 - [Canonical Taiwan Card Rewards Skill Bundle](agents/taiwan-card-rewards-skill/SKILL.md)
 - [使用者安裝與 Skill 分發 SOP](agents/user-installation-and-skill-distribution-sop.md)
-- [Agent Research Skill 與 Pre-flight SOP (v0.9.0)](agents/agent-research-skill-and-preflight-sop.md)
+- [Agent Research Skill 與 Pre-flight SOP (v0.10.0)](agents/agent-research-skill-and-preflight-sop.md)
 - [Card-rewards skill template](agents/card-rewards-skill-template.md)
 - [Card Rewards Schema v2 specification](specs/card-rewards-schema-v2-specification.md)
 - [Multi-component reward ledger specification (v0.6.0)](specs/multi-component-ledger-and-cap-attribution-specification.md)

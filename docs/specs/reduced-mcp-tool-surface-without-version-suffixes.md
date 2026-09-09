@@ -1,15 +1,16 @@
 # Reduced MCP Tool Surface Without Public Version Suffixes
 
-Status: phased proposal. This document specifies a future contract change; the
-current implementation task delivers Phase 1 only and must not change the
-recommendation/path API.
+Status: implemented in release 0.10.0. This document records the public
+contract consolidation and migration boundary; the canonical tool schemas are
+maintained in `docs/agents/taiwan-card-rewards-skill/references/mcp-tools.md`.
 
-## Baseline confirmed from the current repository
+## Current public surface
 
-The current `src/mcp-contract.ts` publishes 21 tools. The existing
-`tests/mcp-contract.test.ts` also expects 21 names. The repository contains
-older documentation that says 20 or 15 tools; those counts are stale and must
-not be used as the migration baseline.
+The current `src/mcp-contract.ts` publishes exactly 19 tools. The
+`tests/mcp-contract.test.ts` contract and the canonical Agent Skill reference
+are the executable and documentation sources of truth. Older documents that
+say 21, 20, or 15 tools describe superseded stages and are not the current
+contract.
 
 The current public names are:
 
@@ -19,24 +20,22 @@ register_card                list_cards
 upsert_offer                 recommend
 recommendation_preflight     upsert_payment_route
 list_payment_routes          register_payment_account
-list_payment_accounts        recommend_payment_paths_v1
-record_transaction            record_event_reward_v1
-record_event_reward_v2        reverse_event_reward_v1
-remaining_caps               get_user_benefit_status
-upsert_user_benefit_status   resolve_merchant
+list_payment_accounts        record_transaction
+record_event_reward           reverse_event_reward
+remaining_caps                get_user_benefit_status
+upsert_user_benefit_status    resolve_merchant
 search_active_offers
 ```
 
-The current CLI dispatch in `src/cli.ts` has one case for each of these names.
-The current tools/list contract in `src/mcp-contract.ts` is therefore the
-source of truth for the baseline, while docs and tests must be reconciled
-during implementation.
+The CLI dispatch also retains migration-only aliases, but those aliases are
+absent from `tools/list` and share the canonical validation and ownership
+gates.
 
 ## Target public surface
 
-Phase 1 targets 20 public tools. Public names do not contain `v1`, `v2`, or
-another transport/schema version suffix. Internal stored-state versions and
-wire compatibility aliases remain allowed.
+The 0.10.0 public surface has 19 tools. Public names do not contain `v1`,
+`v2`, or another transport/schema version suffix. Internal stored-state
+versions and wire compatibility aliases remain allowed.
 
 | Current public name(s) | Target public name | Change |
 | --- | --- | --- |
@@ -60,10 +59,9 @@ wire compatibility aliases remain allowed.
 | `resolve_merchant` | `resolve_merchant` | Keep read-only exact resolution. |
 | `search_active_offers` | `search_active_offers` | Keep read-only search. |
 
-Phase 1 merges the event recording pair and renames the reverse operation; the
-reverse rename does not reduce the count: 21 → 20. A later Phase 2 will merge
-the path recommendation into `recommend`, producing 20 → 19. It does not
-introduce a generic `action` tool.
+The release merges the event recording pair, renames the reverse operation,
+and merges payment-path recommendation into the closed `recommend` union. It
+does not introduce a generic `action` tool.
 
 ## Closed request unions
 
@@ -73,11 +71,10 @@ introduce a generic `action` tool.
 
 1. Card recommendation: the existing `transaction` plus optional card IDs,
    merchant, context, pagination, and projection fields.
-2. (Phase 2) Multi-layer payment-path recommendation: the request shape
-   defined by the forthcoming multi-layer path specification, including
-   explicit route topology, transitions, funding source, and evidence
-   constraints. Until Phase 2, `recommend_payment_paths_v1` remains public and
-   its current flat `amount`/merchant/routeIds shape remains unchanged.
+2. Multi-layer payment-path recommendation: the bounded request shape defined
+   by the multi-layer path specification, including route topology, transitions,
+   funding source, and evidence constraints. The historical
+   `recommend_payment_paths_v1` name is migration-only.
 
 The discriminator should be an explicit `kind` (`card` or `payment_path`) or a
 JSON Schema `oneOf` with disjoint required fields. Ambiguous payloads must be
@@ -141,9 +138,9 @@ requires it.
 
 ## Eight acceptance criteria for implementation
 
-1. Phase 1 `tools/list` returns exactly 20 names and contains unversioned event
-   reward names; Phase 2 then returns exactly 19 after path merging. Neither
-   phase exposes public version suffixes for the merged tools.
+1. Release 0.10.0 `tools/list` returns exactly 19 names and contains
+   unversioned event and payment-path names. It exposes no public version
+   suffixes for the merged tools.
 2. Every target name has one CLI dispatch branch and one closed schema; each
    compatibility alias is absent from tools/list but tested through dispatch.
 3. `recommend` tests cover both union branches, ambiguity rejection, and
@@ -155,8 +152,7 @@ requires it.
    cap release, and idempotency behavior.
 6. Existing StoredState, legacy transaction records, and internal schema
    versions remain readable without reinterpretation.
-7. Phase 1 Agent docs, README, tool reference, examples, and installation SOPs
-   use the same 20-name list and clearly mark the path merge as Phase 2; Phase
-   2 updates the list to 19. No current document may claim 15 tools.
+7. Agent docs, README, tool reference, examples, and installation SOPs use the
+   same 19-name list. No current document may claim 15, 20, or 21 tools.
 8. Full tests, typecheck/build, and `git diff --check` pass; external staging
    and production remain explicitly unverified.
