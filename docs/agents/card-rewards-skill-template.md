@@ -18,9 +18,9 @@ refunds. Use this skill for questions, confirmation, external research, and pres
 
 ## Startup
 
-1. Connect to the host-provided pinned MCP package (release `0.9.0` or a
+1. Connect to the host-provided pinned MCP package (release `0.10.0` or a
    later reviewed release).
-2. Validate handshake, server identity, all 15 public tools (including
+2. Validate handshake, server identity, all 19 canonical public tools (including
    `recommendation_preflight`), and each nested schema including required fields,
    bounds, enums, and closed object shapes.
 3. Stop with an unavailable message if validation fails.

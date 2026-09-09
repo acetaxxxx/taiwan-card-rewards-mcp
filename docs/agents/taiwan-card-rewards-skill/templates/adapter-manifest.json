@@ -5,11 +5,11 @@
   "description": "Standard manifest metadata required for all derived local adapters of taiwan-card-rewards-skill",
   "metadata": {
     "adapterName": "taiwan-card-rewards-custom-adapter",
-    "sourceVersion": "0.9.0",
-    "sourceHash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-    "mcpContractVersion": "0.9.0",
-    "mcpToolsCount": 15,
-    "lastVerifiedAt": "2026-09-06T12:00:00Z",
+    "sourceVersion": "canonical",
+    "sourceHash": "sha256:68c0d4a0b06be469a3b402a140967a463c7defc18fb95f135c312b7bba5b9844",
+    "mcpContractVersion": "canonical-19-tools",
+    "mcpToolsCount": 19,
+    "lastVerifiedAt": "2026-09-09T00:00:00Z",
     "canonicalLink": "docs/agents/taiwan-card-rewards-skill/SKILL.md",
     "invariants": [
       "Zero Network inside MCP Server",

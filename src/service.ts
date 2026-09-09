@@ -1,10 +1,10 @@
 import * as crypto from 'node:crypto';
 import { type LedgerStore, type RecordedTransaction, type StoredState } from './store.js';
-import { convertMinor, evaluateOffer, rankCards, resolveCyclePeriodKey } from './evaluator.js';
-import type { CardDescriptor, CardSwitchInput, CardSwitchProjection, CardSwitchStatus, CapPeriod, CapPoolDefinition, EvaluationContext, MerchantIdentity, MerchantResolution, Money, OfferConfirmation, OfferRuleVersion, OfferSourceSnapshot, RankingEntry, RewardBreakdown, RewardComponentRecord, TransactionTuple, UserBenefitInput, UserBenefitStatus, RecommendationPreflight, RecommendationRequiredAction, RecommendationRequirement, Diagnostic, EvidenceRecord, PaymentRouteRecord } from './types.js';
+import { EventRewardLedger, convertMinor, createPaymentEventRewardCandidate, decidePaymentEventRewards, evaluateOffer, evaluatePredicate, matchPaymentEvent, matchPaymentEventChain, rankCards, resolveCyclePeriodKey } from './evaluator.js';
+import type { CardDescriptor, CardSwitchInput, CardSwitchProjection, CardSwitchStatus, CapPeriod, CapPoolDefinition, EvaluationContext, MerchantIdentity, MerchantResolution, Money, OfferConfirmation, OfferRuleVersion, OfferSourceSnapshot, RankingEntry, RewardBreakdown, RewardComponentRecord, TransactionTuple, UserBenefitInput, UserBenefitStatus, RecommendationPreflight, RecommendationRequiredAction, RecommendationRequirement, Diagnostic, EvidenceRecord, PaymentRouteRecord, PaymentAccountRecord, EventRewardLedgerRecord, EventRewardReversalRecord, PaymentPathRequest, PaymentPathRecommendation, PaymentPathCandidate, PaymentPathEvent, EligibilityFact, RewardValuationSnapshot } from './types.js';
 import type { StartupConfig } from './startup.js';
 import { RewardServiceError } from './errors.js';
-import { validateCard, validateCapPool, validateConfirmation, validateMerchant, validateRecommendationTransaction, validateRule, validateSnapshot, validateTransaction, validateEvidence, validateFactCandidate, validatePaymentRouteRecord } from './validation.js';
+import { validateCard, validateCapPool, validateConfirmation, validateEligibilityFact, validateMerchant, validateRecommendationTransaction, validateRule, validateSnapshot, validateTransaction, validateEvidence, validateFactCandidate, validatePaymentRouteRecord, validatePaymentAccountRecord, validateEventRewardInput, validatePaymentEvent, validatePaymentEventChainRule, validatePaymentEventRule, validateRewardValuationSnapshot } from './validation.js';
 import { cardSwitchStatus, projectionFromInput } from './card-switch.js';
 
 export { RewardServiceError } from './errors.js';
@@ -24,7 +24,7 @@ function merchantId(): string {
   for (let i = 0; i < 16; i += 1) encoded += ULID_ALPHABET[bytes[i % bytes.length]! % 32];
   return `mch_${encoded}`;
 }
-function ownedId(prefix: 'ev' | 'fact' | 'route'): string {
+function ownedId(prefix: 'ev' | 'fact' | 'route' | 'acct' | 'valuation'): string {
   let time = Date.now();
   let encoded = '';
   for (let i = 0; i < 10; i += 1) { encoded = ULID_ALPHABET[time % 32] + encoded; time = Math.floor(time / 32); }
@@ -33,6 +33,7 @@ function ownedId(prefix: 'ev' | 'fact' | 'route'): string {
   return `${prefix}_${encoded}`;
 }
 function routeId(): string { return ownedId('route'); }
+function accountId(): string { return ownedId('acct'); }
 function normalizedMerchantKey(value: string): string {
   return value.normalize('NFKC').toLocaleLowerCase('und').replace(/[\p{P}\p{S}]+/gu, ' ').replace(/\s+/gu, ' ').trim();
 }
@@ -40,25 +41,95 @@ function normalizedMerchantKey(value: string): string {
 export class RewardService {
   constructor(readonly store: LedgerStore, readonly metadataUser: string | undefined) {}
 
+  recordEventReward(input: unknown): EventRewardLedgerRecord {
+    if (!this.metadataUser) throw new RewardServiceError('UNAUTHENTICATED', 'event reward recording requires an authenticated user');
+    const parsed = validateEventRewardInput(input);
+    const state = this.store.read();
+    return new EventRewardLedger(this.metadataUser, state.capPools, this.store).record(createPaymentEventRewardCandidate(parsed.candidate), parsed.event, parsed.idempotencyKey);
+  }
+
+  recordValidatedEventReward(input: unknown): EventRewardLedgerRecord {
+    if (!this.metadataUser) throw new RewardServiceError('UNAUTHENTICATED', 'event reward recording requires an authenticated user');
+    const source = typeof input === 'object' && input !== null ? input as Record<string, unknown> : {};
+    if (Object.keys(source).some((key) => !['event', 'sourceEvents', 'rule', 'chainRule', 'candidate', 'idempotencyKey'].includes(key))) throw new RewardServiceError('UNKNOWN_FIELD', 'validated event reward contains unsupported field');
+    if (source.rule !== undefined && source.chainRule !== undefined) throw new RewardServiceError('INVALID_INPUT', 'validated event reward accepts either rule or chainRule, not both');
+    if (source.rule === undefined && source.chainRule === undefined) throw new RewardServiceError('INVALID_INPUT', 'validated event reward requires a rule or chainRule');
+    if (source.chainRule !== undefined && source.sourceEvents === undefined) throw new RewardServiceError('INVALID_INPUT', 'validated event reward chainRule requires sourceEvents');
+    const event = validatePaymentEvent(source.event);
+    const sourceEventsValue = source.sourceEvents === undefined ? [] : source.sourceEvents;
+    if (!Array.isArray(sourceEventsValue) || sourceEventsValue.length > 16) throw new RewardServiceError('INVALID_INPUT', 'sourceEvents must contain at most 16 events');
+    const sourceEvents = sourceEventsValue.map(validatePaymentEvent);
+    const parsedCandidate = validateEventRewardInput({ event, candidate: source.candidate, idempotencyKey: source.idempotencyKey }).candidate;
+    const eligibility = source.chainRule === undefined ? matchPaymentEvent(validatePaymentEventRule(source.rule), event) : matchPaymentEventChain(validatePaymentEventChainRule(source.chainRule), event, sourceEvents);
+    const candidate = createPaymentEventRewardCandidate({ ...parsedCandidate, eventId: event.id, eligibility });
+    const state = this.store.read();
+    const ledger = new EventRewardLedger(this.metadataUser, state.capPools, this.store);
+    if (candidate) {
+      const existingEventReward = ledger.list().some((record) => record.eventId === event.id && record.idempotencyKey !== source.idempotencyKey);
+      if (existingEventReward) throw new RewardServiceError('NEEDS_REVIEW', 'event reward candidates require an explicit stacking decision before durable recording');
+      const decision = decidePaymentEventRewards([candidate]);
+      if (decision.status !== 'matched') throw new RewardServiceError('NEEDS_REVIEW', 'event reward combination policy requires review');
+    }
+    return ledger.record(candidate, event, String(source.idempotencyKey));
+  }
+
+  reverseEventReward(input: unknown): EventRewardReversalRecord {
+    if (!this.metadataUser) throw new RewardServiceError('UNAUTHENTICATED', 'event reward reversal requires an authenticated user');
+    const source = typeof input === 'object' && input !== null ? input as Record<string, unknown> : {};
+    if (Object.keys(source).some((key) => !['event', 'idempotencyKey'].includes(key))) throw new RewardServiceError('UNKNOWN_FIELD', 'event reward reversal contains unsupported field');
+    const event = validatePaymentEvent(source.event);
+    const idempotencyKey = typeof source.idempotencyKey === 'string' ? source.idempotencyKey : (() => { throw new RewardServiceError('INVALID_INPUT', 'event reward reversal idempotencyKey is required'); })();
+    const state = this.store.read();
+    return new EventRewardLedger(this.metadataUser, state.capPools, this.store).reverse(event, idempotencyKey);
+  }
+
   submitEvidence(input: unknown): EvidenceRecord {
     const parsed = validateEvidence(input);
     const state = this.store.read();
-    const existing = state.evidence.filter((candidate) => candidate.requirementId === parsed.requirementId && candidate.reviewState === 'accepted');
+    const existing = state.evidence.filter((candidate) => candidate.requirementId === parsed.requirementId && candidate.reviewState === 'accepted' && (candidate.ownerUser === this.metadataUser || (candidate.ownerUser === undefined && this.metadataUser === undefined)));
     if (existing.some((candidate) => JSON.stringify(candidate.claim) !== JSON.stringify(parsed.claim))) throw new RewardServiceError('NEEDS_REVIEW', `conflict for evidence requirement ${parsed.requirementId}`);
     const retry = existing.find((candidate) => JSON.stringify(candidate.claim) === JSON.stringify(parsed.claim) && candidate.sourceIdentity === parsed.sourceIdentity);
     if (retry) return retry;
-    const evidence = { ...parsed, id: ownedId('ev') };
+    const evidence = { ...parsed, id: ownedId('ev'), ...(this.metadataUser === undefined ? {} : { ownerUser: this.metadataUser }) };
     this.store.update((next) => { next.evidence.push(evidence); });
     return evidence;
   }
 
   listEvidence(): readonly EvidenceRecord[] { return this.store.read().evidence; }
 
+  submitRewardValuationSnapshot(input: unknown): RewardValuationSnapshot {
+    if (!this.metadataUser) throw new RewardServiceError('UNAUTHENTICATED', 'reward valuation requires an authenticated user');
+    const parsed = validateRewardValuationSnapshot(input);
+    const state = this.store.read();
+    const evidence = state.evidence.find((candidate) => candidate.id === parsed.evidenceId && candidate.ownerUser === this.metadataUser);
+    if (!evidence || evidence.reviewState !== 'accepted' || evidence.sourceType !== 'official' || evidence.authority === 'user') throw new RewardServiceError('NEEDS_REVIEW', 'valuation requires accepted official owned evidence');
+    const now = Date.now();
+    if (Date.parse(evidence.observedAt) > now || (evidence.validTo !== undefined && Date.parse(evidence.validTo) <= now) || (evidence.refreshAfter !== undefined && Date.parse(evidence.refreshAfter) <= now)) throw new RewardServiceError('NEEDS_REVIEW', 'valuation evidence is stale or invalid');
+    const claim = evidence.claim;
+    if (claim.nativeUnit !== parsed.nativeUnit || claim.targetCurrency !== parsed.targetCurrency || claim.rateNumerator !== parsed.rateNumerator || claim.rateDenominator !== parsed.rateDenominator || (claim.version !== undefined && claim.version !== parsed.version)) throw new RewardServiceError('NEEDS_REVIEW', 'valuation does not match its evidence claim');
+    const existing = (state.valuationSnapshots ?? []).find((candidate) => candidate.ownerUser === this.metadataUser && candidate.evidenceId === parsed.evidenceId && candidate.version === parsed.version);
+    if (existing) return existing;
+    const snapshot = { ...parsed, id: ownedId('valuation'), ownerUser: this.metadataUser };
+    this.store.update((next) => { next.valuationSnapshots = [...(next.valuationSnapshots ?? []), snapshot]; });
+    return snapshot;
+  }
+
+  listRewardValuationSnapshots(): readonly RewardValuationSnapshot[] {
+    if (!this.metadataUser) return [];
+    return (this.store.read().valuationSnapshots ?? []).filter((snapshot) => snapshot.ownerUser === this.metadataUser);
+  }
+
   upsertPaymentRoute(input: unknown): PaymentRouteRecord {
     const source = typeof input === 'object' && input !== null ? input as Record<string, unknown> : {};
     const parsed = validatePaymentRouteRecord({ ...source, id: 'route_input', ...(source.status === undefined ? { status: source.confirmation ? 'active' : 'candidate' } : {}), ...(source.ownerUser === undefined ? {} : { ownerUser: source.ownerUser }) });
     if (parsed.status === 'active' && !parsed.confirmation) throw new RewardServiceError('INVALID_CONFIRMATION', 'active payment routes require explicit user confirmation');
     const state = this.store.read();
+    const accountId = parsed.funding.kind === 'account' ? parsed.funding.accountId : undefined;
+    if (accountId !== undefined) {
+      const account = state.paymentAccounts.find((candidate) => candidate.id === accountId && (candidate.ownerUser === this.metadataUser || (candidate.ownerUser === undefined && this.metadataUser === undefined)));
+      if (!account) throw new RewardServiceError('INVALID_INPUT', 'payment route references an unknown payment account');
+      if (parsed.status === 'active' && account.status !== 'active') throw new RewardServiceError('NEEDS_REVIEW', 'active payment routes require an active payment account');
+    }
     const existing = state.paymentRoutes.find((route) => route.idempotencyKey === parsed.idempotencyKey && (route.ownerUser === this.metadataUser || (route.ownerUser === undefined && this.metadataUser === undefined)));
     const desired = { ...parsed, id: existing?.id ?? routeId(), ...(this.metadataUser === undefined ? {} : { ownerUser: this.metadataUser }) };
     if (existing) { if (JSON.stringify({ ...existing, id: parsed.id, ownerUser: parsed.ownerUser }) !== JSON.stringify({ ...desired, id: parsed.id, ownerUser: parsed.ownerUser })) throw new RewardServiceError('IDEMPOTENCY_CONFLICT', 'idempotencyKey already belongs to a different payment route'); return existing; }
@@ -67,6 +138,19 @@ export class RewardService {
   }
 
   listPaymentRoutes(): readonly PaymentRouteRecord[] { const state = this.store.read(); return state.paymentRoutes.filter((route) => route.ownerUser === this.metadataUser || (route.ownerUser === undefined && this.metadataUser === undefined)); }
+
+  upsertPaymentAccount(input: unknown): PaymentAccountRecord {
+    const source = typeof input === 'object' && input !== null ? input as Record<string, unknown> : {};
+    const parsed = validatePaymentAccountRecord({ ...source, id: 'account_input', ...(source.status === undefined ? { status: source.confirmation ? 'active' : 'candidate' } : {}), ...(source.ownerUser === undefined ? {} : { ownerUser: source.ownerUser }) });
+    const state = this.store.read();
+    const existing = state.paymentAccounts.find((account) => account.idempotencyKey === parsed.idempotencyKey && (account.ownerUser === this.metadataUser || (account.ownerUser === undefined && this.metadataUser === undefined)));
+    const desired = { ...parsed, id: existing?.id ?? accountId(), ...(this.metadataUser === undefined ? {} : { ownerUser: this.metadataUser }) };
+    if (existing) { if (JSON.stringify({ ...existing, id: parsed.id, ownerUser: parsed.ownerUser }) !== JSON.stringify({ ...desired, id: parsed.id, ownerUser: parsed.ownerUser })) throw new RewardServiceError('IDEMPOTENCY_CONFLICT', 'idempotencyKey already belongs to a different payment account'); return existing; }
+    this.store.update((next) => { next.paymentAccounts.push(desired); });
+    return desired;
+  }
+
+  listPaymentAccounts(): readonly PaymentAccountRecord[] { const state = this.store.read(); return state.paymentAccounts.filter((account) => account.ownerUser === this.metadataUser || (account.ownerUser === undefined && this.metadataUser === undefined)); }
 
   submitFactCandidate(input: unknown) {
     const parsed = validateFactCandidate(input);
@@ -394,7 +478,7 @@ export class RewardService {
     }
 
     if (!snapshot.id || !snapshot.url || !snapshot.contentHash || !snapshot.parserVersion) throw new RewardServiceError('INVALID_OFFER', 'source snapshot metadata is incomplete');
-    if (rule.sourceSnapshotId !== snapshot.id || !rule.id || !rule.cardId) throw new RewardServiceError('INVALID_OFFER', 'rule must reference its source snapshot');
+    if (rule.sourceSnapshotId !== snapshot.id || !rule.id || (!rule.cardId && (!rule.componentKind || rule.componentKind === 'card_issuer'))) throw new RewardServiceError('INVALID_OFFER', 'rule must reference its source snapshot and a card or non-card component');
     let onboardedMerchant: MerchantIdentity | undefined;
     let storedRule = rule;
     this.store.update((state) => {
@@ -563,6 +647,287 @@ export class RewardService {
     const cards = options.cardIds === undefined ? state.cards : state.cards.filter((card) => options.cardIds!.includes(card.id));
     const context = options.context ?? this.context(state, nowIso(), parsedTransaction);
     return rankCards(cards, state.rules, parsedTransaction, context, limit);
+  }
+
+  /** Build only explicitly active, user-owned and officially evidenced routes. */
+  recommendPaymentPaths(input: PaymentPathRequest | { kind: 'payment_path'; payment_path: PaymentPathRequest }): PaymentPathRecommendation {
+    if (!this.metadataUser) throw new RewardServiceError('UNAUTHENTICATED', 'payment path recommendation requires an authenticated user');
+    if ('kind' in input) input = input.payment_path;
+    if (!input || !input.amount || !Number.isSafeInteger(input.amount.amountMinor) || input.amount.amountMinor < 0 || !input.amount.currency) throw new RewardServiceError('INVALID_INPUT', 'payment path amount is invalid');
+    const asOf = input.asOf ?? nowIso();
+    if (Number.isNaN(Date.parse(asOf))) throw new RewardServiceError('INVALID_INPUT', 'payment path asOf is invalid');
+    const eligibilityFacts: readonly EligibilityFact[] = (input.eligibilityFacts ?? []).map(validateEligibilityFact);
+    if (input.limit !== undefined && (!Number.isSafeInteger(input.limit) || input.limit < 1 || input.limit > 20)) throw new RewardServiceError('INVALID_INPUT', 'payment path limit must be 1..20');
+    const maxHops = input.maxHops ?? 6; const maxEvents = input.maxEvents ?? 4; const maxBranchesPerNode = input.maxBranchesPerNode ?? 8;
+    if (![maxHops, maxEvents, maxBranchesPerNode].every((value) => Number.isSafeInteger(value) && value >= 1 && value <= 20)) throw new RewardServiceError('INVALID_INPUT', 'payment path bounds are invalid');
+    const state = this.store.read();
+    const requested = input.routeIds === undefined ? undefined : new Set(input.routeIds);
+    const verifiedFacts: EligibilityFact[] = [];
+    let invalidEligibilityEvidence = false;
+    const factValues = new Map<string, string>();
+    for (const fact of eligibilityFacts) {
+      const evidence = fact.evidenceId === undefined ? undefined : state.evidence.find((candidate) => candidate.id === fact.evidenceId);
+      const claim = evidence?.claim;
+      const validWindow = evidence !== undefined && (!evidence.validFrom || Date.parse(evidence.validFrom) <= Date.parse(asOf)) && (!evidence.validTo || Date.parse(evidence.validTo) >= Date.parse(asOf)) && (!evidence.refreshAfter || Date.parse(evidence.refreshAfter) >= Date.parse(asOf));
+      const owned = evidence?.ownerUser === this.metadataUser;
+      const exact = claim?.factKey === fact.factKey && JSON.stringify(claim.value) === JSON.stringify(fact.value) && (fact.version === undefined || claim.version === fact.version);
+      if (fact.validFrom !== undefined || fact.validTo !== undefined || !evidence || !owned || evidence.sourceType !== 'official' || evidence.reviewState !== 'accepted' || !validWindow || !exact) { invalidEligibilityEvidence = true; continue; }
+      const key = `${fact.cardId ?? ''}|${fact.factKey}`;
+      const value = JSON.stringify(fact.value);
+      if (factValues.has(key) && factValues.get(key) !== value) { invalidEligibilityEvidence = true; continue; }
+      factValues.set(key, value);
+      verifiedFacts.push(fact);
+    }
+    const visibleRoutes = this.listPaymentRoutes().filter((route) => requested === undefined || requested.has(route.id));
+    const routes = visibleRoutes.filter((route) => {
+      if (route.status !== 'active' || !route.confirmation) return false;
+      if (route.authority === undefined || route.confidence !== 'high' || !route.sourceUrl?.startsWith('https://') || !route.evidenceIds?.length) return false;
+      if (route.validFrom && Date.parse(route.validFrom) > Date.parse(asOf)) return false;
+      if (route.validTo && Date.parse(route.validTo) < Date.parse(asOf)) return false;
+      if (route.funding.kind === 'account' && route.funding.subtype === 'wallet_balance') { const account = state.paymentAccounts.find((candidate) => candidate.id === (route.funding as { accountId?: string }).accountId && candidate.ownerUser === this.metadataUser); if (!account?.balance || account.balance.amountMinor < input.amount.amountMinor || account.balance.currency !== input.amount.currency) return false; }
+      const validEvidence = (id: string) => state.evidence.some((evidence) => evidence.id === id && evidence.sourceType === 'official' && evidence.reviewState === 'accepted' && (!evidence.validFrom || Date.parse(evidence.validFrom) <= Date.parse(asOf)) && (!evidence.validTo || Date.parse(evidence.validTo) >= Date.parse(asOf)));
+      if (!route.evidenceIds.every(validEvidence)) return false;
+      if (route.edges?.length) {
+        if (!route.nodes?.length) return false;
+      }
+      return true;
+    }).sort((a, b) => `${a.id}:${a.edges?.map((edge) => edge.edgeId).sort().join(',') ?? ''}`.localeCompare(`${b.id}:${b.edges?.map((edge) => edge.edgeId).sort().join(',') ?? ''}`));
+    type PathOption = { route: PaymentRouteRecord; pathEdges?: readonly NonNullable<PaymentRouteRecord['edges']>[number][] };
+    const branchBlocked: { routeId: string; reason: string }[] = [];
+    const routePaths: PathOption[] = routes.flatMap((route): PathOption[] => {
+      if (!route.edges?.length || !route.nodes?.length) return [{ route }];
+      const validEvidence = (id: string) => state.evidence.some((evidence) => evidence.id === id && evidence.sourceType === 'official' && evidence.reviewState === 'accepted' && (!evidence.validFrom || Date.parse(evidence.validFrom) <= Date.parse(asOf)) && (!evidence.validTo || Date.parse(evidence.validTo) >= Date.parse(asOf)));
+      const usable = (edge: NonNullable<PaymentRouteRecord['edges']>[number]) => {
+        const from = route.nodes?.find((node) => node.id === edge.fromNodeId);
+        const to = route.nodes?.find((node) => node.id === edge.toNodeId);
+        const fromRole = from?.kind;
+        const toRole = to?.kind;
+        const legal = edge.transition === 'wallet_top_up' ? fromRole === 'funding_source' && toRole === 'wallet_balance' : edge.transition === 'account_debit' ? fromRole === 'funding_source' && ['wallet_balance', 'merchant'].includes(toRole ?? '') : edge.transition === 'wallet_debit' ? fromRole === 'wallet_balance' && ['payment_service', 'acceptance_network', 'merchant'].includes(toRole ?? '') : edge.transition === 'service_to_acceptance' ? fromRole === 'payment_service' && toRole === 'acceptance_network' : edge.transition === 'merchant_settlement' ? ['wallet_balance', 'payment_service', 'acceptance_network'].includes(fromRole ?? '') && toRole === 'merchant' : edge.transition === 'direct_settlement' ? fromRole === 'funding_source' && toRole === 'merchant' : edge.transition === 'card_authorization' ? fromRole === 'funding_source' && ['acceptance_network', 'merchant'].includes(toRole ?? '') : edge.transition === 'split_tender' ? ['funding_source', 'wallet_balance'].includes(fromRole ?? '') && toRole === 'merchant' : false;
+        const directionIsAdmissible = edge.direction !== 'inbound';
+        const claims = edge.evidenceIds.map((id) => state.evidence.find((candidate) => candidate.id === id)?.claim).filter(Boolean).map((claim) => JSON.stringify(claim));
+        const exact = edge.evidenceIds.every((id) => {
+          const evidence = state.evidence.find((candidate) => candidate.id === id);
+          if (!evidence) return false;
+          const claim = evidence.claim;
+          const requiresDirection = edge.fromMarket !== undefined || edge.toMarket !== undefined;
+          const claimHasDirection = claim.fromMarket !== undefined || claim.toMarket !== undefined;
+          if (claimHasDirection && !requiresDirection) return false;
+          if (requiresDirection && (claim.fromRole === undefined || claim.toRole === undefined || claim.transition === undefined || claim.fromMarket === undefined || claim.toMarket === undefined)) return false;
+          return (claim.fromRole === undefined && !requiresDirection) || (claim.fromRole === fromRole && claim.toRole === toRole && claim.transition === edge.transition && (edge.fromMarket === undefined || claim.fromMarket === edge.fromMarket) && (edge.toMarket === undefined || claim.toMarket === edge.toMarket) && (edge.market === undefined || claim.market === edge.market) && (edge.currency === undefined || claim.currency === edge.currency));
+        });
+        return legal && directionIsAdmissible && new Set(claims).size <= 1 && edge.provenance !== 'model_fixture' && edge.evidenceIds.length > 0 && edge.evidenceIds.every(validEvidence) && (!edge.validFrom || Date.parse(edge.validFrom) <= Date.parse(asOf)) && (!edge.validTo || Date.parse(edge.validTo) >= Date.parse(asOf)) && exact;
+      };
+      const adjacency = new Map<string, typeof route.edges>();
+      for (const edge of [...route.edges].sort((a, b) => a.edgeId.localeCompare(b.edgeId))) { if (!usable(edge)) { branchBlocked.push({ routeId: route.id, reason: `edge ${edge.edgeId} lacks exact current evidence` }); continue; } const outgoing = adjacency.get(edge.fromNodeId) ?? []; if (outgoing.length < maxBranchesPerNode) adjacency.set(edge.fromNodeId, [...outgoing, edge]); else branchBlocked.push({ routeId: route.id, reason: `truncated_by_bound:maxBranchesPerNode=${maxBranchesPerNode}` }); }
+      const starts = route.nodes.filter((node) => node.kind === 'funding_source').map((node) => node.id).sort();
+      const paths: PathOption[] = [];
+      const visit = (nodeId: string, seen: Set<string>, path: NonNullable<PaymentRouteRecord['edges']>[number][]) => {
+        if (path.length > maxHops || path.length >= maxEvents || paths.length >= (input.limit ?? 20)) { if (path.length > maxHops) branchBlocked.push({ routeId: route.id, reason: `truncated_by_bound:maxHops=${maxHops}` }); if (path.length >= maxEvents) branchBlocked.push({ routeId: route.id, reason: `truncated_by_bound:maxEvents=${maxEvents}` }); if (paths.length >= (input.limit ?? 20)) branchBlocked.push({ routeId: route.id, reason: 'truncated_by_bound:maxCandidates' }); return; }
+        const node = route.nodes?.find((candidate) => candidate.id === nodeId);
+        if (node?.kind === 'merchant' && path.length) { paths.push({ route, pathEdges: path }); return; }
+        for (const edge of adjacency.get(nodeId) ?? []) { if (seen.has(edge.toNodeId)) { branchBlocked.push({ routeId: route.id, reason: `cycle branch blocked at edge ${edge.edgeId}` }); continue; } visit(edge.toNodeId, new Set([...seen, edge.toNodeId]), [...path, edge]); }
+      };
+      for (const start of starts) visit(start, new Set([start]), []);
+      return paths;
+    });
+    const candidates: PaymentPathCandidate[] = routePaths.map(({ route, pathEdges: selectedEdges }) => {
+      const fundingId = route.funding.kind === 'credit_card' ? route.funding.cardId : route.funding.kind === 'account' ? route.funding.accountId : undefined;
+      const fundingLabel = route.funding.kind === 'credit_card' ? `card:${fundingId ?? 'unknown'}` : route.funding.kind === 'account' ? `${route.funding.subtype}:${fundingId ?? 'unknown'}` : 'cash';
+      const fundingNode = { id: 'funding', kind: route.funding.kind, displayName: fundingLabel };
+      const nodes = (route.nodes?.length ? [...route.nodes] : [fundingNode, ...route.layers.map((layer, index) => ({ id: `node-${index + 1}`, kind: layer.kind, displayName: layer.displayName ?? layer.providerId ?? layer.appId ?? layer.kind }))]).sort((a, b) => a.id.localeCompare(b.id));
+      const pathEdges = selectedEdges;
+      const events: PaymentPathEvent[] = pathEdges?.length
+        ? pathEdges.map((edge) => {
+          const kind = edge.transition === 'wallet_top_up' || edge.transition === 'account_debit' ? 'top_up' as const : 'purchase' as const;
+          return {
+            kind,
+            fromNodeId: edge.fromNodeId,
+            toNodeId: edge.toNodeId,
+            planEventId: `plan:${JSON.stringify(route.funding)}:${edge.edgeId}`,
+            ...(kind === 'purchase' ? { amount: input.amount } : {}),
+            ...(edge.fee === undefined ? {} : { fee: edge.fee }),
+            ...(edge.markup === undefined ? {} : { markup: edge.markup }),
+            ...(edge.foreignTransactionFee === undefined ? {} : { foreignTransactionFee: edge.foreignTransactionFee }),
+            ...(edge.fx === undefined ? {} : { fx: edge.fx }),
+            ...(edge.dcc === undefined ? {} : { dcc: edge.dcc }),
+            transition: edge.transition,
+            routeEdgeIds: [edge.edgeId],
+            evidenceIds: edge.evidenceIds,
+            provenance: edge.provenance ?? 'official',
+            eligibility: kind === 'top_up' ? { status: 'unknown' as const, reasons: ['top-up amount policy is not evidenced'] } : { status: 'ready' as const, reasons: ['wallet purchase can be evaluated independently of aggregate balance provenance'] },
+            rewards: [],
+          };
+        })
+        : route.funding.kind === 'account' && route.funding.subtype === 'wallet_balance'
+        ? [{ kind: 'purchase' as const, fromNodeId: 'funding', toNodeId: 'merchant', planEventId: `plan:${JSON.stringify(route.funding)}:purchase`, amount: input.amount, eligibility: { status: 'ready' as const, reasons: ['wallet purchase can be evaluated independently of aggregate balance provenance'] }, rewards: [] }]
+        : route.layers.length === 0
+        ? [{ kind: route.funding.kind === 'credit_card' ? 'card_authorization' as const : 'account_debit' as const, fromNodeId: 'funding', toNodeId: 'funding', planEventId: `plan:${JSON.stringify(route.funding)}:purchase`, amount: input.amount, eligibility: { status: 'ready' as const, reasons: [] }, rewards: [] }]
+        : route.layers.map((_, index) => ({ kind: index < route.layers.length - 1 ? 'top_up' as const : 'purchase' as const, fromNodeId: index === 0 ? 'funding' : `node-${index}`, toNodeId: `node-${index + 1}`, planEventId: `plan:${JSON.stringify(route.funding)}:layer-${index + 1}`, ...(index === route.layers.length - 1 ? { amount: input.amount } : {}), eligibility: { status: index < route.layers.length - 1 ? 'unknown' as const : 'ready' as const, reasons: index < route.layers.length - 1 ? ['top-up amount policy is not evidenced'] : [] }, rewards: [] }));
+      for (let index = 0; index < events.length - 1; index += 1) {
+        const event = events[index]; const next = events[index + 1];
+        if (event && next) event.relations = [{ type: 'planned_precedes', eventId: next.planEventId! }, { type: 'planned_enables', eventId: next.planEventId! }];
+      }
+      const plannedRewards: { ruleId: string; ruleVersion: string; component: NonNullable<OfferRuleVersion['componentKind']>; sponsor: string; benefitGroup: string; nativeUnit: string; combination?: OfferRuleVersion['combination']; capPoolRefs?: readonly string[]; reward?: Money; reasons: readonly string[] }[] = [];
+      let eligibilityUncertain = invalidEligibilityEvidence;
+      events.forEach((event, index) => {
+        const edge = pathEdges?.[index];
+        const funding = index === 0 ? route.funding : { kind: 'account' as const, subtype: 'wallet_balance' as const, ...(route.funding.kind === 'account' && route.funding.accountId ? { accountId: route.funding.accountId } : {}) };
+        const plannedEvent = { id: event.planEventId!, kind: event.kind === 'top_up' ? 'top_up' as const : 'purchase' as const, amount: event.amount ?? input.amount, occurredAt: asOf, funding, routeId: route.id, ...(input.channel === undefined ? {} : { channel: input.channel }), ...(input.paymentMethod === undefined ? {} : { paymentMethod: input.paymentMethod }) };
+        if (event.kind === 'top_up' && event.amount === undefined) return;
+        for (const rule of state.rules) {
+          if (rule.status !== 'active' || !rule.eventRule || !rule.componentKind || (rule.routeId !== undefined && rule.routeId !== route.id)) continue;
+          const match = matchPaymentEvent(rule.eventRule, plannedEvent);
+          if (match.status !== 'matched') {
+            if (match.status === 'unknown') { eligibilityUncertain = true; plannedRewards.push({ ruleId: rule.id, ruleVersion: rule.version, component: rule.componentKind, sponsor: rule.sponsor ?? rule.componentKind, benefitGroup: rule.benefitGroup ?? rule.combination?.groupId ?? 'default', nativeUnit: rule.reward.kind, ...(rule.combination === undefined ? {} : { combination: rule.combination }), ...(rule.capPoolRefs === undefined ? {} : { capPoolRefs: rule.capPoolRefs }), reasons: match.reasons }); }
+            continue;
+          }
+          if (rule.predicate) {
+            const predicateContext = { ...this.context(state, asOf), eligibilityFacts: verifiedFacts };
+            const outcome = evaluatePredicate(rule.predicate, { cardId: '', routeId: route.id, kind: 'purchase', mode: 'planned', occurredAt: asOf, amount: input.amount }, predicateContext);
+            if (!outcome.matched) {
+              eligibilityUncertain = true;
+              plannedRewards.push({ ruleId: rule.id, ruleVersion: rule.version, component: rule.componentKind, sponsor: rule.sponsor ?? rule.componentKind, benefitGroup: rule.benefitGroup ?? rule.combination?.groupId ?? 'default', nativeUnit: rule.reward.kind, ...(rule.combination === undefined ? {} : { combination: rule.combination }), ...(rule.capPoolRefs === undefined ? {} : { capPoolRefs: rule.capPoolRefs }), reasons: [...outcome.missing, ...outcome.conflicts, ...(outcome.missing.length || outcome.conflicts.length ? [] : ['eligibility fact does not match'])] });
+              continue;
+            }
+          }
+          const reward = rule.reward.amountMinor !== undefined
+            ? { amountMinor: rule.reward.amountMinor, currency: rule.reward.currency ?? input.amount.currency }
+            : rule.reward.rateBps !== undefined && event.amount
+            ? { amountMinor: Math.floor(event.amount.amountMinor * rule.reward.rateBps / 10_000), currency: rule.reward.currency ?? input.amount.currency }
+            : undefined;
+          plannedRewards.push({ ruleId: rule.id, ruleVersion: rule.version, component: rule.componentKind, sponsor: rule.sponsor ?? rule.componentKind, benefitGroup: rule.benefitGroup ?? rule.combination?.groupId ?? 'default', nativeUnit: rule.reward.kind, ...(rule.combination === undefined ? {} : { combination: rule.combination }), ...(rule.capPoolRefs === undefined ? {} : { capPoolRefs: rule.capPoolRefs }), ...(reward === undefined ? {} : { reward }), reasons: reward === undefined ? ['reward spec is not calculable'] : [] });
+          if (reward !== undefined && event.rewards) {
+            event.rewards = [...event.rewards, {
+              ruleId: rule.id,
+              ruleVersion: rule.version,
+              component: rule.componentKind,
+              sponsor: rule.sponsor ?? rule.componentKind,
+              benefitGroup: rule.benefitGroup ?? rule.combination?.groupId ?? 'default',
+              nativeUnit: rule.reward.kind,
+              status: 'ready',
+              reward,
+              reasons: [],
+            }];
+          }
+        }
+        if (edge && event.kind === 'top_up' && event.amount === undefined) event.eligibility = { status: 'unknown', reasons: ['top-up amount policy is not evidenced'] };
+      });
+      const transaction: TransactionTuple = { cardId: route.funding.kind === 'credit_card' ? (route.funding.cardId ?? '') : '', routeId: route.id, kind: 'purchase', mode: 'planned', occurredAt: asOf, amount: input.amount, ...(input.merchant === undefined ? {} : { merchant: input.merchant }), ...(input.mcc === undefined ? {} : { mcc: input.mcc }), ...(input.country === undefined ? {} : { country: input.country }), ...(input.channel === undefined ? {} : { channel: input.channel }), ...(input.paymentMethod === undefined ? {} : { paymentMethod: input.paymentMethod }) };
+      const card = state.cards.find((candidate) => candidate.id === transaction.cardId);
+      const hasPlannedTopUp = events.some((event) => event.kind === 'top_up');
+      const evaluations = card && !hasPlannedTopUp ? state.rules.filter((rule) => rule.cardId === card.id).map((rule) => ({ rule, result: evaluateOffer(rule, transaction, this.context(state, asOf, transaction)) })).filter(({ result }) => result.status === 'ok') : [];
+      const ranking = evaluations.length ? evaluations[0]?.result : undefined;
+      const zero = { amountMinor: 0, currency: input.amount.currency };
+      const rewardGroups = new Map<string, typeof plannedRewards>();
+      for (const item of plannedRewards.filter((candidate) => candidate.reward !== undefined)) rewardGroups.set(`${item.sponsor}|${item.benefitGroup}`, [...(rewardGroups.get(`${item.sponsor}|${item.benefitGroup}`) ?? []), item]);
+      let stackingAmbiguous = eligibilityUncertain;
+      const acceptedPlanned: typeof plannedRewards = [];
+      for (const group of rewardGroups.values()) {
+        if (group.length === 1) { if (group[0]) acceptedPlanned.push(group[0]); continue; }
+        const modes = group.map((item) => item.combination?.mode);
+        if (modes.some((mode) => mode === undefined)) { stackingAmbiguous = true; continue; }
+        if (modes.every((mode) => mode === 'additive')) { acceptedPlanned.push(...group); continue; }
+        const ranked = [...group].sort((a, b) => (b.combination?.priority ?? 0) - (a.combination?.priority ?? 0) || a.ruleId.localeCompare(b.ruleId));
+        if (modes.every((mode) => mode === 'replace' || mode === 'best_of' || mode === 'exclusive')) { if (ranked[0]) acceptedPlanned.push(ranked[0]); }
+        else stackingAmbiguous = true;
+      }
+      const acceptedByRule = new Map(acceptedPlanned.map((item) => [item.ruleId, item]));
+      const prerequisiteMemo = new Map<string, boolean>();
+      const prerequisiteReady = (item: (typeof plannedRewards)[number], visiting = new Set<string>()): boolean => {
+        const cached = prerequisiteMemo.get(item.ruleId);
+        if (cached !== undefined) return cached;
+        const refs = item.combination?.mode === 'prerequisite' ? item.combination.prerequisiteRuleIds : undefined;
+        if (item.combination?.mode !== 'prerequisite') { prerequisiteMemo.set(item.ruleId, true); return true; }
+        if (!refs?.length || visiting.has(item.ruleId)) { prerequisiteMemo.set(item.ruleId, false); return false; }
+        const nextVisiting = new Set(visiting).add(item.ruleId);
+        const ready = refs.every((ref) => {
+          const prerequisite = acceptedByRule.get(ref);
+          return prerequisite !== undefined && prerequisiteReady(prerequisite, nextVisiting);
+        });
+        prerequisiteMemo.set(item.ruleId, ready);
+        return ready;
+      };
+      for (const item of [...acceptedPlanned]) {
+        if (item.combination?.mode === 'prerequisite' && !prerequisiteReady(item)) {
+          stackingAmbiguous = true;
+          acceptedByRule.delete(item.ruleId);
+        }
+      }
+      const allExplicit = [...rewardGroups.values()].flat().every((item) => item.combination?.mode !== undefined);
+      if (rewardGroups.size > 1 && !allExplicit) stackingAmbiguous = true;
+      for (const item of acceptedPlanned) {
+        for (const poolId of item.capPoolRefs ?? []) {
+          const pool = state.capPools.find((candidate) => candidate.id === poolId);
+          if (!pool || pool.metric !== 'reward' || pool.timezone === undefined || (pool.currency !== undefined && pool.currency !== item.reward?.currency)) stackingAmbiguous = true;
+        }
+      }
+      const acceptedIds = new Set(acceptedByRule.keys());
+      for (const event of events) if (event.rewards) event.rewards = event.rewards.filter((reward) => acceptedIds.has(reward.ruleId));
+      const capUsed = new Map<string, number>();
+      const plannedMatched = acceptedPlanned.filter((item) => acceptedByRule.has(item.ruleId)).map((item) => {
+        const capUses = (item.capPoolRefs ?? []).map((poolId) => {
+          const pool = state.capPools.find((candidate) => candidate.id === poolId);
+          const previous = capUsed.get(poolId) ?? 0;
+          const limit = pool?.limit ?? item.reward!.amountMinor;
+          const capped = Math.max(0, Math.min(item.reward!.amountMinor, limit - previous));
+          capUsed.set(poolId, previous + capped);
+          return { poolId, grossAmount: item.reward!, cappedAmount: { amountMinor: capped, currency: item.reward!.currency } };
+        });
+        const cappedMinor = capUses.length ? Math.min(item.reward!.amountMinor, ...capUses.map((use) => use.cappedAmount.amountMinor)) : item.reward!.amountMinor;
+        return { ruleId: item.ruleId, ruleVersion: item.ruleVersion, component: item.component, sponsor: item.sponsor, benefitGroup: item.benefitGroup, nativeUnit: item.nativeUnit, reward: { amountMinor: cappedMinor, currency: item.reward!.currency }, ...(capUses.length ? { capUses } : {}) };
+      });
+      for (const event of events) {
+        if (!event.rewards) continue;
+        event.rewards = event.rewards.map((reward) => {
+          const planned = plannedMatched.find((item) => item.ruleId === reward.ruleId);
+          return planned ? { ...reward, reward: planned.reward, ...(planned.capUses ? { capUses: planned.capUses } : {}) } : reward;
+        });
+      }
+      const matchedRules = [...evaluations.filter(({ rule }) => rule.stacking !== 'possible').map(({ rule, result }) => ({ ruleId: rule.id, ruleVersion: rule.version, component: rule.componentKind ?? 'card_issuer', reward: result.cappedReward ?? zero })), ...plannedMatched];
+      const nativeUnits = new Set(matchedRules.map((item) => ('nativeUnit' in item && typeof item.nativeUnit === 'string') ? item.nativeUnit : item.reward.currency));
+      const valuationSnapshots = state.valuationSnapshots ?? [];
+      const valuedRules = matchedRules.map((item) => {
+        const nativeUnit = ('nativeUnit' in item && typeof item.nativeUnit === 'string') ? item.nativeUnit : item.reward.currency;
+        if (nativeUnit === item.reward.currency || nativeUnit === input.amount.currency || nativeUnit === 'cash' || nativeUnit === 'cashback') return { ...item, nativeUnit };
+        const snapshot = valuationSnapshots.find((candidate) => candidate.ownerUser === this.metadataUser && candidate.nativeUnit === nativeUnit && candidate.targetCurrency === input.amount.currency && Date.parse(candidate.asOf) <= Date.parse(asOf) && (candidate.validTo === undefined || Date.parse(candidate.validTo) > Date.parse(asOf)) && state.evidence.some((evidence) => evidence.id === candidate.evidenceId && evidence.ownerUser === this.metadataUser && evidence.sourceType === 'official' && evidence.reviewState === 'accepted'));
+        if (!snapshot) return { ...item, nativeUnit, valuationMissing: true as const };
+        return { ...item, nativeUnit, nativeReward: item.reward, reward: { amountMinor: Math.floor(item.reward.amountMinor * snapshot.rateNumerator / snapshot.rateDenominator), currency: snapshot.targetCurrency }, valuationSnapshotId: snapshot.id };
+      });
+      const valuationMissing = valuedRules.some((item) => 'valuationMissing' in item && item.valuationMissing);
+      const nativeUnitMismatch = valuationMissing;
+      const sum = (field: 'grossReward' | 'cappedReward') => valuedRules.reduce((amount, item) => amount + (item.reward.amountMinor), 0);
+      const cappedReward = matchedRules.length && !stackingAmbiguous && !nativeUnitMismatch ? { amountMinor: sum('cappedReward'), currency: input.amount.currency } : zero;
+      const grossReward = matchedRules.length && !stackingAmbiguous && !nativeUnitMismatch ? { amountMinor: sum('grossReward'), currency: input.amount.currency } : zero;
+      const convertCost = (cost: Money, fx: NonNullable<PaymentPathEvent['fx']> | undefined): number | undefined => {
+        if (cost.currency === input.amount.currency) return cost.amountMinor;
+        if (!fx || fx.baseCurrency !== cost.currency || fx.quoteCurrency !== input.amount.currency) return undefined;
+        return Math.floor(cost.amountMinor * fx.ratePpm / 1_000_000);
+      };
+      const costValues = events.flatMap((event) => [event.fee, event.markup, event.foreignTransactionFee, event.dcc?.selected ? event.dcc.fee : undefined].filter((value): value is Money => value !== undefined).map((value) => ({ value, converted: convertCost(value, event.fx) })));
+      const feeMismatch = costValues.some((cost) => cost.converted === undefined);
+      const feeTotal = feeMismatch || costValues.length === 0 ? undefined : { amountMinor: costValues.reduce((total, cost) => total + cost.converted!, 0), currency: input.amount.currency };
+      const netValue = feeMismatch || nativeUnitMismatch ? undefined : { amountMinor: cappedReward.amountMinor - (feeTotal?.amountMinor ?? 0), currency: input.amount.currency };
+      const blocked = stackingAmbiguous || feeMismatch || nativeUnitMismatch;
+      const pathEvidence = [...new Set(events.flatMap((event) => event.evidenceIds ?? []))].map((id) => state.evidence.find((candidate) => candidate.id === id)).filter((evidence): evidence is NonNullable<typeof evidence> => evidence !== undefined);
+      const evidenceTier = pathEvidence.length === 0 ? 0 : Math.min(...pathEvidence.map((evidence) => evidence.sourceType === 'official' && evidence.reviewState === 'accepted' ? 3 : evidence.sourceType === 'trusted_secondary' && evidence.reviewState === 'accepted' ? 2 : evidence.sourceType === 'community' && evidence.reviewState === 'accepted' ? 1 : 0));
+      const evidenceFreshness = pathEvidence.length === 0 ? undefined : pathEvidence.map((evidence) => evidence.observedAt).sort()[0];
+      const pathSignature = JSON.stringify({ version: 1, nodes, edges: pathEdges ?? events, funding: route.funding, merchant: input.merchant, currency: input.amount.currency });
+      return { id: `path:${pathSignature}`, routeId: route.id, nodes, events, fundingSource: route.funding, grossReward, netReward: cappedReward, cappedReward, ...(feeTotal === undefined ? {} : { feeTotal }), ...(netValue === undefined ? {} : { netValue }), requiredActions: feeMismatch ? ['confirm fee currency or provide a validated FX snapshot'] : nativeUnitMismatch ? ['provide a validated valuation snapshot for each reward unit'] : [], userEffort: feeMismatch || nativeUnitMismatch ? 1 : 0, evidenceTier, ...(evidenceFreshness === undefined ? {} : { evidenceFreshness }), matchedRules: blocked ? [] : valuedRules, pathSignature, status: blocked ? 'blocked' : 'ready', exclusionReasons: stackingAmbiguous ? ['ambiguous stacking policy'] : feeMismatch ? ['fee currency cannot be compared without validated FX'] : nativeUnitMismatch ? ['provide a fresh authoritative valuation for each reward unit'] : matchedRules.length ? evaluations.length === matchedRules.length ? [] : ['possible stacking policy excluded'] : ['no applicable verified card rule'] };
+    });
+    const statusRank = (status: PaymentPathCandidate['status']): number => status === 'ready' ? 0 : status === 'blocked' ? 2 : status === 'no_match' ? 3 : 1;
+    candidates.sort((a, b) => statusRank(a.status) - statusRank(b.status)
+      || (b.netValue?.amountMinor ?? Number.NEGATIVE_INFINITY) - (a.netValue?.amountMinor ?? Number.NEGATIVE_INFINITY)
+      || b.cappedReward.amountMinor - a.cappedReward.amountMinor
+      || b.grossReward.amountMinor - a.grossReward.amountMinor
+      || (a.feeTotal?.amountMinor ?? Number.POSITIVE_INFINITY) - (b.feeTotal?.amountMinor ?? Number.POSITIVE_INFINITY)
+      || (b.evidenceTier ?? 0) - (a.evidenceTier ?? 0)
+      || (b.evidenceFreshness ?? '').localeCompare(a.evidenceFreshness ?? '')
+      || (a.userEffort ?? 0) - (b.userEffort ?? 0)
+      || a.id.localeCompare(b.id));
+    const accepted = new Set(routes.map((route) => route.id));
+    const blocked = [...visibleRoutes.filter((route) => !accepted.has(route.id)).map((route) => ({ routeId: route.id, reason: route.status !== 'active' || !route.confirmation ? 'route is not active and confirmed' : 'route has no admissible terminal branch' })), ...branchBlocked];
+    const diagnostics = [...new Set(branchBlocked.filter((item) => item.reason.startsWith('truncated_by_bound:')).map((item) => item.reason.split(':', 2)[0] ?? 'truncated_by_bound'))];
+    return { status: candidates.length ? (candidates.some((candidate) => candidate.status === 'blocked') ? 'needs_review' : blocked.length ? 'partial' : 'ok') : (blocked.length ? 'needs_review' : 'no_match'), candidates, evaluatedAt: asOf, blocked, ...(diagnostics.length ? { diagnostics } : {}), limits: { maxCandidates: input.limit ?? 20, maxHops, maxEvents, maxBranchesPerNode } };
   }
 
   recordTransaction(transaction: TransactionTuple): RewardBreakdown {

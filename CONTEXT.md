@@ -175,13 +175,44 @@ The derived index of Offer Rules that are active, source-trusted, time-valid,
 and evaluable for recommendation or reward calculation.
 _Avoid_: all merchant catalog, candidate offer list, search result cache
 
+## Payment paths
+
+**Acceptance Network**:
+The merchant-facing network or acceptance brand through which a payment is presented, such as a QR or interoperability network. A brand name does not by itself prove which role it plays in a specific route.
+_Avoid_: payment method, funding source, provider
+
+**Payment Service**:
+An app, wallet, merchant application, or intermediate payment service that participates between merchant acceptance and funding. It is distinct from the instrument or account that ultimately supplies value.
+_Avoid_: payment method, generic provider
+
+**Funding Instrument**:
+The card, bank account, wallet balance, or cash source that supplies value at a particular step of a route. A funding instrument is not necessarily the terminal settlement source; a card may top up a wallet whose balance settles the purchase.
+_Avoid_: card ID for every funding type, payment route
+
+**Route Node**:
+A role-labeled participant in a Payment Route, such as an acceptance network, payment service, or funding instrument. The role is part of the fact so the same brand can be interpreted differently only when evidence supports that role.
+_Avoid_: provider node, undifferentiated payment method
+
+**Route Transition**:
+The typed relationship between adjacent Route Nodes, such as direct authorization, account debit, wallet top-up, or wallet settlement. It records how value moves and prevents a card top-up from being inferred as a direct card purchase.
+_Avoid_: implicit link, assumed funding
+
+**Payment Route Record**:
+An evidence-backed concrete Payment Route containing ordered Route Nodes, Route Transitions, and relevant settlement facts for an observed or declared path. Its identifier is stable identity only; it does not contain the matching semantics.
+_Avoid_: opaque route rule, route ID as policy
+
+**Payment Route Selector**:
+A reusable declarative condition over Route Nodes and Route Transitions that an Offer Rule can use to match one node, one transition, or a complete route pattern. A selector may require a conjunction of roles without requiring every matching route to share one generated route ID.
+_Avoid_: hard-coded route name, combination-specific enum
+
 ## Transactions and accounting
 
 **Payment Route**:
-The declared path by which a transaction reaches the merchant and the card
-issuer, such as direct card payment, a wallet, or a merchant application; it
-identifies the provider and route context without storing payment credentials.
-_Avoid_: payment token, credential, generic payment method
+The ordered, role-labeled path by which a transaction reaches the merchant and
+its settlement or funding parties, including acceptance networks, payment
+services, funding instruments, and typed transitions; it identifies route
+context without storing payment credentials.
+_Avoid_: payment token, credential, generic payment method, opaque route ID
 
 **Settlement Amount**:
 The amount actually charged to the underlying Held Card after an applicable
@@ -229,6 +260,18 @@ _Avoid_: cached balance, prompt memory
 The rule that repeating an actual-record request with the same identity returns
 the original result, while a different payload is rejected for review.
 _Avoid_: duplicate tolerance, best-effort append
+
+**Top-up Event**:
+An event transferring monetary value from a Funding Instrument into a stored-value balance, distinct from and potentially preceding a subsequent purchase across different days.
+_Avoid_: purchase transaction, direct payment, wallet debit
+
+**Purchase Event**:
+An event exchanging payment for goods or services with a merchant, possessing its own independent payment route, amount, currency, and timestamp.
+_Avoid_: funding transfer, top-up, generic transaction
+
+**Cross-Event Eligibility**:
+A qualified status for reward rules established by multiple evidenced events spanning specific time windows, execution sequences, or cumulative thresholds, rather than an instantaneous single-transaction match or permanent static boolean fact.
+_Avoid_: single-transaction predicate, instant match, static user attribute
 
 ## Outcomes and collaboration
 

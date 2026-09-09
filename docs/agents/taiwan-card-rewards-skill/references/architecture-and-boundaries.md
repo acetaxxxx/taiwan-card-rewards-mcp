@@ -1,6 +1,6 @@
 # 架構與系統邊界規範 (Architecture & Boundaries)
 
-**規範版本**：v0.9.0
+**規範範圍**：canonical 19-tool MCP contract
 **適用架構**：MCP 伺服器與 Agent Workspace 雙層架構
 
 ---

@@ -12,11 +12,24 @@ export interface PaymentRouteContext {
   transactionCurrency: Currency; settlementCurrency?: Currency; billingCurrency?: Currency; conversionOwner?: ConversionOwner; rateType?: FxRateType; conversionTiming?: ConversionTiming;
   foreignTransactionFee?: Money; markup?: Money; serviceFee?: Money; dcc?: boolean;
 }
+export type PaymentEventKind = 'top_up' | 'purchase' | 'refund' | 'reversal' | 'reward_issuance' | 'reward_redemption';
+export type PaymentEventFunding = { kind: 'credit_card'; cardId?: string } | { kind: 'account'; subtype: 'linked_bank_account' | 'wallet_balance' | 'foreign_currency_account'; accountId?: string } | { kind: 'cash' };
+export interface PaymentEventRelations { funded_by?: readonly string[]; caused_by?: readonly string[]; refunds?: readonly string[]; }
+export interface PaymentEvent { id: string; kind: PaymentEventKind; amount: Money; occurredAt: string; funding: PaymentEventFunding; cardId?: string; routeId?: string; channel?: string; paymentMethod?: string; relations?: PaymentEventRelations; }
+export interface PaymentEventRule { id: string; version: string; eventKind: PaymentEventKind; fundingKind?: PaymentEventFunding['kind']; fundingSubtype?: Extract<PaymentEventFunding, { kind: 'account' }>['subtype']; channel?: string; paymentMethod?: string; }
+export interface PaymentEventMatch { status: 'matched' | 'no_match' | 'unknown'; reasons: readonly string[]; }
+export interface PaymentEventChainRule { id: string; version: string; relation: 'funded_by'; windowSeconds: number; sourceRule: PaymentEventRule; targetRule: PaymentEventRule; }
+export interface PaymentEventRewardCandidate { eventId: string; ruleId: string; ruleVersion: string; evidenceId: string; sponsor: string; benefitGroup: string; reward?: RewardSpec; combination?: RewardCombinationPolicy; capPoolId?: string; }
+export interface PaymentEventRewardCandidateInput extends PaymentEventRewardCandidate { eligibility: PaymentEventMatch; }
+export interface PaymentEventRewardDecision { status: 'matched' | 'no_match' | 'needs_review'; candidates: readonly PaymentEventRewardCandidate[]; reasons: readonly string[]; }
+export interface EventRewardLedgerRecord { idempotencyKey: string; ownerUser: string; eventId: string; eventAmount: Money; ruleId: string; ruleVersion: string; evidenceId: string; sponsor: string; benefitGroup: string; reward: Money; rewardSpecFingerprint: string; capUsage?: { poolId: string; periodKey: string; consumedAmount: number }; }
+export interface EventRewardReversalRecord { idempotencyKey: string; ownerUser: string; eventId: string; originalEventId: string; refundedAmount: Money; ruleId: string; ruleVersion: string; evidenceId: string; sponsor: string; benefitGroup: string; reward: Money; capUsage?: { poolId: string; periodKey: string; consumedAmount: number }; }
+export interface EventRewardCapUsageRecord { ownerUser: string; poolId: string; periodKey: string; consumedAmount: number; }
 export type PaymentRouteLayerKind = 'merchant_loyalty' | 'merchant_acceptance' | 'consumer_app' | 'payment_provider' | 'wallet' | 'interoperability_scheme' | 'intermediate_provider' | 'card_network' | 'card_issuer';
 export interface PaymentRouteLayer { kind: PaymentRouteLayerKind; providerId?: string; appId?: string; paymentMethod?: string; displayName?: string; evidenceIds?: readonly string[]; }
 export type FundingInstrument =
   | { kind: 'credit_card'; cardId?: string }
-  | { kind: 'account'; subtype: 'linked_bank_account' | 'wallet_balance' | 'foreign_currency_account' }
+  | { kind: 'account'; subtype: 'linked_bank_account' | 'wallet_balance' | 'foreign_currency_account'; accountId?: string }
   | { kind: 'cash' };
 export interface PaymentRouteRecord {
   id: string;
@@ -35,6 +48,27 @@ export interface PaymentRouteRecord {
   evidenceIds?: readonly string[];
   idempotencyKey: string;
   ownerUser?: string;
+  nodes?: readonly PaymentPathNode[];
+  edges?: readonly PaymentPathEdge[];
+}
+export type PaymentPathNodeRole = 'funding_source' | 'wallet_balance' | 'payment_service' | 'acceptance_network' | 'merchant';
+export type PaymentPathTransition = 'card_authorization' | 'account_debit' | 'wallet_top_up' | 'wallet_debit' | 'service_to_acceptance' | 'merchant_settlement' | 'direct_settlement' | 'split_tender';
+export interface PaymentPathEdge { edgeId: string; fromNodeId: string; toNodeId: string; transition: PaymentPathTransition; evidenceIds: readonly string[]; provenance?: 'official' | 'model_fixture'; direction?: 'inbound' | 'outbound'; fromMarket?: string; toMarket?: string; market?: string; currency?: string; validFrom?: string; validTo?: string; fee?: Money; markup?: Money; foreignTransactionFee?: Money; fx?: FxSnapshot; dcc?: { selected: boolean; fee?: Money }; }
+export type PaymentAccountKind = 'linked_bank_account' | 'wallet_balance' | 'foreign_currency_account';
+export interface PaymentAccountRecord {
+  id: string;
+  providerId: string;
+  kind: PaymentAccountKind;
+  displayName: string;
+  status: 'candidate' | 'active' | 'stale' | 'needs_review';
+  observedAt: string;
+  sourceUrl?: string;
+  sourceSnapshotId?: string;
+  evidenceIds?: readonly string[];
+  confirmation?: { confirmedAt: string; confirmedBy: string };
+  idempotencyKey: string;
+  ownerUser?: string;
+  balance?: Money;
 }
 export type StackingConfidence = 'confirmed' | 'possible';
 export type RewardComponentKind = 'merchant_loyalty' | 'payment_provider' | 'card_issuer';
@@ -120,6 +154,8 @@ export interface HeldCard {
 
 export interface EligibilityFact {
   id?: string | undefined;
+  evidenceId?: string | undefined;
+  version?: string | undefined;
   cardId?: string | undefined;
   factKey: string;
   value: PredicateValue;
@@ -235,7 +271,7 @@ export interface CapPoolDefinition {
 
 export interface OfferRuleVersion {
   id: string;
-  cardId: string;
+  cardId?: string;
   version: string;
   sourceSnapshotId: string;
   status: 'candidate' | 'active' | 'stale' | 'superseded' | 'needs_review' | 'unknown';
@@ -247,6 +283,8 @@ export interface OfferRuleVersion {
   requires?: readonly CalculationTrustRequirement[] | undefined;
   reward: RewardSpec;
   componentKind?: RewardComponentKind | undefined;
+  sponsor?: string | undefined;
+  benefitGroup?: string | undefined;
   useSettlementAmount?: boolean | undefined;
   stacking?: StackingConfidence | undefined;
   confirmation?: OfferConfirmation | undefined;
@@ -255,6 +293,9 @@ export interface OfferRuleVersion {
   capPoolRefs?: readonly string[] | undefined;
   /** Optional exact PaymentRoute binding; absent means the legacy generic rule. */
   routeId?: string | undefined;
+  /** Optional recommendation-time event eligibility; exactly one may be supplied. */
+  eventRule?: PaymentEventRule | undefined;
+  eventChainRule?: PaymentEventChainRule | undefined;
 }
 
 export interface FxSnapshot {
@@ -275,6 +316,19 @@ export interface FxSnapshot {
   /** Optional scope restrictions for card-specific or issuer-specific quotes. */
   cardIdScope?: string | undefined;
   issuerScope?: string | undefined;
+}
+
+export interface RewardValuationSnapshot {
+  id: string;
+  nativeUnit: string;
+  rateNumerator: number;
+  rateDenominator: number;
+  targetCurrency: Currency;
+  asOf: string;
+  validTo?: string | undefined;
+  version: string;
+  evidenceId: string;
+  ownerUser?: string | undefined;
 }
 
 export interface CycleWindow {
@@ -370,6 +424,7 @@ export interface EvidenceRecord {
   contentHash: string;
   reviewState: EvidenceReviewState;
   sourceUrl?: string | undefined;
+  ownerUser?: string | undefined;
 }
 export interface FactCandidate {
   id: string;
@@ -490,11 +545,72 @@ export interface EvaluationContext {
   capPools?: readonly CapPoolDefinition[] | undefined;
   benefitStatuses?: readonly UserBenefitStatus[] | undefined;
   paymentRoutes?: readonly PaymentRouteRecord[] | undefined;
+  paymentEvents?: { target: PaymentEvent; sourceEvents: readonly PaymentEvent[] } | undefined;
 }
 
 export interface RankingEntry extends RewardBreakdown {
   rank: number;
 }
+
+export interface PaymentPathRequest {
+  amount: Money;
+  merchant?: string;
+  mcc?: string;
+  country?: string;
+  channel?: string;
+  paymentMethod?: string;
+  asOf?: string;
+  routeIds?: readonly string[];
+  limit?: number;
+  maxHops?: number;
+  maxEvents?: number;
+  maxBranchesPerNode?: number;
+  eligibilityFacts?: readonly EligibilityFact[] | undefined;
+}
+export interface PaymentPathNode { id: string; kind: string; displayName: string; }
+export interface PaymentPathEventEligibility { status: 'ready' | 'unknown' | 'no_match' | 'needs_facts'; reasons: readonly string[]; }
+export interface PlannedRewardCapUse { poolId: string; grossAmount: Money; cappedAmount: Money; }
+export interface PlannedRewardComponent { ruleId: string; ruleVersion: string; component: RewardComponentKind; sponsor?: string; benefitGroup?: string; nativeUnit?: string; status: 'ready' | 'unknown' | 'no_match'; reward?: Money; capUses?: readonly PlannedRewardCapUse[]; reasons: readonly string[]; }
+export interface PaymentPathEvent {
+  kind: 'top_up' | 'purchase' | 'account_debit' | 'card_authorization';
+  fromNodeId: string;
+  toNodeId: string;
+  planEventId?: string;
+  amount?: Money;
+  fee?: Money;
+  markup?: Money;
+  foreignTransactionFee?: Money;
+  fx?: FxSnapshot;
+  dcc?: { selected: boolean; fee?: Money };
+  transition?: PaymentPathTransition;
+  routeEdgeIds?: readonly string[];
+  evidenceIds?: readonly string[];
+  provenance?: 'official' | 'model_fixture';
+  relations?: readonly { type: 'planned_precedes' | 'planned_enables'; eventId: string }[];
+  eligibility?: PaymentPathEventEligibility;
+  rewards?: readonly PlannedRewardComponent[];
+}
+export interface PaymentPathCandidate {
+  id: string;
+  routeId: string;
+  nodes: readonly PaymentPathNode[];
+  events: readonly PaymentPathEvent[];
+  fundingSource: FundingInstrument;
+  grossReward: Money;
+  netReward: Money;
+  cappedReward: Money;
+  feeTotal?: Money;
+  netValue?: Money;
+  requiredActions?: readonly string[];
+  userEffort?: number;
+  evidenceTier?: number;
+  evidenceFreshness?: string;
+  matchedRules: readonly { ruleId: string; ruleVersion: string; component: string; sponsor?: string; benefitGroup?: string; nativeUnit?: string; nativeReward?: Money; reward: Money; capUses?: readonly PlannedRewardCapUse[] }[];
+  exclusionReasons: readonly string[];
+  status?: 'ready' | 'blocked' | 'no_match';
+  pathSignature?: string;
+}
+export interface PaymentPathRecommendation { status: 'ok' | 'partial' | 'needs_facts' | 'needs_review' | 'no_match'; candidates: readonly PaymentPathCandidate[]; evaluatedAt: string; blocked?: readonly { routeId: string; reason: string }[]; diagnostics?: readonly string[]; limits?: { maxCandidates: number; maxHops: number; maxEvents: number; maxBranchesPerNode: number }; }
 
 export interface McpToolContract {
   name: string;

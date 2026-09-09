@@ -1,111 +1,63 @@
-# 範例：國內購物選卡推薦 (Planned Recommendation)
+# Example: planned card recommendation
 
-**情境**：使用者計劃在 momo 購物網購買一件 NT$ 3,000 的小家電，詢問應使用手上的哪張信用卡刷卡回饋最高。
+這是 card branch 的合法骨架。`card_illustrative` 與回應數字都是 illustrative；Agent 必須先以 `list_cards` 確認使用者實際持有的 opaque card ID，並以 MCP 回應為準，不自行計算回饋。
 
----
+## 1. Preflight
 
-## Step 1: Agent 發起 Pre-flight 診斷
-
-Agent 呼叫 `recommendation_preflight`：
 ```json
 {
-  "amount": 3000,
-  "currency": "TWD",
-  "merchantName": "momo購物網",
-  "paymentRoute": {
-    "channel": "direct_card"
-  }
-}
-```
-
-**MCP 回傳結果**：
-```json
-{
-  "ready": true,
-  "requiredActions": [],
-  "diagnostics": [],
-  "dataVersion": "2026.09.06-01"
-}
-```
-
----
-
-## Step 2: 執行推薦計算 (`recommend`)
-
-因 `ready === true`，Agent 直接呼叫 `recommend`：
-```json
-{
-  "amount": 3000,
-  "currency": "TWD",
-  "merchantName": "momo購物網",
-  "paymentRoute": {
-    "channel": "direct_card"
+  "transaction": {
+    "cardId": "card_illustrative",
+    "kind": "purchase",
+    "mode": "planned",
+    "occurredAt": "2026-09-06T15:00:00+08:00",
+    "amount": { "amountMinor": 300000, "currency": "TWD" },
+    "merchant": "momo購物網",
+    "country": "TW",
+    "channel": "online",
+    "paymentMethod": "direct_card"
   },
-  "limit": 3
+  "context": { "now": "2026-09-06T07:00:00Z" }
 }
 ```
 
-**MCP 回傳結果**：
+若回應含 stale、unknown、needs_review 或 required action，Agent 先完成 research/clarification，不直接展示確定回饋。
+
+## 2. Recommend
+
 ```json
 {
-  "recommendations": [
-    {
-      "cardId": "cathay_cube",
-      "cardName": "國泰世華 CUBE 卡 (玩數位方案)",
-      "totalRewardEstimated": 90,
-      "effectiveRate": 0.03,
-      "components": [
-        { "name": "一般國內消費", "rate": "0.3%", "amount": 9 },
-        { "name": "玩數位指定電商加碼", "rate": "2.7%", "amount": 81 }
-      ],
-      "capImpact": [
-        { "pool": "cube_digital_unlimited", "consumed": 81, "remainingAfter": "unlimited" }
-      ],
-      "prerequisitesMet": true,
-      "warnings": ["請確認當日於國泰 App 切換為「玩數位」權益方案"]
-    },
-    {
-      "cardId": "taishin_gogo",
-      "cardName": "台新 @GoGo 卡",
-      "totalRewardEstimated": 90,
-      "effectiveRate": 0.03,
-      "components": [
-        { "name": "基本回饋", "rate": "0.5%", "amount": 15 },
-        { "name": "精選網購加碼", "rate": "2.5%", "amount": 75 }
-      ],
-      "capImpact": [
-        { "pool": "gogo_monthly_cap", "consumed": 75, "remainingAfter": 225 }
-      ],
-      "prerequisitesMet": true,
-      "warnings": ["需使用數位帳單並以 Richart 帳戶自動扣繳"]
-    },
-    {
-      "cardId": "fubon_j",
-      "cardName": "台北富邦 J 卡",
-      "totalRewardEstimated": 30,
-      "effectiveRate": 0.01,
-      "components": [
-        { "name": "一般消費", "rate": "1.0%", "amount": 30 }
-      ],
-      "capImpact": [],
-      "prerequisitesMet": true,
-      "warnings": []
-    }
-  ]
+  "transaction": {
+    "cardId": "card_illustrative",
+    "kind": "purchase",
+    "mode": "planned",
+    "occurredAt": "2026-09-06T15:00:00+08:00",
+    "amount": { "amountMinor": 300000, "currency": "TWD" },
+    "merchant": "momo購物網",
+    "country": "TW",
+    "channel": "online",
+    "paymentMethod": "direct_card"
+  },
+  "limit": 3,
+  "page": 1,
+  "projection": "detail"
 }
 ```
 
----
+實際回應是 bounded ranking entries（陣列），欄位依 source contract 的
+`RankingEntry` 為準。例如 Agent 可呈現：
 
-## Step 3: Agent 回覆使用者
+```json
+[
+  {
+    "cardId": "card_illustrative",
+    "status": "ok",
+    "grossReward": { "amountMinor": 9000, "currency": "TWD" },
+    "cappedReward": { "amountMinor": 9000, "currency": "TWD" },
+    "components": [],
+    "unknownReasons": []
+  }
+]
+```
 
-> 💡 **推薦用卡結果**（消費金額：NT$ 3,000 @ momo購物網）：
->
-> 1. 🥇 **國泰世華 CUBE 卡**：預估獲得 **90 點小樹點 (3.0%)**
->    - 基本 0.3% (9點) + 玩數位指定電商 2.7% (81點，無上限)
->    - ⚠️ **提醒**：刷卡當日請確保 CUBE App 設定為「玩數位」方案。
->
-> 2. 🥈 **台新 @GoGo 卡**：預估獲得 **90 元台新Point (3.0%)**
->    - 基本 0.5% (15元) + 精選加碼 2.5% (75元)
->    - 📊 本月加碼上限尚餘 225 元。
->    - ⚠️ **提醒**：需綁定 Richart 自動扣繳。
+上面數值與 component 為 shape-only，不能假裝已從銀行條款驗證。planned call 不消耗 cap、不寫 transaction ledger；實際消費應另以 `record_transaction` actual payload 記錄。

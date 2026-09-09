@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.10.0
+
+- Consolidated the public MCP surface to 19 unversioned tools, including the
+  closed card/payment_path `recommend` union and canonical event tools.
+- Added bounded multi-layer payment-path planning with planned top-up/purchase
+  events, explicit stacking/caps, authoritative eligibility evidence, fee/FX/
+  valuation fail-closed handling, and deterministic ranking.
+- Published the canonical Agent Skill router, references, workflows, and
+  end-to-end usage examples aligned with the runtime contract.
+
+External bank APIs, sidecar/Chromium integration, and staging remain outside
+this release's verification scope.
+
 ## 0.9.0
 
 - Added read-only `recommendation_preflight` and PaymentRoute onboarding/listing (15-tool MCP contract).

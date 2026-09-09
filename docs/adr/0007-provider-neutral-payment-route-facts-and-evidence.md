@@ -8,18 +8,35 @@
 
 ## Decision
 
-Model a payment route as two related but distinct facts:
+Model a payment route as an ordered, role-labeled route graph plus distinct settlement facts:
 
-1. An observed customer/payment path: merchant acceptance network, consumer app or wallet, optional interoperability/intermediate scheme, and the terminal funding instrument.
-2. Settlement facts: transaction, settlement, and billing currencies; conversion owner and timing; FX snapshot; markup and fees; DCC choice.
+1. Route nodes identify the merchant acceptance network, consumer app or wallet, optional interoperability/intermediate service, and funding instrument or account.
+2. Route transitions identify how value moves between adjacent nodes, such as direct authorization, account debit, wallet top-up, or wallet settlement.
+3. Settlement facts preserve transaction, settlement, and billing currencies; conversion owner and timing; FX snapshot; markup and fees; and DCC choice.
+
+The route graph is necessary because a card used to top up a wallet is not automatically a card-funded merchant purchase. For example, a PayPay acceptance path may involve Taishin Pay+ and then either a Taishin Richart card or a Taishin Jieli Cun account; those are different funding and reward facts even when the acceptance brand and intermediate service are the same. These paths remain candidate routes until current evidence establishes the actual transitions.
 
 The terminal funding instrument remains the stable coarse category `credit_card | account | cash`. Account subtypes are open to the known facts needed by the route, including `linked_bank_account`, `wallet_balance`, and `foreign_currency_account`.
 
 Provider names, app names, payment methods, acceptance networks, and interoperability schemes remain open strings. Adding a provider therefore adds an evidence-backed route and offer rule; it does not require a new MCP tool or a core enum. Stable topology kinds are reserved for calculation semantics, not brand names.
 
-The current 15-tool surface remains the public seam. Route registration uses `upsert_payment_route`; route discovery uses `list_payment_routes`; reward applicability uses `OfferRuleVersion.routeId` when an offer is specific to one observed route. Generic rules omit `routeId` and remain backward compatible.
+The current 15-tool surface remains the public seam. Route registration uses `upsert_payment_route`; route discovery uses `list_payment_routes`. Reward applicability should be expressed by a reusable `Payment Route Selector` over route roles and transitions: a selector may bind to a funding node, a payment-service node, an acceptance node, one transition, or a complete route pattern. `OfferRuleVersion.routeId` remains a backward-compatible exact constraint for a concrete observed route, but it is not the reusable policy language and must not hide matching semantics inside an opaque ID. Generic rules omit `routeId`.
+
+The simpler `money_source + pay_channel` projection is allowed as an input or display view when a route has only two relevant facts. It is not the canonical domain model because it loses intermediate services and transition semantics.
 
 ## Route semantics
+
+### Route-specific offer matching
+
+An offer can bind to one or more route facts without inventing a new combination type:
+
+- a funding selector matches a Richart card or Jieli Cun account;
+- a payment-service selector matches Taishin Pay+;
+- an acceptance selector matches PayPay acceptance;
+- a transition selector distinguishes card authorization, card top-up, account debit, and wallet settlement;
+- a complete route selector requires the relevant nodes and transitions together.
+
+All required selector clauses are conjunctive. Unknown or contradictory route facts do not match a constrained selector and are never widened to `any`. This preserves reusable node-level policies while still allowing a genuine PayPay + Taishin Pay+ + Richart-card or PayPay + Taishin Pay+ + Jieli-Cun combination to have its own rule.
 
 These examples are distinct routes, even when they share a merchant QR brand:
 
@@ -57,9 +74,14 @@ When any required fact is absent, stale, contradictory, or outside its validity 
 
 - New payment brands can be onboarded by the Agent through the existing route, evidence, offer, and preflight workflow.
 - Rules can be precise without forcing every generic card rule to mention a route.
+- The canonical matching model is a typed route graph with reusable selectors, not a two-column channel model and not a collection of manually named combination routes.
 - The model distinguishes the user-visible path from the clearing/settlement path and avoids false “nested wallet” chains.
 - Deep provider-specific facts remain refreshable external evidence rather than hard-coded MCP assumptions.
 - Production availability, current campaigns, and individual issuer treatment still require current official verification.
+
+## Considered and rejected simplification
+
+The two-column `money_source + pay_channel` model is useful for simple direct payments, but it is insufficient as the canonical model. It cannot represent an intermediate service such as Taishin Pay+, cannot distinguish direct card authorization from card-to-wallet top-up, and cannot express why the same PayPay acceptance path has different reward semantics when funded by a Richart card versus a Jieli Cun account. Those facts require role-labeled route nodes and typed transitions.
 
 ## Primary research anchors
 

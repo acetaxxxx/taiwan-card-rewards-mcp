@@ -12,7 +12,18 @@ import type {
   Diagnostic,
   RewardBreakdown,
   TransactionTuple,
+  PaymentEvent,
+  PaymentEventMatch,
+  PaymentEventRule,
+  PaymentEventChainRule,
+  PaymentEventRewardCandidate,
+  PaymentEventRewardCandidateInput,
+  PaymentEventRewardDecision,
+  EventRewardLedgerRecord,
+  EventRewardReversalRecord,
 } from './types.js';
+import { RewardServiceError } from './errors.js';
+import type { LedgerStore } from './store.js';
 
 function diagnostic(code: Diagnostic['code'], path: string, requiredFacts: readonly string[], retryAction: string): Diagnostic {
   return { code, path, requiredFacts, retryAction };
@@ -51,6 +62,192 @@ function matchRule(rule: OfferRuleVersion, tx: TransactionTuple): string[] | fal
   const unknown = checks.filter(([, result]) => result === undefined).map(([name]) => `missing ${name}`);
   if (unknown.length) return unknown;
   return checks.some(([, result]) => result === false) ? false : [];
+}
+
+/** Matches only facts belonging to this event; it never traverses funded_by relations. */
+export function matchPaymentEvent(rule: PaymentEventRule, event: PaymentEvent): PaymentEventMatch {
+  const reasons: string[] = [];
+  if (event.kind !== rule.eventKind) return { status: 'no_match', reasons: [`event kind is ${event.kind}`] };
+  if (rule.fundingKind !== undefined && event.funding.kind !== rule.fundingKind) return { status: 'no_match', reasons: ['funding kind does not match'] };
+  if (rule.fundingSubtype !== undefined && (event.funding.kind !== 'account' || event.funding.subtype !== rule.fundingSubtype)) return { status: 'no_match', reasons: ['funding subtype does not match'] };
+  if (rule.fundingKind === 'credit_card' && event.funding.kind === 'credit_card' && event.funding.cardId === undefined) return { status: 'unknown', reasons: ['credit-card identity is missing'] };
+  if (rule.channel !== undefined && event.channel === undefined) reasons.push('missing channel');
+  else if (rule.channel !== undefined && event.channel !== rule.channel) return { status: 'no_match', reasons: ['channel does not match'] };
+  if (rule.paymentMethod !== undefined && event.paymentMethod === undefined) reasons.push('missing payment method');
+  else if (rule.paymentMethod !== undefined && event.paymentMethod !== rule.paymentMethod) return { status: 'no_match', reasons: ['payment method does not match'] };
+  return reasons.length ? { status: 'unknown', reasons } : { status: 'matched', reasons: [] };
+}
+
+/** Checks one explicitly evidenced funded_by edge; it never discovers or allocates relations. */
+export function matchPaymentEventChain(rule: PaymentEventChainRule, target: PaymentEvent, events: readonly PaymentEvent[]): PaymentEventMatch {
+  const targetMatch = matchPaymentEvent(rule.targetRule, target);
+  if (targetMatch.status !== 'matched') return targetMatch;
+  const relatedIds = target.relations?.funded_by;
+  if (!relatedIds?.length) return { status: 'no_match', reasons: ['funded_by relation is missing'] };
+  if (relatedIds.length !== 1) return { status: 'unknown', reasons: ['funded_by relation has ambiguous wallet provenance'] };
+  const sources = events.filter((event) => event.id === relatedIds[0]);
+  if (!sources.length) return { status: 'unknown', reasons: ['funded_by source event is unavailable'] };
+  if (sources.length !== 1) return { status: 'unknown', reasons: ['funded_by source event is ambiguous'] };
+  const source = sources[0]!;
+  const sourceMatch = matchPaymentEvent(rule.sourceRule, source);
+  if (sourceMatch.status !== 'matched') return sourceMatch;
+  const sourceTime = Date.parse(source.occurredAt);
+  const targetTime = Date.parse(target.occurredAt);
+  if (!Number.isFinite(sourceTime) || !Number.isFinite(targetTime)) return { status: 'unknown', reasons: ['event timestamps are invalid'] };
+  if (sourceTime > targetTime) return { status: 'no_match', reasons: ['funded_by source occurs after target event'] };
+  if (targetTime - sourceTime > rule.windowSeconds * 1000) return { status: 'no_match', reasons: ['funded_by source is outside the eligibility window'] };
+  return { status: 'matched', reasons: [] };
+}
+
+/** Turns known eligibility into an unpersisted candidate; amount calculation is deliberately separate. */
+export function createPaymentEventRewardCandidate(input: PaymentEventRewardCandidateInput): PaymentEventRewardCandidate | undefined {
+  if (input.eligibility.status !== 'matched') return undefined;
+  const { eligibility: _eligibility, ...candidate } = input;
+  return candidate;
+}
+
+/** Applies only explicit non-stacking boundaries; it never writes a ledger or invents reward amounts. */
+export function decidePaymentEventRewards(candidates: readonly PaymentEventRewardCandidate[]): PaymentEventRewardDecision {
+  if (!candidates.length) return { status: 'no_match', candidates: [], reasons: [] };
+  const groups = new Map<string, PaymentEventRewardCandidate[]>();
+  for (const candidate of candidates) {
+    const key = `${candidate.sponsor}\u0000${candidate.benefitGroup}`;
+    const group = groups.get(key) ?? [];
+    group.push(candidate);
+    groups.set(key, group);
+  }
+  const allAdditive = candidates.every((candidate) => candidate.combination?.mode === 'additive');
+  const duplicateGroup = [...groups.values()].some((group) => group.length > 1);
+  if (duplicateGroup && !allAdditive) return { status: 'needs_review', candidates: [], reasons: ['same sponsor and benefit group are not explicitly combinable'] };
+  if (groups.size > 1 && !allAdditive) return { status: 'needs_review', candidates: [], reasons: ['cross-sponsor candidates require explicit additive combination policy'] };
+  return { status: 'matched', candidates: [...candidates], reasons: [] };
+}
+
+/** First event-aware ledger seam; records are user-scoped in memory until durable migration is specified. */
+export class EventRewardLedger {
+  private readonly records = new Map<string, EventRewardLedgerRecord>();
+  private readonly reversals = new Map<string, EventRewardReversalRecord>();
+  private readonly capUsage = new Map<string, number>();
+  private readonly capPools: readonly CapPoolDefinition[];
+  private readonly store: LedgerStore | undefined;
+
+  constructor(readonly ownerUser: string, capPools: readonly CapPoolDefinition[] = [], store?: LedgerStore) {
+    if (!ownerUser.trim()) throw new RewardServiceError('INVALID_INPUT', 'event reward ledger ownerUser is required');
+    this.capPools = capPools;
+    this.store = store;
+    if (store) {
+      const state = store.read();
+      for (const record of state.eventRewardLedger.filter((entry) => entry.ownerUser === ownerUser)) this.records.set(record.idempotencyKey, record);
+      for (const reversal of state.eventRewardReversals.filter((entry) => entry.ownerUser === ownerUser)) this.reversals.set(reversal.idempotencyKey, reversal);
+      for (const usage of state.eventRewardCapUsage.filter((entry) => entry.ownerUser === ownerUser)) this.capUsage.set(`${usage.poolId}|${usage.periodKey}`, usage.consumedAmount);
+    }
+  }
+
+  private persist(): void {
+    if (!this.store) return;
+    this.store.update((state) => {
+      state.eventRewardLedger = [...state.eventRewardLedger.filter((entry) => entry.ownerUser !== this.ownerUser), ...this.records.values()];
+      state.eventRewardReversals = [...state.eventRewardReversals.filter((entry) => entry.ownerUser !== this.ownerUser), ...this.reversals.values()];
+      state.eventRewardCapUsage = [...state.eventRewardCapUsage.filter((entry) => entry.ownerUser !== this.ownerUser), ...[...this.capUsage.entries()].map(([key, consumedAmount]) => { const separator = key.indexOf('|'); return { ownerUser: this.ownerUser, poolId: key.slice(0, separator), periodKey: key.slice(separator + 1), consumedAmount }; })];
+    });
+  }
+
+  record(candidate: PaymentEventRewardCandidate | undefined, event: PaymentEvent, idempotencyKey: string): EventRewardLedgerRecord {
+    if (!idempotencyKey.trim()) throw new RewardServiceError('IDEMPOTENCY_REQUIRED', 'event reward idempotencyKey is required');
+    if (!candidate) throw new RewardServiceError('INELIGIBLE_EVENT_REWARD', 'event reward candidate is not eligible');
+    if (candidate.eventId !== event.id) throw new RewardServiceError('INVALID_INPUT', 'candidate eventId does not match event');
+    const reward = candidate.reward;
+    const rewardSpecFingerprint = JSON.stringify(reward);
+    const existing = this.records.get(idempotencyKey);
+    if (existing) {
+      if (existing.eventId !== candidate.eventId || existing.ruleId !== candidate.ruleId || existing.ruleVersion !== candidate.ruleVersion || existing.evidenceId !== candidate.evidenceId || existing.sponsor !== candidate.sponsor || existing.benefitGroup !== candidate.benefitGroup || existing.rewardSpecFingerprint !== rewardSpecFingerprint) throw new RewardServiceError('IDEMPOTENCY_CONFLICT', 'event reward idempotencyKey already belongs to a different reward');
+      return existing;
+    }
+    if (!reward) throw new RewardServiceError('REWARD_NOT_CALCULABLE', 'event reward candidate has no calculable RewardSpec');
+    let amountMinor: number;
+    let currency = event.amount.currency;
+    if (reward?.rateBps !== undefined && Number.isSafeInteger(reward.rateBps) && reward.rateBps >= 0) {
+      amountMinor = Math.floor((event.amount.amountMinor * reward.rateBps) / 10_000);
+    } else if (reward?.amountMinor !== undefined && Number.isSafeInteger(reward.amountMinor) && reward.amountMinor >= 0) {
+      amountMinor = reward.amountMinor;
+      if (reward.currency !== undefined) currency = reward.currency;
+    } else {
+      throw new RewardServiceError('REWARD_NOT_CALCULABLE', 'event reward candidate has no calculable RewardSpec');
+    }
+    let capUsage: EventRewardLedgerRecord['capUsage'];
+    if (candidate.capPoolId !== undefined) {
+      const cap = this.capPools.find((pool) => pool.id === candidate.capPoolId);
+      if (!cap) throw new RewardServiceError('CAP_NOT_FOUND', `event reward cap pool ${candidate.capPoolId} is not registered`);
+      if (cap.metric !== 'reward') throw new RewardServiceError('CAP_METRIC_UNSUPPORTED', 'event reward cap must use reward metric');
+      if (cap.currency !== undefined && cap.currency !== event.amount.currency) throw new RewardServiceError('CAP_CURRENCY_MISMATCH', 'event reward cap currency does not match event currency');
+      if (cap.timezone === undefined) throw new RewardServiceError('CAP_TIMEZONE_REQUIRED', 'event reward cap requires an explicit timezone');
+      if (cap.period !== 'calendar_month') throw new RewardServiceError('CAP_PERIOD_AMBIGUOUS', 'event reward cap period requires event-specific cycle facts');
+      let periodKey: string;
+      try {
+        const parts = new Intl.DateTimeFormat('en-US', { timeZone: cap.timezone, year: 'numeric', month: '2-digit' }).formatToParts(new Date(event.occurredAt));
+        const year = parts.find((part) => part.type === 'year')?.value;
+        const month = parts.find((part) => part.type === 'month')?.value;
+        if (!year || !month) throw new Error('missing period parts');
+        periodKey = `${year}-${month}`;
+      } catch {
+        throw new RewardServiceError('CAP_TIMEZONE_REQUIRED', 'event reward cap timezone is invalid');
+      }
+      const usageKey = `${cap.id}|${periodKey}`;
+      const used = this.capUsage.get(usageKey) ?? 0;
+      const remaining = Math.max(0, cap.limit - used);
+      if (remaining <= 0) throw new RewardServiceError('CAP_EXHAUSTED', 'event reward cap has no remaining allowance');
+      amountMinor = Math.min(amountMinor, remaining);
+      capUsage = { poolId: cap.id, periodKey, consumedAmount: amountMinor };
+    }
+    const desired: EventRewardLedgerRecord = { idempotencyKey, ownerUser: this.ownerUser, eventId: candidate.eventId, eventAmount: event.amount, ruleId: candidate.ruleId, ruleVersion: candidate.ruleVersion, evidenceId: candidate.evidenceId, sponsor: candidate.sponsor, benefitGroup: candidate.benefitGroup, reward: { amountMinor, currency }, rewardSpecFingerprint, ...(capUsage ? { capUsage } : {}) };
+    this.records.set(idempotencyKey, desired);
+    if (capUsage) this.capUsage.set(`${capUsage.poolId}|${capUsage.periodKey}`, (this.capUsage.get(`${capUsage.poolId}|${capUsage.periodKey}`) ?? 0) + capUsage.consumedAmount);
+    this.persist();
+    return desired;
+  }
+
+  list(): readonly EventRewardLedgerRecord[] { return [...this.records.values()]; }
+
+  /** Reverses exactly one evidenced original reward, without discovering or allocating relations. */
+  reverse(event: PaymentEvent, idempotencyKey: string): EventRewardReversalRecord {
+    if (!idempotencyKey.trim()) throw new RewardServiceError('IDEMPOTENCY_REQUIRED', 'event reward reversal idempotencyKey is required');
+    if (event.kind !== 'refund' && event.kind !== 'reversal') throw new RewardServiceError('INVALID_INPUT', 'event reward reversal requires a refund or reversal event');
+    const existing = this.reversals.get(idempotencyKey);
+    const relatedIds = event.relations?.refunds;
+    if (!relatedIds || relatedIds.length !== 1 || !relatedIds[0]) throw new RewardServiceError('INVALID_REFUND_RELATION', 'refund must explicitly reference exactly one original event');
+    const originalEventId = relatedIds[0];
+    if (existing) {
+      if (existing.eventId !== event.id || existing.originalEventId !== originalEventId || existing.refundedAmount.amountMinor !== event.amount.amountMinor || existing.refundedAmount.currency !== event.amount.currency) throw new RewardServiceError('IDEMPOTENCY_CONFLICT', 'event reward reversal idempotencyKey already belongs to a different refund');
+      return existing;
+    }
+    const originals = [...this.records.values()].filter((record) => record.eventId === originalEventId);
+    if (!originals.length) throw new RewardServiceError('ORIGINAL_REWARD_NOT_FOUND', 'refund relation does not identify a recorded reward');
+    if (originals.length !== 1) throw new RewardServiceError('ORIGINAL_REWARD_AMBIGUOUS', 'refund relation identifies more than one recorded reward');
+    const original = originals[0]!;
+    if (event.amount.currency !== original.eventAmount.currency || event.amount.amountMinor <= 0) throw new RewardServiceError('INVALID_REFUND', 'refund amount must be positive and match the original event currency');
+    const priorRefunded = [...this.reversals.values()].filter((record) => record.originalEventId === originalEventId).reduce((sum, record) => sum + record.refundedAmount.amountMinor, 0);
+    const remainingEventAmount = original.eventAmount.amountMinor - priorRefunded;
+    if (event.amount.amountMinor > remainingEventAmount) throw new RewardServiceError('OVER_REFUND', 'refund exceeds the unreversed original event amount');
+    const priorRewardReversed = [...this.reversals.values()].filter((record) => record.originalEventId === originalEventId).reduce((sum, record) => sum + Math.abs(record.reward.amountMinor), 0);
+    const remainingReward = Math.max(0, original.reward.amountMinor - priorRewardReversed);
+    const finalRefund = event.amount.amountMinor === remainingEventAmount;
+    const rewardAmount = finalRefund ? remainingReward : Math.min(remainingReward, Math.floor((original.reward.amountMinor * event.amount.amountMinor) / original.eventAmount.amountMinor));
+    let capUsage: EventRewardReversalRecord['capUsage'];
+    if (original.capUsage) {
+      const priorCapReleased = [...this.reversals.values()].filter((record) => record.originalEventId === originalEventId && record.capUsage?.poolId === original.capUsage?.poolId).reduce((sum, record) => sum + Math.abs(record.capUsage?.consumedAmount ?? 0), 0);
+      const remainingCap = Math.max(0, original.capUsage.consumedAmount - priorCapReleased);
+      const release = finalRefund ? remainingCap : Math.min(remainingCap, Math.floor((original.capUsage.consumedAmount * event.amount.amountMinor) / original.eventAmount.amountMinor));
+      capUsage = { poolId: original.capUsage.poolId, periodKey: original.capUsage.periodKey, consumedAmount: -release };
+      const usageKey = `${capUsage.poolId}|${capUsage.periodKey}`;
+      this.capUsage.set(usageKey, Math.max(0, (this.capUsage.get(usageKey) ?? 0) - release));
+    }
+    const desired: EventRewardReversalRecord = { idempotencyKey, ownerUser: this.ownerUser, eventId: event.id, originalEventId, refundedAmount: event.amount, ruleId: original.ruleId, ruleVersion: original.ruleVersion, evidenceId: original.evidenceId, sponsor: original.sponsor, benefitGroup: original.benefitGroup, reward: { amountMinor: -rewardAmount, currency: original.reward.currency }, ...(capUsage ? { capUsage } : {}) };
+    this.reversals.set(idempotencyKey, desired);
+    this.persist();
+    return desired;
+  }
+
+  listReversals(): readonly EventRewardReversalRecord[] { return [...this.reversals.values()]; }
 }
 
 type FactResolution =
@@ -139,13 +336,13 @@ function resolveFieldFact(field: string, tx: TransactionTuple, context: Evaluati
   return { kind: 'missing', reason: `unsupported field ${field}` };
 }
 
-type PredicateOutcome = {
+export type PredicateOutcome = {
   matched: boolean;
   missing: string[];
   conflicts: string[];
 };
 
-function evaluatePredicate(predicate: Predicate, tx: TransactionTuple, context: EvaluationContext): PredicateOutcome {
+export function evaluatePredicate(predicate: Predicate, tx: TransactionTuple, context: EvaluationContext): PredicateOutcome {
   if (predicate.op === 'NOT') {
     const child = evaluatePredicate(predicate.rule, tx, context);
     if (child.conflicts.length) return { matched: false, missing: [], conflicts: child.conflicts };
@@ -296,6 +493,14 @@ export function evaluateOffer(
     }
   } else if (rule.routeId !== undefined) {
     return base;
+  }
+  if (rule.eventRule !== undefined || rule.eventChainRule !== undefined) {
+    const path = context.paymentEvents;
+    if (!path) return { ...base, status: 'unknown', ruleId: rule.id, ruleVersion: rule.version, unknownReasons: ['recommendation payment event path is missing'], diagnostics: [diagnostic('missing_required_fact', 'context.paymentEvents', ['target event and explicit source events'], 'ask_user')] };
+    if (path.target.amount.amountMinor !== tx.amount.amountMinor || path.target.amount.currency !== tx.amount.currency || path.target.occurredAt !== tx.occurredAt) return { ...base, status: 'unknown', ruleId: rule.id, ruleVersion: rule.version, unknownReasons: ['target payment event does not match recommendation transaction'], diagnostics: [diagnostic('invalid_input', 'context.paymentEvents.target', ['target event amount and timestamp'], 'rebuild_payment_event_path')] };
+    const eventMatch = rule.eventRule !== undefined ? matchPaymentEvent(rule.eventRule, path.target) : matchPaymentEventChain(rule.eventChainRule!, path.target, path.sourceEvents);
+    if (eventMatch.status === 'no_match') return base;
+    if (eventMatch.status === 'unknown') return { ...base, status: 'unknown', ruleId: rule.id, ruleVersion: rule.version, unknownReasons: [...eventMatch.reasons], diagnostics: [diagnostic('missing_required_fact', 'context.paymentEvents', ['complete evidenced payment path'], 'ask_user')] };
   }
   if (rule.status !== 'active') {
     return { ...base, status: rule.status === 'stale' ? 'stale' : 'needs_review', ruleId: rule.id, unknownReasons: [`rule status is ${rule.status}`], diagnostics: [diagnostic(rule.status === 'stale' ? 'stale_rule' : 'needs_review', 'rule.status', ['rule confirmation'], 'refresh_or_confirm_offer')] };

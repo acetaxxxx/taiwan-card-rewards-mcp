@@ -1,7 +1,7 @@
 # 使用者安裝與 Skill 分發標準作業程序 (SOP)
 
 **文件狀態**：正式營運與分發規範 (Normative Distribution & Installation SOP)
-**適用版本**：v0.9.0+ (15-Tool MCP Contract)
+**適用範圍**：canonical 19-tool MCP contract（release tag 僅供部署管理）
 **語言**：繁體中文
 **遵循規範**：[`CONTEXT.md`](../../CONTEXT.md), [ADR 0001](../adr/0001-independent-card-rewards-domain-and-agent-supplied-rules.md), [ADR 0003](../adr/0003-complete-initial-mcp-surface-with-layered-trust-gates.md), [ADR 0004](../adr/0004-generic-benefit-status-and-schema-v2.md), [ADR 0005](../adr/0005-payment-route-opportunity-stacking.md), [ADR 0006](../adr/0006-multi-component-reward-ledger-and-cap-attribution.md), [Agent Research Skill SOP](agent-research-skill-and-preflight-sop.md), [Usage Guide](usage-guide.md).
 
@@ -14,9 +14,9 @@
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
 │              Canonical Source of Truth (本專案唯一權威版本)                │
-│  - docs/agents/agent-research-skill-and-preflight-sop.md (完整 SOP)     │
-│  - docs/agents/card-rewards-skill-template.md (標準 Skill 模板)          │
-│  - 規格版本：v0.9.0 (15 Tools) | 語系：繁體中文 (zh-Hant-TW)              │
+│  - docs/agents/taiwan-card-rewards-skill/SKILL.md (Agent 入口)           │
+│  - docs/agents/taiwan-card-rewards-skill/references/ (詳細 contract)     │
+│  - canonical contract：19 tools | 語系：繁體中文 (zh-Hant-TW)             │
 └────────────────────────────────────┬────────────────────────────────────┘
                                      │
            ┌─────────────────────────┴─────────────────────────┐
@@ -30,7 +30,7 @@
 ```
 
 ### 1.1 Canonical Source 原則
-1. **單一事實來源 (Single Source of Truth)**：本專案程式庫內的 `docs/agents/card-rewards-skill-template.md` 與 `docs/agents/agent-research-skill-and-preflight-sop.md` 為全系統唯一具有規範效力的 Canonical Skill 定義。
+1. **單一事實來源 (Single Source of Truth)**：Agent 入口是 [`docs/agents/taiwan-card-rewards-skill/SKILL.md`](taiwan-card-rewards-skill/SKILL.md)，詳細 contract 是其 [`references/mcp-tools.md`](taiwan-card-rewards-skill/references/mcp-tools.md)；模板與長版研究 SOP 是可移植輔助文件，不得覆蓋入口或 source contract。
 2. **免除自行重構負擔**：使用者或整合商**不需要、亦不應被要求**自行從零編寫或推導完整 Skill 邏輯；安裝時應優先直接引用或複製 Canonical 檔案。
 
 ### 1.2 Local Adapter 轉接與在地化規範
@@ -41,7 +41,7 @@
 > 任何 Local Adapter 檔案檔頭必須包含以下機器可讀註記：
 > - `sourceVersion`: 衍生之 Canonical 版本（如 `0.9.0`）。
 > - `sourceHash`: 衍生時 Canonical 檔案之 SHA-256 雜湊值。
-> - `mcpContractVersion`: 對應之 MCP 合約版本（如 `0.9.0` / 15 Tools）。
+> - `mcpContractVersion`: 對應之 canonical MCP contract；不要在此欄位硬編 public tool count。
 > - `lastVerifiedAt`: 最近一次通過健康檢查之 ISO 8601 時間戳記。
 > - `canonicalLink`: 指向本專案 Canonical 文件的絕對或相對連結。
 
@@ -89,7 +89,7 @@ mkdir -p /path/to/my-card-rewards-data
 直接透過 `npx` 執行指定發行版本（npm 會自動觸發 `prepare` 編譯）：
 
 ```bash
-npx --yes github:acetaxxxx/taiwan-card-rewards-mcp#v0.9.0 \
+npx --yes github:acetaxxxx/taiwan-card-rewards-mcp#v0.10.0 \
   --data-dir /path/to/my-card-rewards-data \
   --user default-user
 ```
@@ -113,7 +113,7 @@ node dist/cli.js --data-dir /path/to/my-card-rewards-data --user default-user
       "command": "npx",
       "args": [
         "--yes",
-        "github:acetaxxxx/taiwan-card-rewards-mcp#v0.9.0",
+        "github:acetaxxxx/taiwan-card-rewards-mcp#v0.10.0",
         "--data-dir",
         "/absolute/path/to/my-card-rewards-data",
         "--user",
@@ -125,9 +125,9 @@ node dist/cli.js --data-dir /path/to/my-card-rewards-data --user default-user
 ```
 
 ### 步驟 3：載入與安裝 Canonical Skill
-1. 將本專案的 [`docs/agents/card-rewards-skill-template.md`](card-rewards-skill-template.md) 內容複製至您的 Agent 技能庫中（例如 AionCore Skills 或 Cursor Rules）。
+1. 將本專案的 [`docs/agents/taiwan-card-rewards-skill/SKILL.md`](taiwan-card-rewards-skill/SKILL.md) 內容複製至您的 Agent 技能庫中（例如 AionCore Skills 或 Cursor Rules）。
 2. 若您的 Agent 需要專用名稱，可在檔頭指定 `name: card-rewards-assistant`。
-3. 確保 Agent 能讀取 [`docs/agents/agent-research-skill-and-preflight-sop.md`](agent-research-skill-and-preflight-sop.md) 作為標準作業流程參考。
+3. 確保 Agent 能讀取 [`docs/agents/taiwan-card-rewards-skill/references/mcp-tools.md`](taiwan-card-rewards-skill/references/mcp-tools.md) 與相關 workflow；研究細節可參考 [`docs/agents/agent-research-skill-and-preflight-sop.md`](agent-research-skill-and-preflight-sop.md)。
 
 ---
 
@@ -143,10 +143,10 @@ Agent 在接收到安裝或初始化指令時，應依照以下 Checklist 進行
 - [ ] 2. 伺服器握手 (Handshake Validation)
       - 發送 `initialize` JSON-RPC 請求。
       - 驗證回應中的 `protocolVersion` 為 `2024-11-05`。
-      - 驗證 `serverInfo.name` 為 `taiwan-card-rewards-mcp`，`serverInfo.version` 為 `0.9.0` (或更新相容版本)。
+      - 驗證 `serverInfo.name` 為 `taiwan-card-rewards-mcp`，`serverInfo.version` 為 `0.10.0` (或更新相容版本)。
 
-- [ ] 3. 15 項公開工具檢核 (15-Tool Contract Verification)
-      - 發送 `tools/list` 請求，確認以下 15 項工具完整存在：
+- [ ] 3. 19 項 canonical 公開工具檢核 (19-Tool Contract Verification)
+      - 發送 `tools/list` 請求，確認 [`taiwan-card-rewards-skill/references/mcp-tools.md`](taiwan-card-rewards-skill/references/mcp-tools.md) 的 19 項工具完整存在：
         [ ] recommendation_preflight (唯讀，支援 preflight 診斷)
         [ ] recommend (唯讀，支援分頁與有界推薦)
         [ ] calculate_reward (唯讀，純數學計算)
@@ -157,11 +157,15 @@ Agent 在接收到安裝或初始化指令時，應依照以下 Checklist 進行
         [ ] remaining_caps (唯讀，上限餘額查詢)
         [ ] get_user_benefit_status (唯讀，權益/登錄狀態)
         [ ] list_payment_routes (唯讀，支付路徑清冊查詢)
+        [ ] register_payment_account (寫入，wallet/bank opaque identity)
+        [ ] list_payment_accounts (唯讀，account identity 查詢)
         [ ] register_card (寫入，卡片登記)
         [ ] upsert_offer (寫入，快照與規則建立)
         [ ] upsert_payment_route (寫入，支付路徑拓撲與扣款設定)
         [ ] upsert_user_benefit_status (寫入，權益與登錄確認)
         [ ] record_transaction (寫入，實際交易記帳與退款)
+        [ ] record_event_reward (寫入，event rule/chain eligibility)
+        [ ] reverse_event_reward (寫入，explicit event refund reversal)
 
 - [ ] 4. 聯通性健康檢查 (Connectivity Ping)
       - 呼叫 `list_cards`，預期回傳空陣列 `[]`（初始狀態）或已登記卡片。
@@ -183,7 +187,7 @@ Agent 在接收到安裝或初始化指令時，應依照以下 Checklist 進行
    cp -r /path/to/my-card-rewards-data /path/to/my-card-rewards-data.backup-$(date +%Y%m%d%H%M%S)
    ```
 3. **更新版本宣告**：將啟動命令或設定檔中的版本 tag 指向新版本（例如 `#v0.10.0`）。
-4. **重新執行健康檢查**：重跑第 4 節的 15 項工具驗證與 `recommendation_preflight`。
+4. **重新執行健康檢查**：重跑第 4 節的 19 項工具驗證與 `recommendation_preflight`。
 
 ### 5.2 回滾程序 (Rollback Procedure)
 若升級後遇到相容性問題或異常：

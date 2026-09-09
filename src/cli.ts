@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import * as readline from 'node:readline';
+import { createRequire } from 'node:module';
 import { parseStartupArgs, StartupContractError } from './startup.js';
 import { FileStore, contentHash, type LedgerStore } from './store.js';
 import { RewardService } from './service.js';
@@ -8,7 +9,9 @@ import { mcpInstructions, mcpTools } from './mcp-contract.js';
 import { evaluateOffer, rankCards } from './evaluator.js';
 import { validateUserBenefitInput, validateContext, validateToolArgs, validateRecommendationTransaction, validateTransaction, validateCard, validateCapPool, validateConfirmation, validateRule, validateSnapshot } from './validation.js';
 import { projectPage, ProjectionTooLargeError } from './projections.js';
-import type { CardDescriptor, RankingEntry } from './types.js';
+import type { CardDescriptor, RankingEntry, PaymentPathRequest } from './types.js';
+
+const packageJson = createRequire(import.meta.url)('../package.json') as { version: string };
 
 type JsonRpc = { jsonrpc?: string; id?: string | number | null; method?: string; params?: Record<string, unknown> };
 type Reply = { jsonrpc: '2.0'; id: string | number | null; result?: unknown; error?: { code: number; message: string; data?: unknown } };
@@ -61,7 +64,7 @@ async function main(): Promise<void> {
     try { request = JSON.parse(line) as JsonRpc; } catch { failure(null, -32700, 'Parse error'); continue; }
     if (request.method === 'notifications/initialized' || request.method?.startsWith('notifications/')) continue;
     try {
-      if (request.method === 'initialize') reply(request.id, { protocolVersion: '2024-11-05', capabilities: { tools: {} }, serverInfo: { name: 'taiwan-card-rewards-mcp', version: '0.9.0' }, instructions: mcpInstructions });
+      if (request.method === 'initialize') reply(request.id, { protocolVersion: '2024-11-05', capabilities: { tools: {} }, serverInfo: { name: 'taiwan-card-rewards-mcp', version: packageJson.version }, instructions: mcpInstructions });
       else if (request.method === 'tools/list') reply(request.id, { tools: mcpTools.map((tool) => ({ name: tool.name, description: tool.description, inputSchema: tool.inputSchema })) });
       else if (request.method === 'tools/call') reply(request.id, toolResult(await callTool(service, request.params ?? {})));
       else failure(request.id, -32601, `Method not found: ${request.method ?? ''}`);
@@ -79,6 +82,11 @@ async function callTool(service: RewardService, params: Record<string, unknown>)
   const rawArgs = params.arguments ?? {};
   rejectSensitiveFields(rawArgs);
   const args = validateToolArgs(name, rawArgs);
+  if (name === 'recommend' && args.kind !== undefined) {
+    if (args.kind !== 'payment_path' || !args.payment_path || typeof args.payment_path !== 'object' || Array.isArray(args.payment_path) || args.transaction !== undefined) throw new RewardServiceError('INVALID_INPUT', 'recommend requires exactly one card or payment_path branch');
+    const allowedPath = ['amount', 'merchant', 'mcc', 'country', 'channel', 'paymentMethod', 'asOf', 'routeIds', 'limit', 'maxHops', 'maxEvents', 'maxBranchesPerNode'];
+    for (const key of Object.keys(args.payment_path as object)) if (!allowedPath.includes(key)) throw new RewardServiceError('UNKNOWN_FIELD', `recommend.payment_path contains unsupported field: ${key}`);
+  }
   const paged = (value: unknown[], projection: string | undefined, page: number | undefined, limit: number | undefined, sortKey: (item: unknown) => string): unknown => {
     if (projection !== undefined && !['summary', 'detail', 'calculation', 'audit'].includes(projection)) throw new RewardServiceError('INVALID_INPUT', 'projection is invalid');
     const projected = projection === 'summary' ? value.map((item) => {
@@ -94,11 +102,25 @@ async function callTool(service: RewardService, params: Record<string, unknown>)
     case 'register_card': return service.registerCard(validateCard(args.card));
     case 'list_cards': { const rows = service.listCards(); return (args.limit !== undefined || args.page !== undefined || args.projection !== undefined) ? paged(rows, typeof args.projection === 'string' ? args.projection : undefined, typeof args.page === 'number' ? args.page : undefined, typeof args.limit === 'number' ? args.limit : undefined, (item) => String((item as CardDescriptor).id)) : rows; }
     case 'upsert_offer': return service.upsertOffer(validateSnapshot(args.snapshot), validateRule(args.rule), args.confirmation !== undefined ? validateConfirmation(args.confirmation) : undefined, args.capPools === undefined ? undefined : (Array.isArray(args.capPools) ? args.capPools.map(validateCapPool) : []), args.merchant as any);
-    case 'recommend': { const recommendation = parseRecommendationInput(args); const hasPage = args.page !== undefined; const rows = service.recommend(recommendation.transaction, hasPage ? 20 : (typeof args.limit === 'number' ? args.limit : 10), recommendation.options); return hasPage ? paged(rows, undefined, typeof args.page === 'number' ? args.page : undefined, typeof args.limit === 'number' ? args.limit : undefined, (item) => String((item as RankingEntry).cardId)) : rows; }
+    case 'recommend': {
+      if (args.kind === 'payment_path' && args.payment_path && typeof args.payment_path === 'object') {
+        const body = args.payment_path as Record<string, unknown>;
+        return service.recommendPaymentPaths({ amount: body.amount as PaymentPathRequest['amount'], ...(typeof body.merchant === 'string' ? { merchant: body.merchant } : {}), ...(typeof body.mcc === 'string' ? { mcc: body.mcc } : {}), ...(typeof body.country === 'string' ? { country: body.country } : {}), ...(typeof body.channel === 'string' ? { channel: body.channel } : {}), ...(typeof body.paymentMethod === 'string' ? { paymentMethod: body.paymentMethod } : {}), ...(typeof body.asOf === 'string' ? { asOf: body.asOf } : {}), ...(Array.isArray(body.routeIds) ? { routeIds: body.routeIds as string[] } : {}), ...(typeof body.limit === 'number' ? { limit: body.limit } : {}), ...(typeof body.maxHops === 'number' ? { maxHops: body.maxHops } : {}), ...(typeof body.maxEvents === 'number' ? { maxEvents: body.maxEvents } : {}), ...(typeof body.maxBranchesPerNode === 'number' ? { maxBranchesPerNode: body.maxBranchesPerNode } : {}) });
+      }
+      const recommendation = parseRecommendationInput(args); const hasPage = args.page !== undefined; const rows = service.recommend(recommendation.transaction, hasPage ? 20 : (typeof args.limit === 'number' ? args.limit : 10), recommendation.options); return hasPage ? paged(rows, undefined, typeof args.page === 'number' ? args.page : undefined, typeof args.limit === 'number' ? args.limit : undefined, (item) => String((item as RankingEntry).cardId)) : rows;
+    }
     case 'recommendation_preflight': return service.preflightRecommendation(validateRecommendationTransaction(args.transaction), { ...(args.context === undefined ? {} : { context: validateContext(args.context) }) });
     case 'upsert_payment_route': return service.upsertPaymentRoute(args.route);
     case 'list_payment_routes': { const rows = [...service.listPaymentRoutes()]; return (args.limit !== undefined || args.page !== undefined || args.projection !== undefined) ? paged(rows, typeof args.projection === 'string' ? args.projection : undefined, typeof args.page === 'number' ? args.page : undefined, typeof args.limit === 'number' ? args.limit : undefined, (item) => String((item as { id: string }).id)) : rows; }
+    case 'register_payment_account': return service.upsertPaymentAccount(args.account);
+    case 'list_payment_accounts': { const rows = [...service.listPaymentAccounts()]; return (args.limit !== undefined || args.page !== undefined || args.projection !== undefined) ? paged(rows, typeof args.projection === 'string' ? args.projection : undefined, typeof args.page === 'number' ? args.page : undefined, typeof args.limit === 'number' ? args.limit : undefined, (item) => String((item as { id: string }).id)) : rows; }
+    case 'recommend_payment_paths_v1': return service.recommendPaymentPaths({ amount: args.amount as PaymentPathRequest['amount'], ...(typeof args.merchant === 'string' ? { merchant: args.merchant } : {}), ...(typeof args.mcc === 'string' ? { mcc: args.mcc } : {}), ...(typeof args.country === 'string' ? { country: args.country } : {}), ...(typeof args.channel === 'string' ? { channel: args.channel } : {}), ...(typeof args.paymentMethod === 'string' ? { paymentMethod: args.paymentMethod } : {}), ...(typeof args.asOf === 'string' ? { asOf: args.asOf } : {}), ...(Array.isArray(args.routeIds) ? { routeIds: args.routeIds as string[] } : {}), ...(typeof args.limit === 'number' ? { limit: args.limit } : {}), ...(Array.isArray(args.eligibilityFacts) ? { eligibilityFacts: args.eligibilityFacts as PaymentPathRequest['eligibilityFacts'] } : {}) });
     case 'record_transaction': return service.recordTransaction(validateTransaction(args.transaction));
+    case 'record_event_reward':
+    case 'record_event_reward_v2': return service.recordValidatedEventReward(args);
+    case 'record_event_reward_v1': throw new RewardServiceError('MIGRATION_REQUIRED', 'record_event_reward_v1 cannot be safely converted without an event rule; call record_event_reward with exactly one rule or chainRule');
+    case 'reverse_event_reward':
+    case 'reverse_event_reward_v1': return service.reverseEventReward(args);
     case 'remaining_caps': { const rows = service.remainingCaps(String(args.cardId), typeof args.asOf === 'string' ? args.asOf : undefined); return (args.limit !== undefined || args.page !== undefined || args.projection !== undefined) ? paged(rows, typeof args.projection === 'string' ? args.projection : undefined, typeof args.page === 'number' ? args.page : undefined, typeof args.limit === 'number' ? args.limit : undefined, (item) => String((item as { usageKey: string }).usageKey)) : rows; }
     case 'get_user_benefit_status': {
       const kind = args.kind;

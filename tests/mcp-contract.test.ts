@@ -97,9 +97,11 @@ describe("MCP Contract and Agent Boundary", () => {
   });
   it("publishes the public contract distinctions that validators enforce", () => {
     const recommend = mcpTools.find((tool) => tool.name === "recommend")!.inputSchema as any;
-    expect(recommend.properties.transaction.required).not.toContain("cardId");
-    expect(recommend.properties.cardIds.items.type).toBe("string");
-    expect(recommend.properties.merchant.additionalProperties).toBe(false);
+    expect(recommend.oneOf).toHaveLength(2);
+    const cardBranch = recommend.oneOf.find((branch: any) => branch.properties?.transaction);
+    expect(cardBranch.properties.transaction.required).not.toContain("cardId");
+    expect(cardBranch.properties.cardIds.items.type).toBe("string");
+    expect(cardBranch.properties.merchant.additionalProperties).toBe(false);
 
     const calculate = mcpTools.find((tool) => tool.name === "calculate_reward")!.inputSchema as any;
     expect(calculate.properties.transaction.properties.fx.required).toEqual(expect.arrayContaining(["provider", "rateType"]));
@@ -113,8 +115,15 @@ describe("MCP Contract and Agent Boundary", () => {
     expect(upsertOffer.properties.merchant.additionalProperties).toBe(false);
     expect(upsertOffer.properties.merchant.properties.canonicalNameLocale.const).toBe("zh-Hant-TW");
     expect(upsertOffer.properties.merchant.properties.channels.items.enum).toEqual(["in_store", "online"]);
+
+    const upsertRoute = mcpTools.find((tool) => tool.name === "upsert_payment_route")!.inputSchema as any;
+    const edge = upsertRoute.properties.route.properties.edges.items;
+    expect(edge.additionalProperties).toBe(false);
+    expect(edge.properties.direction.enum).toEqual(["inbound", "outbound"]);
+    expect(edge.properties.fromMarket.type).toBe("string");
+    expect(edge.properties.toMarket.type).toBe("string");
   });
-  it("exposes all fifteen approved MCP tools with valid schemas in tools/list", async () => {
+  it("exposes all approved MCP tools with valid schemas in tools/list", async () => {
     const dir = mkdtempSync(join(tmpdir(), "mcp-contract-list-"));
     const client = new McpProcessClient(dir);
     try {
@@ -123,14 +132,14 @@ describe("MCP Contract and Agent Boundary", () => {
       expect(initRes.result).toBeDefined();
       expect(initRes.result.protocolVersion).toBe("2024-11-05");
       expect(initRes.result.serverInfo.name).toBe("taiwan-card-rewards-mcp");
-      expect(initRes.result.serverInfo.version).toBe("0.9.0");
+      expect(initRes.result.serverInfo.version).toBe("0.10.0");
       expect(initRes.result.instructions).toContain("single-user durable ledger");
       expect(initRes.result.instructions).toContain("fail-closed");
 
       // 2. tools/list
       const listRes = await client.send({ id: 2, method: "tools/list" });
       expect(listRes.result).toBeDefined();
-      expect(listRes.result.tools).toHaveLength(15);
+      expect(listRes.result.tools).toHaveLength(19);
 
       const toolNames = listRes.result.tools.map((t: any) => t.name).sort();
       const expectedNames = [
@@ -141,7 +150,11 @@ describe("MCP Contract and Agent Boundary", () => {
         "recommendation_preflight",
         "upsert_payment_route",
         "list_payment_routes",
+        "register_payment_account",
+        "list_payment_accounts",
         "record_transaction",
+        "record_event_reward",
+        "reverse_event_reward",
         "register_card",
         "remaining_caps",
         "get_user_benefit_status",
@@ -151,14 +164,15 @@ describe("MCP Contract and Agent Boundary", () => {
         "upsert_offer",
       ].sort();
       expect(toolNames).toEqual(expectedNames);
-      expect(mcpTools).toHaveLength(15);
+      expect(mcpTools).toHaveLength(19);
 
       // Verify schema properties of all tools
       for (const tool of listRes.result.tools) {
         expect(tool.name).toBeTypeOf("string");
         expect(tool.description).toBeTypeOf("string");
         expect(tool.inputSchema).toBeTypeOf("object");
-        expect(tool.inputSchema.type).toBe("object");
+        if (tool.name === "recommend") expect(tool.inputSchema.oneOf).toHaveLength(2);
+        else expect(tool.inputSchema.type).toBe("object");
       }
     } finally {
       await client.close();
@@ -189,6 +203,13 @@ describe("MCP Contract and Agent Boundary", () => {
         params: { name: "non_existent_tool", arguments: {} },
       });
       expect(unknownToolRes.error?.message).toBe("TOOL_NOT_FOUND");
+
+      const legacyEventRes = await client.send({
+        id: 12,
+        method: "tools/call",
+        params: { name: "record_event_reward_v1", arguments: { event: {}, candidate: {}, idempotencyKey: "legacy" } },
+      });
+      expect(legacyEventRes.error?.message).toBe("MIGRATION_REQUIRED");
     } finally {
       await client.close();
       rmSync(dir, { recursive: true, force: true });

@@ -1,67 +1,54 @@
-# 範例：過期外幣匯率查核與快照補齊 (Stale FX Recovery)
+# Example: stale FX recovery
 
-**情境**：使用者在日本 Bic Camera 實體店購買 ¥15,000 JPY 商品，詢問用卡推薦。
+情境：日本 Bic Camera ¥15,000 的 planned card payment 使用過期匯率。以下
+ID/URL 是 illustrative，不代表任何實際 provider。
 
----
-
-## Step 1: Pre-flight 提示缺少匯率快照
-
-Agent 呼叫 `recommendation_preflight`：
-```json
-{
-  "amount": 15000,
-  "currency": "JPY",
-  "merchantName": "Bic Camera"
-}
-```
-
-**MCP 回傳結果**：
-```json
-{
-  "ready": false,
-  "requiredActions": ["refresh_external_data"],
-  "diagnostics": [
-    {
-      "code": "MISSING_FX_SNAPSHOT",
-      "message": "外幣 JPY 交易需要有效的 FxSnapshot，系統嚴禁 1:1 匯率回退。"
-    }
-  ]
-}
-```
-
----
-
-## Step 2: Agent Workspace 查詢該 route 的官方匯率
-
-Agent 先依 route 的 `conversionOwner` 與 `rateType` 查詢對應的官方匯率頁、App 顯示或條款快照。例如若該路徑明確指定銀行即期賣出價，才可記錄：
-- 1 JPY = 0.2150 TWD
-- 量化為 PPM：$0.2150 \times 1,000,000 = `215000` PPM。
-
-若路徑是錢包換匯、信用卡儲值或 DCC，不能拿銀行牌告或卡組織匯率代替；Agent 必須先詢問／查證換匯主體與時間。匯率、費用與 DCC markup 都不能以 1.5% 或其他固定值預設。
-
----
-
-## Step 3: 注入 `fxSnapshot` 重跑 Pre-flight
+## 1. Detect stale or missing FX
 
 ```json
 {
-  "amount": 15000,
-  "currency": "JPY",
-  "merchantName": "Bic Camera",
-  "fxSnapshot": {
-    "sourceCurrency": "JPY",
-    "targetCurrency": "TWD",
-    "ratePpm": 215000,
-    "quotedAt": "2026-09-06T12:00:00Z",
-    "source": "BankOfTaiwan_Spot"
+  "transaction": {
+    "cardId": "card_illustrative",
+    "kind": "purchase",
+    "mode": "planned",
+    "occurredAt": "2026-09-06T17:00:00+08:00",
+    "amount": { "amountMinor": 1500000, "currency": "JPY" },
+    "merchant": "Bic Camera",
+    "country": "JP",
+    "channel": "in_store",
+    "paymentMethod": "direct_card"
   }
 }
 ```
 
-**MCP 回傳結果**：只有當 route、FX snapshot 與費用／回饋證據均符合有效期時才可 `ready: true`；否則維持 `ready: false` 並回傳可操作的 `requiredActions`。
+`recommendation_preflight` 的實際回應若顯示 missing/stale FX，Agent 不能
+自行用 1:1 或固定費用繼續。
 
----
+## 2. Refresh outside MCP
 
-## Step 4: 執行 `recommend`
+Agent 查證實際 route 的 conversion owner、rateType、capturedAt、有效期間與
+fee。示意 rate 1 JPY = 0.2150 TWD（`ratePpm: 215000`）：
 
-MCP 只能依已查證的 route fee 與卡片條款計算折合台幣、費用與回饋；若沒有該卡／通道當期費率證據，不得自行扣除 1.5%，也不得宣稱一般海外消費回饋適用於錢包信用卡儲值。
+```json
+{
+  "id": "fx_jpy_twd_refresh_illustrative",
+  "baseCurrency": "JPY",
+  "quoteCurrency": "TWD",
+  "ratePpm": 215000,
+  "capturedAt": "2026-09-06T12:00:00Z",
+  "maxAgeSeconds": 86400,
+  "provider": "official-provider-illustrative",
+  "rateType": "card_scheme",
+  "sourceUrl": "https://official.example.invalid/fx",
+  "contentHash": "sha256:illustrative"
+}
+```
+
+把該 object 放入合法 transaction 的 `fx` 欄位（不是 `fxSnapshot`，也不是
+`quotedAt`），並補齊 country/channel/paymentMethod/routeContext。
+
+## 3. Re-run and stop if unresolved
+
+用更新後的 nested `transaction` 重跑 `recommendation_preflight`，ready 只在
+MCP 判斷所有必要 facts valid 時成立；否則保留 stale/unknown 與 required
+actions。只有 ready 後才呼叫 `recommend`，且只轉述 MCP 的 reward/cap/fee。
