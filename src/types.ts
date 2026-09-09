@@ -603,6 +603,8 @@ export interface PaymentPathCandidate {
   netValue?: Money;
   requiredActions?: readonly string[];
   userEffort?: number;
+  evidenceTier?: number;
+  evidenceFreshness?: string;
   matchedRules: readonly { ruleId: string; ruleVersion: string; component: string; sponsor?: string; benefitGroup?: string; nativeUnit?: string; nativeReward?: Money; reward: Money; capUses?: readonly PlannedRewardCapUse[] }[];
   exclusionReasons: readonly string[];
   status?: 'ready' | 'blocked' | 'no_match';
