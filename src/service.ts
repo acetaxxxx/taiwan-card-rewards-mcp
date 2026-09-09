@@ -723,7 +723,7 @@ export class RewardService {
         const event = events[index]; const next = events[index + 1];
         if (event && next) event.relations = [{ type: 'planned_precedes', eventId: next.planEventId! }, { type: 'planned_enables', eventId: next.planEventId! }];
       }
-      const plannedRewards: { ruleId: string; ruleVersion: string; component: NonNullable<OfferRuleVersion['componentKind']>; reward?: Money; reasons: readonly string[] }[] = [];
+      const plannedRewards: { ruleId: string; ruleVersion: string; component: NonNullable<OfferRuleVersion['componentKind']>; sponsor: string; benefitGroup: string; nativeUnit: string; combination?: OfferRuleVersion['combination']; capPoolRefs?: readonly string[]; reward?: Money; reasons: readonly string[] }[] = [];
       events.forEach((event, index) => {
         const edge = pathEdges?.[index];
         const funding = index === 0 ? route.funding : { kind: 'account' as const, subtype: 'wallet_balance' as const, ...(route.funding.kind === 'account' && route.funding.accountId ? { accountId: route.funding.accountId } : {}) };
@@ -733,7 +733,7 @@ export class RewardService {
           if (rule.status !== 'active' || !rule.eventRule || !rule.componentKind || (rule.routeId !== undefined && rule.routeId !== route.id)) continue;
           const match = matchPaymentEvent(rule.eventRule, plannedEvent);
           if (match.status !== 'matched') {
-            if (match.status === 'unknown') plannedRewards.push({ ruleId: rule.id, ruleVersion: rule.version, component: rule.componentKind, reasons: match.reasons });
+            if (match.status === 'unknown') plannedRewards.push({ ruleId: rule.id, ruleVersion: rule.version, component: rule.componentKind, sponsor: rule.sponsor ?? rule.componentKind, benefitGroup: rule.benefitGroup ?? rule.combination?.groupId ?? 'default', nativeUnit: rule.reward.kind, ...(rule.combination === undefined ? {} : { combination: rule.combination }), ...(rule.capPoolRefs === undefined ? {} : { capPoolRefs: rule.capPoolRefs }), reasons: match.reasons });
             continue;
           }
           const reward = rule.reward.amountMinor !== undefined
@@ -741,8 +741,20 @@ export class RewardService {
             : rule.reward.rateBps !== undefined && event.amount
             ? { amountMinor: Math.floor(event.amount.amountMinor * rule.reward.rateBps / 10_000), currency: rule.reward.currency ?? input.amount.currency }
             : undefined;
-          plannedRewards.push({ ruleId: rule.id, ruleVersion: rule.version, component: rule.componentKind, ...(reward === undefined ? {} : { reward }), reasons: reward === undefined ? ['reward spec is not calculable'] : [] });
-          if (event.rewards) event.rewards = [...event.rewards, { ruleId: rule.id, ruleVersion: rule.version, component: rule.componentKind, status: reward === undefined ? 'unknown' : 'ready', ...(reward === undefined ? {} : { reward }), reasons: reward === undefined ? ['reward spec is not calculable'] : [] }];
+          plannedRewards.push({ ruleId: rule.id, ruleVersion: rule.version, component: rule.componentKind, sponsor: rule.sponsor ?? rule.componentKind, benefitGroup: rule.benefitGroup ?? rule.combination?.groupId ?? 'default', nativeUnit: rule.reward.kind, ...(rule.combination === undefined ? {} : { combination: rule.combination }), ...(rule.capPoolRefs === undefined ? {} : { capPoolRefs: rule.capPoolRefs }), ...(reward === undefined ? {} : { reward }), reasons: reward === undefined ? ['reward spec is not calculable'] : [] });
+          if (reward !== undefined && event.rewards) {
+            event.rewards = [...event.rewards, {
+              ruleId: rule.id,
+              ruleVersion: rule.version,
+              component: rule.componentKind,
+              sponsor: rule.sponsor ?? rule.componentKind,
+              benefitGroup: rule.benefitGroup ?? rule.combination?.groupId ?? 'default',
+              nativeUnit: rule.reward.kind,
+              status: 'ready',
+              reward,
+              reasons: [],
+            }];
+          }
         }
         if (edge && event.kind === 'top_up' && event.amount === undefined) event.eligibility = { status: 'unknown', reasons: ['top-up amount policy is not evidenced'] };
       });
@@ -752,17 +764,60 @@ export class RewardService {
       const evaluations = card && !hasPlannedTopUp ? state.rules.filter((rule) => rule.cardId === card.id).map((rule) => ({ rule, result: evaluateOffer(rule, transaction, this.context(state, asOf, transaction)) })).filter(({ result }) => result.status === 'ok') : [];
       const ranking = evaluations.length ? evaluations[0]?.result : undefined;
       const zero = { amountMinor: 0, currency: input.amount.currency };
-      const matchedRules = [...evaluations.filter(({ rule }) => rule.stacking !== 'possible').map(({ rule, result }) => ({ ruleId: rule.id, ruleVersion: rule.version, component: rule.componentKind ?? 'card_issuer', reward: result.cappedReward ?? zero })), ...plannedRewards.filter((item) => item.reward !== undefined).map((item) => ({ ruleId: item.ruleId, ruleVersion: item.ruleVersion, component: item.component, reward: item.reward! }))];
+      const rewardGroups = new Map<string, typeof plannedRewards>();
+      for (const item of plannedRewards.filter((candidate) => candidate.reward !== undefined)) rewardGroups.set(`${item.sponsor}|${item.benefitGroup}`, [...(rewardGroups.get(`${item.sponsor}|${item.benefitGroup}`) ?? []), item]);
+      let stackingAmbiguous = false;
+      const acceptedPlanned: typeof plannedRewards = [];
+      for (const group of rewardGroups.values()) {
+        if (group.length === 1) { if (group[0]) acceptedPlanned.push(group[0]); continue; }
+        const modes = group.map((item) => item.combination?.mode);
+        if (modes.some((mode) => mode === undefined)) { stackingAmbiguous = true; continue; }
+        if (modes.every((mode) => mode === 'additive')) { acceptedPlanned.push(...group); continue; }
+        const ranked = [...group].sort((a, b) => (b.combination?.priority ?? 0) - (a.combination?.priority ?? 0) || a.ruleId.localeCompare(b.ruleId));
+        if (modes.every((mode) => mode === 'replace' || mode === 'best_of' || mode === 'exclusive')) { if (ranked[0]) acceptedPlanned.push(ranked[0]); }
+        else stackingAmbiguous = true;
+      }
+      const allExplicit = [...rewardGroups.values()].flat().every((item) => item.combination?.mode !== undefined);
+      if (rewardGroups.size > 1 && !allExplicit) stackingAmbiguous = true;
+      for (const item of acceptedPlanned) {
+        for (const poolId of item.capPoolRefs ?? []) {
+          const pool = state.capPools.find((candidate) => candidate.id === poolId);
+          if (!pool || pool.metric !== 'reward' || pool.timezone === undefined || (pool.currency !== undefined && pool.currency !== item.reward?.currency)) stackingAmbiguous = true;
+        }
+      }
+      const acceptedIds = new Set(acceptedPlanned.map((item) => item.ruleId));
+      for (const event of events) if (event.rewards) event.rewards = event.rewards.filter((reward) => acceptedIds.has(reward.ruleId));
+      const capUsed = new Map<string, number>();
+      const plannedMatched = acceptedPlanned.map((item) => {
+        const capUses = (item.capPoolRefs ?? []).map((poolId) => {
+          const pool = state.capPools.find((candidate) => candidate.id === poolId);
+          const previous = capUsed.get(poolId) ?? 0;
+          const limit = pool?.limit ?? item.reward!.amountMinor;
+          const capped = Math.max(0, Math.min(item.reward!.amountMinor, limit - previous));
+          capUsed.set(poolId, previous + capped);
+          return { poolId, grossAmount: item.reward!, cappedAmount: { amountMinor: capped, currency: item.reward!.currency } };
+        });
+        const cappedMinor = capUses.length ? Math.min(item.reward!.amountMinor, ...capUses.map((use) => use.cappedAmount.amountMinor)) : item.reward!.amountMinor;
+        return { ruleId: item.ruleId, ruleVersion: item.ruleVersion, component: item.component, sponsor: item.sponsor, benefitGroup: item.benefitGroup, nativeUnit: item.nativeUnit, reward: { amountMinor: cappedMinor, currency: item.reward!.currency }, ...(capUses.length ? { capUses } : {}) };
+      });
+      for (const event of events) {
+        if (!event.rewards) continue;
+        event.rewards = event.rewards.map((reward) => {
+          const planned = plannedMatched.find((item) => item.ruleId === reward.ruleId);
+          return planned ? { ...reward, reward: planned.reward, ...(planned.capUses ? { capUses: planned.capUses } : {}) } : reward;
+        });
+      }
+      const matchedRules = [...evaluations.filter(({ rule }) => rule.stacking !== 'possible').map(({ rule, result }) => ({ ruleId: rule.id, ruleVersion: rule.version, component: rule.componentKind ?? 'card_issuer', reward: result.cappedReward ?? zero })), ...plannedMatched];
       const sum = (field: 'grossReward' | 'cappedReward') => matchedRules.reduce((amount, item) => amount + (item.reward.amountMinor), 0);
-      const cappedReward = matchedRules.length ? { amountMinor: sum('cappedReward'), currency: input.amount.currency } : zero;
-      const grossReward = matchedRules.length ? { amountMinor: sum('grossReward'), currency: input.amount.currency } : zero;
+      const cappedReward = matchedRules.length && !stackingAmbiguous ? { amountMinor: sum('cappedReward'), currency: input.amount.currency } : zero;
+      const grossReward = matchedRules.length && !stackingAmbiguous ? { amountMinor: sum('grossReward'), currency: input.amount.currency } : zero;
       const pathSignature = JSON.stringify({ version: 1, nodes, edges: pathEdges ?? events, funding: route.funding, merchant: input.merchant, currency: input.amount.currency });
-      return { id: `path:${pathSignature}`, routeId: route.id, nodes, events, fundingSource: route.funding, grossReward, netReward: cappedReward, cappedReward, matchedRules, pathSignature, status: 'ready', exclusionReasons: matchedRules.length ? evaluations.length === matchedRules.length ? [] : ['possible stacking policy excluded'] : ['no applicable verified card rule'] };
+      return { id: `path:${pathSignature}`, routeId: route.id, nodes, events, fundingSource: route.funding, grossReward, netReward: cappedReward, cappedReward, matchedRules: stackingAmbiguous ? [] : matchedRules, pathSignature, status: stackingAmbiguous ? 'blocked' : 'ready', exclusionReasons: stackingAmbiguous ? ['ambiguous stacking policy'] : matchedRules.length ? evaluations.length === matchedRules.length ? [] : ['possible stacking policy excluded'] : ['no applicable verified card rule'] };
     });
     const accepted = new Set(routes.map((route) => route.id));
     const blocked = [...visibleRoutes.filter((route) => !accepted.has(route.id)).map((route) => ({ routeId: route.id, reason: route.status !== 'active' || !route.confirmation ? 'route is not active and confirmed' : 'route has no admissible terminal branch' })), ...branchBlocked];
     const diagnostics = [...new Set(branchBlocked.filter((item) => item.reason.startsWith('truncated_by_bound:')).map((item) => item.reason.split(':', 2)[0] ?? 'truncated_by_bound'))];
-    return { status: candidates.length ? (blocked.length ? 'partial' : 'ok') : (blocked.length ? 'needs_review' : 'no_match'), candidates, evaluatedAt: asOf, blocked, ...(diagnostics.length ? { diagnostics } : {}), limits: { maxCandidates: input.limit ?? 20, maxHops, maxEvents, maxBranchesPerNode } };
+    return { status: candidates.length ? (candidates.some((candidate) => candidate.status === 'blocked') ? 'needs_review' : blocked.length ? 'partial' : 'ok') : (blocked.length ? 'needs_review' : 'no_match'), candidates, evaluatedAt: asOf, blocked, ...(diagnostics.length ? { diagnostics } : {}), limits: { maxCandidates: input.limit ?? 20, maxHops, maxEvents, maxBranchesPerNode } };
   }
 
   recordTransaction(transaction: TransactionTuple): RewardBreakdown {

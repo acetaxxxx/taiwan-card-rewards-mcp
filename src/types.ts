@@ -281,6 +281,8 @@ export interface OfferRuleVersion {
   requires?: readonly CalculationTrustRequirement[] | undefined;
   reward: RewardSpec;
   componentKind?: RewardComponentKind | undefined;
+  sponsor?: string | undefined;
+  benefitGroup?: string | undefined;
   useSettlementAmount?: boolean | undefined;
   stacking?: StackingConfidence | undefined;
   confirmation?: OfferConfirmation | undefined;
@@ -550,7 +552,8 @@ export interface PaymentPathRequest {
 }
 export interface PaymentPathNode { id: string; kind: string; displayName: string; }
 export interface PaymentPathEventEligibility { status: 'ready' | 'unknown' | 'no_match' | 'needs_facts'; reasons: readonly string[]; }
-export interface PlannedRewardComponent { ruleId: string; ruleVersion: string; component: RewardComponentKind; status: 'ready' | 'unknown' | 'no_match'; reward?: Money; reasons: readonly string[]; }
+export interface PlannedRewardCapUse { poolId: string; grossAmount: Money; cappedAmount: Money; }
+export interface PlannedRewardComponent { ruleId: string; ruleVersion: string; component: RewardComponentKind; sponsor?: string; benefitGroup?: string; nativeUnit?: string; status: 'ready' | 'unknown' | 'no_match'; reward?: Money; capUses?: readonly PlannedRewardCapUse[]; reasons: readonly string[]; }
 export interface PaymentPathEvent {
   kind: 'top_up' | 'purchase' | 'account_debit' | 'card_authorization';
   fromNodeId: string;
@@ -574,7 +577,7 @@ export interface PaymentPathCandidate {
   grossReward: Money;
   netReward: Money;
   cappedReward: Money;
-  matchedRules: readonly { ruleId: string; ruleVersion: string; component: string; reward: Money }[];
+  matchedRules: readonly { ruleId: string; ruleVersion: string; component: string; sponsor?: string; benefitGroup?: string; nativeUnit?: string; reward: Money; capUses?: readonly PlannedRewardCapUse[] }[];
   exclusionReasons: readonly string[];
   status?: 'ready' | 'blocked' | 'no_match';
   pathSignature?: string;

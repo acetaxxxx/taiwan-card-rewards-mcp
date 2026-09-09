@@ -324,7 +324,7 @@ export function validateConfirmation(value: unknown): OfferConfirmation {
 
 export function validateRule(value: unknown): OfferRuleVersion {
   const item = object(value, 'rule');
-  keys(item, ['id', 'cardId', 'version', 'sourceSnapshotId', 'status', 'validFrom', 'validTo', 'settlementCurrency', 'match', 'predicate', 'requires', 'reward', 'capPoolRefs', 'confirmation', 'combination', 'componentKind', 'useSettlementAmount', 'stacking', 'routeId', 'eventRule', 'eventChainRule'], 'rule');
+  keys(item, ['id', 'cardId', 'version', 'sourceSnapshotId', 'status', 'validFrom', 'validTo', 'settlementCurrency', 'match', 'predicate', 'requires', 'reward', 'capPoolRefs', 'confirmation', 'combination', 'componentKind', 'sponsor', 'benefitGroup', 'useSettlementAmount', 'stacking', 'routeId', 'eventRule', 'eventChainRule'], 'rule');
   const status = requiredString(item.status, 'rule.status');
   if (!['candidate', 'active', 'stale', 'superseded', 'needs_review', 'unknown'].includes(status)) throw new RewardServiceError('INVALID_INPUT', 'rule.status is invalid');
   const rewardItem = object(item.reward, 'rule.reward');
@@ -361,6 +361,8 @@ export function validateRule(value: unknown): OfferRuleVersion {
     capPoolRefs = [...new Set(item.capPoolRefs.map((v) => requiredString(v, 'rule.capPoolRefs', true)))];
   }
   const componentKind = item.componentKind === undefined ? undefined : requiredString(item.componentKind, 'rule.componentKind');
+  const sponsor = item.sponsor === undefined ? undefined : requiredString(item.sponsor, 'rule.sponsor', true);
+  const benefitGroup = item.benefitGroup === undefined ? undefined : requiredString(item.benefitGroup, 'rule.benefitGroup', true);
   if (componentKind !== undefined && !['merchant_loyalty', 'payment_provider', 'card_issuer'].includes(componentKind)) throw new RewardServiceError('INVALID_INPUT', 'rule.componentKind is invalid');
   const stacking = item.stacking === undefined ? undefined : requiredString(item.stacking, 'rule.stacking');
   if (stacking !== undefined && stacking !== 'confirmed' && stacking !== 'possible') throw new RewardServiceError('INVALID_INPUT', 'rule.stacking is invalid');
@@ -370,7 +372,7 @@ export function validateRule(value: unknown): OfferRuleVersion {
   const eventChainRule = item.eventChainRule === undefined ? undefined : validatePaymentEventChainRule(item.eventChainRule);
   const cardId = item.cardId === undefined ? undefined : requiredString(item.cardId, 'rule.cardId', true);
   if (cardId === undefined && (!componentKind || componentKind === 'card_issuer')) throw new RewardServiceError('INVALID_INPUT', 'non-card rules require an explicit componentKind');
-  return { id: requiredString(item.id, 'rule.id', true), ...(cardId === undefined ? {} : { cardId }), version: requiredString(item.version, 'rule.version'), sourceSnapshotId: requiredString(item.sourceSnapshotId, 'rule.sourceSnapshotId', true), status: status as OfferRuleVersion['status'], validFrom, ...(validTo ? { validTo } : {}), settlementCurrency: requiredString(item.settlementCurrency, 'rule.settlementCurrency', true).toUpperCase(), match: validateMatch(item.match), ...(predicate ? { predicate } : {}), ...(requires?.length ? { requires } : {}), reward, ...(capPoolRefs ? { capPoolRefs } : {}), ...(componentKind ? { componentKind: componentKind as OfferRuleVersion['componentKind'] } : {}), ...(item.useSettlementAmount === undefined ? {} : { useSettlementAmount: item.useSettlementAmount }), ...(stacking ? { stacking: stacking as OfferRuleVersion['stacking'] } : {}), ...(confirmation ? { confirmation } : {}), ...(combination ? { combination } : {}), ...(item.routeId === undefined ? {} : { routeId: requiredString(item.routeId, 'rule.routeId', true) }), ...(eventRule ? { eventRule } : {}), ...(eventChainRule ? { eventChainRule } : {}) };
+  return { id: requiredString(item.id, 'rule.id', true), ...(cardId === undefined ? {} : { cardId }), version: requiredString(item.version, 'rule.version'), sourceSnapshotId: requiredString(item.sourceSnapshotId, 'rule.sourceSnapshotId', true), status: status as OfferRuleVersion['status'], validFrom, ...(validTo ? { validTo } : {}), settlementCurrency: requiredString(item.settlementCurrency, 'rule.settlementCurrency', true).toUpperCase(), match: validateMatch(item.match), ...(predicate ? { predicate } : {}), ...(requires?.length ? { requires } : {}), reward, ...(capPoolRefs ? { capPoolRefs } : {}), ...(componentKind ? { componentKind: componentKind as OfferRuleVersion['componentKind'] } : {}), ...(sponsor === undefined ? {} : { sponsor }), ...(benefitGroup === undefined ? {} : { benefitGroup }), ...(item.useSettlementAmount === undefined ? {} : { useSettlementAmount: item.useSettlementAmount }), ...(stacking ? { stacking: stacking as OfferRuleVersion['stacking'] } : {}), ...(confirmation ? { confirmation } : {}), ...(combination ? { combination } : {}), ...(item.routeId === undefined ? {} : { routeId: requiredString(item.routeId, 'rule.routeId', true) }), ...(eventRule ? { eventRule } : {}), ...(eventChainRule ? { eventChainRule } : {}) };
 }
 
 export function validateCapPool(value: unknown): CapPoolDefinition {
