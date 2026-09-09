@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.10.1
+
+- Renamed the MCP protocol identity to `taiwan_card_rewards_mcp` for Codex and
+  host compatibility while preserving the npm package and CLI binary names.
+
 ## 0.10.0
 
 - Consolidated the public MCP surface to 19 unversioned tools, including the
