@@ -139,8 +139,10 @@ _Avoid_: implicit TWD, display currency only
 
 **FX Snapshot**:
 A dated, source-attributed exchange-rate observation for a currency pair and
-effective time. The Agent supplies the observation; the MCP creates the
-authoritative ID when it persists the snapshot used by a durable transaction.
+effective time. The Agent supplies the observation, including its source
+reference ID. For an actual transaction, the MCP freezes the applied rate and
+its provenance in that transaction; the source reference is not an MCP-owned
+record ID.
 _Avoid_: live rate, timeless conversion
 
 **Current FX Rate**:
@@ -372,8 +374,10 @@ _Avoid_: caller promise, warning flag, best effort
 - An Agent workspace may retain raw research evidence, but the MCP durable state
   retains only validated typed facts, provenance references, rule versions,
   ledger records, and the FX snapshot actually used by a durable transaction.
-- The MCP generates authoritative IDs for persisted snapshots and records;
-  Agent references and idempotency keys are correlation inputs, not server IDs.
+- The MCP generates authoritative IDs for MCP-managed records. An inline FX
+  snapshot ID is an Agent-supplied source/provenance reference; the durable
+  transaction retains the frozen applied rate rather than creating a separate
+  MCP FX record.
 - A query that needs a local period boundary must use an explicit Timezone
   Authority; the AI agent asks the user when the relevant timezone is missing,
   and the calculator does not infer it from the server or environment locale.

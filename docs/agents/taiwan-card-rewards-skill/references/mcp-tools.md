@@ -92,7 +92,7 @@ Response 中每個 candidate 的 `fxEstimate.status` 可能是 `estimated`（有
 }
 ```
 
-`upsert_payment_route` 接受 `route`，含 `layers`、`funding`、`observedAt`、`idempotencyKey`；要參與路徑搜尋還需要 `nodes` 和 `edges`。node 的 kind 是 `funding_source`、`wallet_balance`、`payment_service`、`acceptance_network`、`merchant` 之一。edge 的 transition 是 `card_authorization`、`account_debit`、`wallet_top_up`、`wallet_debit`、`service_to_acceptance`、`merchant_settlement`、`direct_settlement`、`split_tender` 之一，且必須指向已存在的 node。edge 的 `direction` 必須是 `outbound`（`inbound` 一律拒絕）；`evidenceIds` 必須非空但直接信任 Agent 自帶的內容，不需要另外呼叫任何 evidence tool 先行提交。`provenance: 'model_fixture'` 只給測試使用，production 會拒絕。
+`upsert_payment_route` 接受 `route`，含 `layers`、`funding`、`observedAt`、`idempotencyKey`；要參與路徑搜尋還需要 `nodes` 和 `edges`。node 的 kind 是 `funding_source`、`wallet_balance`、`payment_service`、`acceptance_network`、`merchant` 之一。edge 的 transition 是 `card_authorization`、`account_debit`、`wallet_top_up`、`wallet_debit`、`service_to_acceptance`、`merchant_settlement`、`direct_settlement`、`split_tender` 之一，且必須指向已存在的 node。edge 的 `direction` 可為 `inbound` 或 `outbound`，須依有證據的資金流向填寫；不可自行反轉或推測。`evidenceIds` 必須非空但直接信任 Agent 自帶的內容，不需要另外呼叫任何 evidence tool 先行提交。`provenance: 'model_fixture'` 只給測試使用，production 會拒絕。
 
 `upsert_payment_capability` 同樣直接信任 Agent 提供的 `evidenceIds`（至少一筆），一旦 `status: 'active'` 就可能被 `recommend` 用來自動產生 planned route（例如「持有信用卡 + 錢包支援」→ 自動組出信用卡儲值進錢包再付款的路徑）。
 

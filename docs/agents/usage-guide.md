@@ -137,9 +137,10 @@ For the merchant-first recommendation shape, follow [`recommendation-intent.md`]
      the user to choose when needed.
    - After a candidate is confirmed, call `recommend` with the resolved
      transaction facts. The Agent never selects `ruleId`.
-   - New merchant identity registration is a controlled catalog-ingestion
-     operation, not a public MCP tool; normal recommendation and resolution
-     calls never create identities.
+   - `recommend` and `resolve_merchant` never create identities. When official
+     evidence identifies a merchant that is not cataloged yet,
+     `upsert_offer` may atomically onboard one strict candidate merchant and
+     bind the submitted rule to its MCP-generated canonical ID.
 
 ### C. Planned Spend Recommendations vs Actual Purchases
 - **Planned Evaluation (Simulation / Intent)**:
@@ -173,8 +174,10 @@ suggested rate types, time, and required facts to query an approved source. The 
 of Taiwan quote page may be a public reference candidate, but it is not the actual
 policy or settlement rate of a card, wallet, or issuer. Return the validated typed `fx`
 snapshot with the same intent and call `recommend` again so MCP recomputes the result.
-There is no separate FX policy or observation storage — the Agent supplies a fresh
-`fx` snapshot on every call that needs one; nothing is saved or reused server-side.
+There is no separate FX policy or observation store: the Agent supplies a fresh
+`fx` snapshot on each new evaluation. A successful actual transaction or event
+freezes the applied rate and provenance in its durable ledger record; a refund
+reuses only that original frozen rate, not a current or globally stored quote.
 
 ### F. Top-ups, Wallet Purchases & Cross-Event Rewards
 
@@ -251,7 +254,7 @@ or `needs_review`; the Agent must not allocate the balance automatically.
 
 #### PayPay, EasyWallet, and card-funded wallet routes
 
-For proactive route selection, call the normal merchant-first `recommend` intent, optionally narrowed with `routeIds`. Its `candidates[]` already mixes `direct_card` and `payment_path` results in one ranked list — there is no separate path-only tool or envelope. It considers only the current user's active routes with self-asserted `evidenceIds` and returns bounded nodes, transitions, funding source, reward totals, matched rules, and explicit exclusions. Routes are usable by default once evidenceIds are supplied; ask only when facts conflict or are ambiguous, and mark a route failed when the user says it is unavailable. It never invents mixed wallet funding, unregistered routes, or unverified cross-border paths; absent evidence yields no candidate. `recommend`'s public intent schema does not yet expose `eligibilityFacts`; treat Gold/member-dependent stacking prerequisites as a schema gap until it is exposed.
+For proactive route selection, call the normal merchant-first `recommend` intent, optionally narrowed with `routeIds`. Its `candidates[]` already mixes `direct_card` and `payment_path` results in one ranked list — there is no separate path-only tool or envelope. It considers only the current user's active routes with self-asserted `evidenceIds` and returns bounded nodes, transitions, funding source, reward totals, matched rules, and explicit exclusions. Routes are usable by default once evidenceIds are supplied; ask only when facts conflict or are ambiguous, and mark a route failed when the user says it is unavailable. It never invents mixed wallet funding, unregistered routes, or unverified cross-border paths; absent evidence yields no candidate. When Gold/member-dependent prerequisites are known and evidenced, include them in the public `eligibilityFacts` array; otherwise retain the candidate's required action or blocked status.
 
 Do not collapse these into one card purchase:
 

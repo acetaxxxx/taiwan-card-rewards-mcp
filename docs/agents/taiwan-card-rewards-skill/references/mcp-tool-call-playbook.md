@@ -140,8 +140,9 @@ tool；只要 route/edge 的其餘欄位（`sourceUrl`、`authority`、`confiden
 ```
 
 The URL above is a shape placeholder only; a real production route should cite
-a real official source. `direction` must be `outbound`; `inbound` edges are
-always rejected. `provenance: "model_fixture"` is for tests only.
+a real official source. Set `direction` to the evidenced flow (`outbound` or
+`inbound`); do not infer or reverse it. `provenance: "model_fixture"` is for
+tests only.
 
 若使用者事後表示某條路徑不可用，重新呼叫 `upsert_payment_route`（同一
 `idempotencyKey`）並把 `status` 改成 `failed`、附上 `failure` 詳情即可。

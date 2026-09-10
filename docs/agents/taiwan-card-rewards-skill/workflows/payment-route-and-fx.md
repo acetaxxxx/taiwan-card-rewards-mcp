@@ -153,7 +153,7 @@ $$\text{ratePpm} = \text{匯率 (1 單位外幣折合新台幣金額)} \times 1,
 
 ## 6. FX 自動化解析合約 (FX Resolution Contract)
 
-為消除 Host Agent 與 MCP 核心之間的外幣資訊落差，同時恪守「核心零直接網路 I/O、失敗即關閉 (Fail-Closed)」之架構承諾，系統回傳標準化 `FxResolutionRequest`，供 Agent 查詢並以本次 typed `fx` snapshot 重試。MCP 不保存或仲裁多個匯率候選值——Agent 每次呼叫自行取得單一目前匯率，附在同一個 intent／transaction／event 上，通過幣別配對與新鮮度檢查即被直接信任套用。
+為消除 Host Agent 與 MCP 核心之間的外幣資訊落差，同時恪守「核心零直接網路 I/O、失敗即關閉 (Fail-Closed)」之架構承諾，系統回傳標準化 `FxResolutionRequest`，供 Agent 查詢並以本次 typed `fx` snapshot 重試。MCP 不維護全域 FX policy/observation store，也不仲裁多個候選值——Agent 每次新 evaluation 自行取得單一目前匯率，附在同一個 intent／transaction／event 上，通過幣別配對與新鮮度檢查即被直接信任套用。
 
 ### 6.1 `FxResolutionRequest` 合約架構
 
@@ -200,7 +200,7 @@ export interface FxResolutionRequest {
 ### 6.3 寫入操作原子性保證與 Fail-Closed 機制
 
 1. **本次 typed snapshot**：
-   Agent 查詢並驗證報價後，將 typed `fx` snapshot 帶回原本的 planned intent（一般 `fx` 或指定 `routeFacts` 的 route/edge scope），再呼叫 `recommend` 讓 MCP 重新計算。Actual `record_transaction` 或 `record_event_reward` 同樣傳入驗證過的 `fx: FxSnapshot`；沒有任何儲存／重用機制，Agent 每次都直接提供目前值。
+   Agent 查詢並驗證報價後，將 typed `fx` snapshot 帶回原本的 planned intent（一般 `fx` 或指定 `routeFacts` 的 route/edge scope），再呼叫 `recommend` 讓 MCP 重新計算。Actual `record_transaction` 或 `record_event_reward` 同樣傳入驗證過的 `fx: FxSnapshot`；`fx.id` 是來源 reference，不會建立可跨交易重用的 MCP FX record。成功寫入只會把當次採用的 rate 與 provenance 凍結在該筆 ledger record。
 2. **`fx_missing` 結構化錯誤回傳**：
    若未提供匯率快照，核心引擎立即拋出 `fx_missing` 錯誤，並在 `error.details` 中完整附帶 `fxResolutionRequest`，引導外部 Agent 透過核可管道查詢補齊後重試。
 3. **歷史入帳凍結與退款匯率豁免 (Frozen Provenance & Refund Immunity)**：

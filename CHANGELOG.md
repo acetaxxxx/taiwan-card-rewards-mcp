@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.12.0
 
 - Reduced the public MCP surface from 25 to 19 tools. Removed `upsert_fx_policy`,
   `list_fx_policies`, `upsert_fx_observation`, `list_fx_observations`,

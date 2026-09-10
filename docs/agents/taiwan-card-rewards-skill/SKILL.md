@@ -15,7 +15,7 @@ description: 協助試算、比較與記錄台灣信用卡回饋；路由至 can
 3. 絕不傳送或儲存 PAN、CVV/CVC、OTP、密碼、cookie、token、帳號號碼，或把 `user_id` 當作 tool-level tenant selector。
 4. 啟動 MCP 時，`--data-dir` 才是持久化邊界；`--user` 只供 display/metadata，不能當授權或 storage selector。
 5. `unknown`、`stale`、`needs_review`、衝突或缺 evidence 一律 fail closed；不可把未知轉成零回饋或擅自選活動。
-6. 外幣交易由 Agent 自行取得目前匯率，以單一 `fx` snapshot 附在呼叫上；planned recommendation 若缺 `fx`，可先用依 `fxResolutionRequest` 取得的臺銀即期公共參考估算，但必須標示 estimate（見 candidate 的 `fxEstimate.status`），不能當成 actual settlement 的確定政策。費用或 reward valuation 無法換算時，net value 仍是 blocked/unknown。
+6. 外幣交易由 Agent 自行取得目前匯率，以單一 `fx` snapshot 附在呼叫上；`fx.id` 是來源/provenance reference，不是 MCP record ID。actual 寫入會凍結採用的 rate 與 provenance，退款沿用原交易。planned recommendation 若缺 `fx`，可先用依 `fxResolutionRequest` 取得的臺銀即期公共參考估算，但必須標示 estimate（見 candidate 的 `fxEstimate.status`），不能當成 actual settlement 的確定政策。費用或 reward valuation 無法換算時，net value 仍是 blocked/unknown。
 7. payment path 是有界圖，不是把卡片、wallet、支付服務壓平為一個交易。每個 top-up/purchase 是 planned event；不可對 fungible wallet 自動推 FIFO/LIFO 或把早先卡 top-up 推成後續 wallet purchase 的卡刷。
 
 ## 意圖 router
