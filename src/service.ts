@@ -790,6 +790,14 @@ export class RewardService {
       ...(input.fx ? { fx: input.fx } : {}),
     }) : undefined;
     const context = this.context(state, evaluatedAt, transaction);
+    const storedFx = (baseCurrency: string, quoteCurrency: string, card?: CardDescriptor): FxObservationRecord | undefined => {
+      const target = Date.parse(evaluatedAt);
+      return (state.fxObservations ?? [])
+        .filter((observation) => observation.ownerUser === this.metadataUser && observation.baseCurrency === baseCurrency.toUpperCase() && observation.quoteCurrency === quoteCurrency.toUpperCase())
+        .filter((observation) => (!observation.cardIdScope || observation.cardIdScope === card?.id) && (!observation.issuerScope || observation.issuerScope === card?.issuer))
+        .filter((observation) => { const captured = Date.parse(observation.capturedAt); return Number.isFinite(captured) && captured <= target && target - captured <= (observation.maxAgeSeconds ?? 7 * 24 * 3600) * 1000; })
+        .sort((a, b) => Date.parse(b.capturedAt) - Date.parse(a.capturedAt))[0];
+    };
     const cards = state.cards.filter(card => input.cardIds === undefined || input.cardIds.includes(card.id));
     const routes = this.listPaymentRoutes().filter(route =>
       (input.routeIds === undefined || input.routeIds.includes(route.id)) &&
@@ -824,10 +832,12 @@ export class RewardService {
     };
     if (input.routeIds === undefined) for (const card of cards) {
       const rules = applicable(card.id);
+      const ruleQuote = transaction ? rules.find((rule) => rule.settlementCurrency.toUpperCase() !== transaction.amount.currency.toUpperCase())?.settlementCurrency : undefined;
+      const reusableFx = transaction && ruleQuote ? storedFx(transaction.amount.currency, ruleQuote, card) : undefined;
       const applicableFx = transaction?.fx &&
         (!transaction.fx.cardIdScope || transaction.fx.cardIdScope === card.id) &&
         (!transaction.fx.issuerScope || transaction.fx.issuerScope === card.issuer)
-        ? transaction.fx : undefined;
+        ? transaction.fx : reusableFx;
       const tx = transaction ? { ...transaction, cardId: card.id, route: { kind: 'direct_card' as const }, ...(applicableFx ? { fx: applicableFx } : { fx: undefined }) } : undefined;
       const evaluations = rules.map(rule => ({ rule, result: tx ? evaluateOffer(rule, tx, context) : undefined }));
       const projected = evaluations.map(({ rule, result }) => projectRule(rule, result));
