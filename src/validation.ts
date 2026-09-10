@@ -126,6 +126,10 @@ export function validateFxPolicy(value: unknown): FxPolicyRecord {
   keys(scope, ['kind', 'cardId', 'issuer', 'routeId', 'edgeId'], 'fx policy.scope');
   const kind = requiredString(scope.kind, 'fx policy.scope.kind');
   if (!['card', 'issuer', 'route', 'route_edge'].includes(kind)) throw new RewardServiceError('INVALID_INPUT', 'fx policy scope is invalid');
+  if (kind === 'card' && scope.cardId === undefined) throw new RewardServiceError('INVALID_INPUT', 'card FX policy scope requires cardId');
+  if (kind === 'issuer' && scope.issuer === undefined) throw new RewardServiceError('INVALID_INPUT', 'issuer FX policy scope requires issuer');
+  if (kind === 'route' && scope.routeId === undefined) throw new RewardServiceError('INVALID_INPUT', 'route FX policy scope requires routeId');
+  if (kind === 'route_edge' && (scope.routeId === undefined || scope.edgeId === undefined)) throw new RewardServiceError('INVALID_INPUT', 'route_edge FX policy scope requires routeId and edgeId');
   const owner = requiredString(item.conversionOwner, 'fx policy.conversionOwner');
   if (!['card_scheme', 'issuer', 'wallet', 'merchant_dcc', 'unknown'].includes(owner)) throw new RewardServiceError('INVALID_INPUT', 'fx policy conversionOwner is invalid');
   const rateType = requiredString(item.rateType, 'fx policy.rateType');

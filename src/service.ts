@@ -852,12 +852,19 @@ export class RewardService {
       const rules = applicable(card.id);
       const ruleQuote = transaction ? rules.find((rule) => rule.settlementCurrency.toUpperCase() !== transaction.amount.currency.toUpperCase())?.settlementCurrency : undefined;
       if (transaction && ruleQuote) {
-        const policy = (state.fxPolicies ?? []).find((candidate) => candidate.ownerUser === this.metadataUser &&
+        const matchingPolicies = (state.fxPolicies ?? []).filter((candidate) => candidate.ownerUser === this.metadataUser &&
           ((candidate.scope.kind === 'card' && candidate.scope.cardId === card.id) ||
            (candidate.scope.kind === 'issuer' && candidate.scope.issuer === card.issuer)) &&
           (!candidate.validFrom || Date.parse(candidate.validFrom) <= Date.parse(evaluatedAt)) &&
           (!candidate.validTo || Date.parse(candidate.validTo) >= Date.parse(evaluatedAt)));
-        if (!policy) {
+        const policySignatures = new Set(matchingPolicies.map((candidate) => JSON.stringify({ conversionOwner: candidate.conversionOwner, rateType: candidate.rateType, rateDirection: candidate.rateDirection, conversionTiming: candidate.conversionTiming, feeBasis: candidate.feeBasis, markupBasis: candidate.markupBasis })));
+        if (policySignatures.size > 1) addAction({
+          id: `fx-policy-conflict:${card.id}`, action: 'ask_user', owner: 'user', path: 'fxPolicy',
+          requiredFacts: ['which conflicting FX policy applies to this card and transaction'], candidateIds: [`card:${card.id}`],
+          completionCondition: 'repeat recommend after the applicable policy is clarified or conflicting evidence is resolved',
+        });
+        const policy = policySignatures.size > 1 ? undefined : matchingPolicies[0];
+        if (!policy && policySignatures.size <= 1) {
           const sourceUrls = state.evidence
             .filter((evidence) => evidence.ownerUser === this.metadataUser && evidence.sourceType === 'official' && evidence.authority === 'issuer' && evidence.sourceUrl)
             .map((evidence) => evidence.sourceUrl!)

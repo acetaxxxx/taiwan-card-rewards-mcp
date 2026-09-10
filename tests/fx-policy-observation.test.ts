@@ -30,6 +30,11 @@ describe('FX policy and observation persistence', () => {
     expect(() => service.upsertFxPolicy({ policyKey: 'issuer-jpy', version: '1', scope: { kind: 'issuer', issuer: 'Bank' }, conversionOwner: 'issuer', rateType: 'cash_selling', rateDirection: 'base_to_quote', conversionTiming: 'settlement', evidenceId: 'missing', observedAt: '2026-09-10T00:00:00Z', idempotencyKey: 'policy-1' })).toThrow(/accepted official evidence/);
   });
 
+  it('requires the identifier matching an FX policy scope', () => {
+    const service = new RewardService(new MemoryStore(), 'user-1');
+    expect(() => service.upsertFxPolicy({ policyKey: 'issuer-jpy', version: '1', scope: { kind: 'issuer' }, conversionOwner: 'issuer', rateType: 'cash_selling', rateDirection: 'base_to_quote', conversionTiming: 'settlement', evidenceId: 'missing', observedAt: '2026-09-10T00:00:00Z', idempotencyKey: 'policy-1' })).toThrow(/requires issuer/);
+  });
+
   it('reuses a fresh stored observation during planned recommendation', () => {
     const service = new RewardService(new MemoryStore(), 'user-1');
     service.registerCard({ id: 'card-jpy', issuer: 'Bank', productName: 'Japan Card' });
@@ -61,6 +66,19 @@ describe('FX policy and observation persistence', () => {
     expect(action).toEqual(expect.objectContaining({ owner: 'agent', submission: { tool: 'upsert_fx_policy', field: 'policy' } }));
     expect(action?.fxPolicyResearchRequest).toEqual(expect.objectContaining({ purpose: 'policy_research', scope: { kind: 'issuer', issuer: 'Example Bank' }, sourceStatus: 'discovery_required' }));
     expect(action?.requiredFacts).toEqual(expect.arrayContaining(['conversionOwner', 'rateType', 'conversionTiming', 'evidenceId']));
+  });
+
+  it('asks the user when current FX policies conflict instead of choosing by insertion order', () => {
+    const service = new RewardService(new MemoryStore(), 'user-1');
+    service.registerCard({ id: 'card-conflict', issuer: 'Example Bank', productName: 'Japan Card' });
+    const evidence1 = service.submitEvidence({ id: 'policy-conflict-1', requirementId: 'fx-policy:issuer:terms', sourceIdentity: 'bank-terms', sourceType: 'official', authority: 'issuer', claim: { policy: 'settlement' }, observedAt: '2026-09-01T00:00:00Z', confidence: 'high', contentHash: 'policy-conflict-1', reviewState: 'accepted', sourceUrl: 'https://bank.example/terms' });
+    const evidence2 = service.submitEvidence({ id: 'policy-conflict-2', requirementId: 'fx-policy:issuer:rate', sourceIdentity: 'bank-rate', sourceType: 'official', authority: 'issuer', claim: { policy: 'posting' }, observedAt: '2026-09-01T00:00:00Z', confidence: 'high', contentHash: 'policy-conflict-2', reviewState: 'accepted', sourceUrl: 'https://bank.example/rates' });
+    const base = { scope: { kind: 'issuer' as const, issuer: 'Example Bank' }, conversionOwner: 'issuer' as const, rateDirection: 'base_to_quote' as const, evidenceId: evidence1.id, observedAt: '2026-09-01T00:00:00Z' };
+    service.upsertFxPolicy({ ...base, policyKey: 'issuer-jpy', version: '1', rateType: 'cash_selling', conversionTiming: 'settlement', idempotencyKey: 'policy-conflict-1' });
+    service.upsertFxPolicy({ ...base, evidenceId: evidence2.id, policyKey: 'issuer-jpy', version: '2', rateType: 'card_scheme', conversionTiming: 'posting', idempotencyKey: 'policy-conflict-2' });
+    service.upsertOffer({ id: 'conflict-offer', url: 'https://bank.example/offer', fetchedAt: '2026-09-01T00:00:00Z', contentHash: 'conflict-offer', parserVersion: '1', verified: true }, { id: 'conflict-rule', cardId: 'card-conflict', version: '1', sourceSnapshotId: 'conflict-offer', status: 'active', validFrom: '2026-01-01T00:00:00Z', settlementCurrency: 'TWD', match: {}, reward: { kind: 'percentage', rateBps: 100 } });
+    const result = service.recommendIntent({ merchant: 'Shop', amount: { amountMinor: 1000, currency: 'JPY' }, occurredAt: '2026-09-10T00:00:00Z' });
+    expect(result.requiredActions).toEqual(expect.arrayContaining([expect.objectContaining({ action: 'ask_user', path: 'fxPolicy', candidateIds: ['card:card-conflict'] })]));
   });
 
   it('preserves route and edge scope when persisting observations', () => {
