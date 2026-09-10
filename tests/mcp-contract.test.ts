@@ -195,6 +195,7 @@ describe("MCP Contract and Agent Boundary", () => {
         "list_payment_routes",
         "register_payment_account",
         "list_payment_accounts",
+        "list_payment_capabilities",
         "record_transaction",
         "record_event_reward",
         "reverse_event_reward",
@@ -209,6 +210,7 @@ describe("MCP Contract and Agent Boundary", () => {
         "list_fx_policies",
         "upsert_fx_observation",
         "list_fx_observations",
+        "upsert_payment_capability",
       ].sort();
       expect(toolNames).toEqual(expectedNames);
       expect(mcpTools).toHaveLength(25);
