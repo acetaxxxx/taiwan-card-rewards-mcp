@@ -22,4 +22,4 @@ Status: ready-for-agent
 
 使用者已核可八票拆分；補充要求為具體 FX 查詢來源／回填契約，以及多路徑與各層優惠比較。僅在前置票完成後開始實作。
 
-已補第一個 selector 邊界：route/edge-scoped observation 不會被 direct-card candidate 重用；測試先驗證錯套用會失敗，再修正 service filter。Build 與 targeted test 通過。
+已補 selector 邊界：route/edge-scoped observation 不會被 direct-card candidate 重用；同時 exact edge scope 優先於 route-level wildcard，避免較粗 scope 蓋掉較精確報價。測試先驗證錯套用會失敗，再修正 service selector。Build 與 targeted test 通過。

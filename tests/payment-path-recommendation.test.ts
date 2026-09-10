@@ -27,6 +27,16 @@ describe('proactive payment path recommendation', () => {
     expect(result.candidates[0]?.feeTotal).toEqual({ amountMinor: 3200, currency: 'TWD' });
     expect(result.candidates[0]?.netValue).toEqual({ amountMinor: -3200, currency: 'TWD' });
   });
+
+  it('prefers an edge-scoped FX observation over a route-scoped fallback', () => {
+    const store = new MemoryStore(); const service = new RewardService(store, 'u1');
+    const evidence = service.submitEvidence({ id: 'scope-priority', requirementId: 'route', sourceIdentity: 'merchant', sourceType: 'official', authority: 'merchant', claim: { route: 'scope-priority' }, observedAt: '2026-09-01T00:00:00Z', confidence: 'high', contentHash: 'scope-priority', reviewState: 'accepted', sourceUrl: 'https://merchant.example/terms' });
+    const route = service.upsertPaymentRoute({ status: 'active', idempotencyKey: 'scope-priority-route', layers: [], funding: { kind: 'cash' }, observedAt: '2026-09-01T00:00:00Z', sourceUrl: 'https://merchant.example/terms', authority: 'merchant', confidence: 'high', evidenceIds: [evidence.id], nodes: [{ id: 'cash', kind: 'funding_source', displayName: 'cash' }, { id: 'merchant', kind: 'merchant', displayName: 'merchant' }], edges: [{ edgeId: 'settle', fromNodeId: 'cash', toNodeId: 'merchant', transition: 'direct_settlement', evidenceIds: [evidence.id], fee: { amountMinor: 100, currency: 'USD' } }], confirmation: { confirmedAt: '2026-09-01T00:00:00Z', confirmedBy: 'u1' } });
+    const fallback = { id: 'fallback', baseCurrency: 'USD', quoteCurrency: 'TWD', ratePpm: 30_000_000, capturedAt: '2026-09-01T00:00:00Z', provider: 'route', rateType: 'spot_selling' as const };
+    const precise = { id: 'precise', baseCurrency: 'USD', quoteCurrency: 'TWD', ratePpm: 32_000_000, capturedAt: '2026-09-01T00:00:00Z', provider: 'edge', rateType: 'spot_selling' as const };
+    const result = service.recommendPaymentPaths({ amount: { amountMinor: 1000, currency: 'TWD' }, asOf: '2026-09-02T00:00:00Z', routeIds: [route.id], routeFacts: [{ routeId: route.id, fx: fallback }, { routeId: route.id, edgeId: 'settle', fx: precise }] });
+    expect(result.candidates[0]?.feeTotal).toEqual({ amountMinor: 3200, currency: 'TWD' });
+  });
   it('accepts valuation only when the official evidence claim matches and is user scoped', () => {
     const store = new MemoryStore(); const service = new RewardService(store, 'u1');
     const evidence = service.submitEvidence({ id: 'points-value', requirementId: 'valuation', sourceIdentity: 'issuer', sourceType: 'official', authority: 'issuer', claim: { nativeUnit: 'points', targetCurrency: 'TWD', rateNumerator: 15, rateDenominator: 100, version: '2026-09' }, observedAt: '2026-09-01T00:00:00Z', confidence: 'high', contentHash: 'points-value-hash', reviewState: 'accepted', sourceUrl: 'https://issuer.example/points' });

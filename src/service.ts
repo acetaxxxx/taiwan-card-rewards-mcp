@@ -1090,12 +1090,13 @@ export class RewardService {
         const requiredCurrencies = [edge.fee, edge.markup, edge.foreignTransactionFee, edge.dcc?.selected ? edge.dcc.fee : undefined]
           .filter((value): value is Money => value !== undefined && value.currency !== input.amount.currency)
           .map((value) => value.currency);
-        const fact = routeFacts.find((candidate) => candidate.routeId === route.id &&
+        const fact = routeFacts.filter((candidate) => candidate.routeId === route.id &&
           (candidate.edgeId === undefined || candidate.edgeId === edge.edgeId) &&
           requiredCurrencies.includes(candidate.fx.baseCurrency) && candidate.fx.quoteCurrency === input.amount.currency &&
           (!candidate.fx.cardIdScope || candidate.fx.cardIdScope === card?.id) &&
           (!candidate.fx.issuerScope || candidate.fx.issuerScope === card?.issuer) &&
-          Math.abs(Date.parse(asOf) - Date.parse(candidate.fx.capturedAt)) <= (candidate.fx.maxAgeSeconds ?? 7 * 24 * 3600) * 1000);
+          Math.abs(Date.parse(asOf) - Date.parse(candidate.fx.capturedAt)) <= (candidate.fx.maxAgeSeconds ?? 7 * 24 * 3600) * 1000)
+          .sort((a, b) => Number(Boolean(b.edgeId)) - Number(Boolean(a.edgeId)))[0];
         return fact ? { ...edge, fx: fact.fx } : edge;
       }) };
     });
