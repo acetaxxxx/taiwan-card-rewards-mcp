@@ -8,12 +8,12 @@ Implementation changes are committed incrementally on `enhance-user-exp`; the br
 | --- | --- | --- |
 | 01 | Implemented and integrated | Public merchant-only entry, unified candidates/rule terms, three-route fixture, read-only and legacy checks; covered by the current full suite |
 | 02 | Implemented and verified | Candidate-scoped recovery actions, multi-target/stale FX diagnostics, route-edge facts, source/scope metadata, intent preflight parity, and read-only retry; `npm run build`, `npm run typecheck`, and full suite passed (49 files / 208 tests) |
-| 03 | In progress | FX policy typed ingestion/evidence gate plus candidate-scoped `research_fx_policy` actions; policy completeness/conflict validation and ingestion hooks remain |
+| 03 | Implemented and verified | FX policy typed ingestion/evidence gate, candidate-scoped `research_fx_policy` actions, and optional missing-policy requirements on card/offer/route ingestion are covered by public schema, dispatcher, service, and tests |
 | 04 | Implemented and verified | Scoped FX observation persistence/reuse, direct-card isolation, exact edge-over-route selection, policy rate compatibility, refresh actions, and read-only retry are covered by targeted and full tests |
 | 05 | Implemented and verified | Public reference/stale/unavailable output, policy freshness windows, fallback source, route FX status, merchant-first net-spend projection, research fields for estimate windows, and multi-route fee/FX ranking are covered by targeted and full tests |
 | 06 | Implemented and verified | Stable intent cursor and canonical `limit + page` pagination, resultVersion-bound restart, 10-item pages, route rule-set coverage, actions and coverage semantics are covered by targeted and full tests |
 | 07 | Implemented and verified | Separate typed capability persistence, explicit transition requirements, ephemeral wallet/account route generation, capability-scoped binding actions, ADR 0009 ownership/version strategy, layered reward projection, and duplicate-rule protection are covered by targeted and full tests |
-| 08 | Pending 05, 06, 07 | Final Agent workflow and public contract validation |
+| 08 | In progress | Canonical workflow, default usable routes, page pagination, FX recovery guidance, and public contract checks are aligned; final trace/document consistency audit remains |
 
 Each slice is reviewed against the public contract and independent acceptance tests. A passing fixture alone is insufficient: rule matching, uncertainty, and candidate-specific recovery are reviewed before advancing dependencies.
 
