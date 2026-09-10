@@ -1,7 +1,7 @@
 import * as crypto from 'node:crypto';
 import { type LedgerStore, type RecordedTransaction, type StoredState } from './store.js';
 import { EventRewardLedger, convertMinor, createPaymentEventRewardCandidate, decidePaymentEventRewards, evaluateOffer, evaluatePredicate, matchPaymentEvent, matchPaymentEventChain, rankCards, resolveCyclePeriodKey } from './evaluator.js';
-import type { CardDescriptor, CardSwitchInput, CardSwitchProjection, CardSwitchStatus, CapPeriod, CapPoolDefinition, EvaluationContext, MerchantIdentity, MerchantResolution, Money, OfferConfirmation, OfferRuleVersion, OfferSourceSnapshot, RankingEntry, RewardBreakdown, RewardComponentRecord, TransactionTuple, UserBenefitInput, UserBenefitStatus, RecommendationPreflight, RecommendationRequiredAction, RecommendationRequirement, Diagnostic, EvidenceRecord, PaymentRouteRecord, PaymentAccountRecord, EventRewardLedgerRecord, EventRewardReversalRecord, PaymentPathRequest, PaymentPathRecommendation, PaymentPathCandidate, PaymentPathEvent, EligibilityFact, RewardValuationSnapshot, FxResolutionRequest, FxRateObservation, AppliedFxRate, RecommendationIntent, RecommendationIntentResult, IntentCandidate, FxPolicyRecord, FxObservationRecord } from './types.js';
+import type { CardDescriptor, CardSwitchInput, CardSwitchProjection, CardSwitchStatus, CapPeriod, CapPoolDefinition, EvaluationContext, MerchantIdentity, MerchantResolution, Money, OfferConfirmation, OfferRuleVersion, OfferSourceSnapshot, RankingEntry, RewardBreakdown, RewardComponentRecord, TransactionTuple, UserBenefitInput, UserBenefitStatus, RecommendationPreflight, RecommendationRequiredAction, RecommendationRequirement, Diagnostic, EvidenceRecord, PaymentRouteRecord, PaymentAccountRecord, EventRewardLedgerRecord, EventRewardReversalRecord, PaymentPathRequest, PaymentPathRecommendation, PaymentPathCandidate, PaymentPathEvent, EligibilityFact, RewardValuationSnapshot, FxResolutionRequest, FxRateObservation, AppliedFxRate, RecommendationIntent, RecommendationIntentResult, IntentCandidate, FxPolicyRecord, FxObservationRecord, FxSnapshot } from './types.js';
 import type { StartupConfig } from './startup.js';
 import { RewardServiceError } from './errors.js';
 import { validateCard, validateCapPool, validateConfirmation, validateEligibilityFact, validateMerchant, validateRecommendationTransaction, validateRule, validateSnapshot, validateTransaction, validateEvidence, validateFactCandidate, validatePaymentRouteRecord, validatePaymentAccountRecord, validateEventRewardInput, validatePaymentEvent, validatePaymentEventChainRule, validatePaymentEventRule, validateRewardValuationSnapshot, validateFxPolicy, validateFxObservation } from './validation.js';
@@ -878,11 +878,16 @@ export class RewardService {
     }
     let pathTruncated = false;
     if (transaction && this.metadataUser) {
+      const persistedRouteFacts = (state.fxObservations ?? [])
+        .filter((observation) => observation.ownerUser === this.metadataUser && observation.routeIdScope !== undefined)
+        .map((observation) => ({ routeId: observation.routeIdScope!, ...(observation.edgeIdScope === undefined ? {} : { edgeId: observation.edgeIdScope }), fx: observation }));
+      const routeFactMap = new Map<string, { routeId: string; edgeId?: string; fx: FxSnapshot }>();
+      for (const fact of [...persistedRouteFacts, ...(input.routeFacts ?? [])]) routeFactMap.set(`${fact.routeId}|${fact.edgeId ?? '*'}`, fact);
       const result = this.recommendPaymentPaths({
         amount: transaction.amount, asOf: evaluatedAt, ...(merchant ? { merchant } : {}),
         ...(country ? { country } : {}), ...(input.channel ? { channel: input.channel } : {}),
         ...(input.paymentMethod ? { paymentMethod: input.paymentMethod } : {}),
-        ...(input.routeFacts ? { routeFacts: input.routeFacts } : {}),
+        routeFacts: [...routeFactMap.values()],
         routeIds: routes.map(route => route.id), limit: 128, continuation: true,
       });
       for (const path of result.candidates) {

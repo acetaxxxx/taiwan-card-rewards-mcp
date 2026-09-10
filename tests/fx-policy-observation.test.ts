@@ -50,4 +50,12 @@ describe('FX policy and observation persistence', () => {
     expect(candidate?.fxEstimate?.status).toBe('stale_estimate');
     expect(result.requiredActions.some((action) => action.fxResolutionRequest?.quoteCurrency === 'TWD')).toBe(true);
   });
+
+  it('preserves route and edge scope when persisting observations', () => {
+    const service = new RewardService(new MemoryStore(), 'user-1');
+    const observation = service.upsertFxObservation({ baseCurrency: 'USD', quoteCurrency: 'TWD', ratePpm: 32000000, capturedAt: '2026-09-10T00:00:00Z', provider: 'Wallet', rateType: 'spot_selling', sourceUrl: 'https://wallet.example/rate', contentHash: 'route-rate', routeIdScope: 'route-1', edgeIdScope: 'edge-1', idempotencyKey: 'route-obs-1' });
+    expect(observation.routeIdScope).toBe('route-1');
+    expect(observation.edgeIdScope).toBe('edge-1');
+    expect(() => service.upsertFxObservation({ baseCurrency: 'USD', quoteCurrency: 'TWD', ratePpm: 32000000, capturedAt: '2026-09-10T00:00:00Z', provider: 'Wallet', rateType: 'spot_selling', sourceUrl: 'https://wallet.example/rate', contentHash: 'route-rate', edgeIdScope: 'edge-2', idempotencyKey: 'bad-scope' })).toThrow(/requires routeIdScope/);
+  });
 });
