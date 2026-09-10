@@ -858,14 +858,15 @@ export class RewardService {
           const walletNode = { id: 'wallet', kind: 'wallet_balance' as const, displayName: capability.providerId };
           const nodes = [
             { id: 'funding', kind: 'funding_source' as const, displayName: seed },
-            ...(funding.kind === 'credit_card' ? [walletNode] : []),
+            walletNode,
             providerNode, acceptanceNode, { id: 'merchant', kind: 'merchant' as const, displayName: rawMerchant },
           ];
           const evidenceIds = capability.evidenceIds;
           const edges = funding.kind === 'credit_card'
             ? [{ edgeId: 'fund', fromNodeId: 'funding', toNodeId: 'wallet', transition: 'wallet_top_up' as const, evidenceIds }, { edgeId: 'pay', fromNodeId: 'wallet', toNodeId: 'acceptance', transition: 'wallet_debit' as const, evidenceIds }, { edgeId: 'settle', fromNodeId: 'acceptance', toNodeId: 'merchant', transition: 'merchant_settlement' as const, evidenceIds }]
-            : [{ edgeId: 'debit', fromNodeId: 'funding', toNodeId: 'service', transition: 'account_debit' as const, evidenceIds }, { edgeId: 'pay', fromNodeId: 'service', toNodeId: 'acceptance', transition: 'service_to_acceptance' as const, evidenceIds }, { edgeId: 'settle', fromNodeId: 'acceptance', toNodeId: 'merchant', transition: 'merchant_settlement' as const, evidenceIds }];
-          generatedRoutes.push({ id: `generated_${capability.id}_${seed}`, status: 'active', layers: [{ kind: 'merchant_acceptance', providerId: capability.acceptanceProviderId ?? capability.providerId }, ...(capability.consumerAppId ? [{ kind: 'consumer_app' as const, appId: capability.consumerAppId }] : []), { kind: 'payment_provider', providerId: capability.providerId }], funding, ...(capability.sourceUrl ? { sourceUrl: capability.sourceUrl } : {}), observedAt: capability.observedAt, ...(capability.validFrom ? { validFrom: capability.validFrom } : {}), ...(capability.validTo ? { validTo: capability.validTo } : {}), authority: 'wallet', confidence: 'high', evidenceIds, idempotencyKey: `generated:${capability.id}:${seed}`, nodes, edges });
+            : [{ edgeId: 'debit', fromNodeId: 'funding', toNodeId: 'wallet', transition: 'account_debit' as const, evidenceIds }, { edgeId: 'pay', fromNodeId: 'wallet', toNodeId: 'acceptance', transition: 'wallet_debit' as const, evidenceIds }, { edgeId: 'settle', fromNodeId: 'acceptance', toNodeId: 'merchant', transition: 'merchant_settlement' as const, evidenceIds }];
+          const sourceUrl = capability.sourceUrl ?? state.evidence.find((evidence) => evidence.id === evidenceIds[0])?.sourceUrl;
+          generatedRoutes.push({ id: `generated_${capability.id}_${seed}`, status: 'active', layers: [{ kind: 'merchant_acceptance', providerId: capability.acceptanceProviderId ?? capability.providerId }, ...(capability.consumerAppId ? [{ kind: 'consumer_app' as const, appId: capability.consumerAppId }] : []), { kind: 'payment_provider', providerId: capability.providerId }], funding, ...(sourceUrl ? { sourceUrl } : {}), observedAt: capability.observedAt, ...(capability.validFrom ? { validFrom: capability.validFrom } : {}), ...(capability.validTo ? { validTo: capability.validTo } : {}), authority: 'wallet', confidence: 'high', evidenceIds, idempotencyKey: `generated:${capability.id}:${seed}`, nodes, edges });
         }
       }
     }

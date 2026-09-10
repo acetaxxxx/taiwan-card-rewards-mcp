@@ -35,4 +35,15 @@ describe('public payment capability persistence', () => {
     expect(result.candidates.some((candidate) => candidate.kind === 'payment_path' && candidate.routeId?.startsWith('generated_'))).toBe(true);
     expect(store.read().paymentRoutes).toHaveLength(0);
   });
+
+  it('generates an account-funded planned route with explicit debit and wallet transitions', () => {
+    const service = new RewardService(new MemoryStore(), 'u1');
+    const account = service.upsertPaymentAccount({ providerId: 'bank', kind: 'linked_bank_account', displayName: 'Bank account', status: 'active', observedAt: '2026-09-01T00:00:00Z', confirmation: { confirmedAt: '2026-09-01T00:00:00Z', confirmedBy: 'u1' }, idempotencyKey: 'generated-account' });
+    const evidence = service.submitEvidence({ id: 'account-capability-evidence', requirementId: 'payment-capability', sourceIdentity: 'wallet.example', sourceType: 'official', authority: 'wallet', claim: { capability: 'account wallet acceptance' }, observedAt: '2026-09-01T00:00:00Z', confidence: 'high', contentHash: 'account-capability-hash', reviewState: 'accepted', sourceUrl: 'https://wallet.example/terms' });
+    service.upsertPaymentCapability({ providerId: 'wallet.example', acceptanceProviderId: 'qr-network', fundingKinds: ['account'], evidenceIds: [evidence.id], observedAt: '2026-09-01T00:00:00Z', idempotencyKey: 'account-capability' });
+    const result = service.recommendIntent({ merchant: 'shop', amount: { amountMinor: 1000, currency: 'TWD' }, occurredAt: '2026-09-02T00:00:00Z' });
+    const candidate = result.candidates.find((item) => item.routeId?.endsWith(`_${account.id}`));
+    expect(candidate).toEqual(expect.objectContaining({ kind: 'payment_path', routeId: expect.stringContaining('generated_') }));
+    expect(candidate?.events.map((event) => event.transition)).toEqual(['account_debit', 'wallet_debit', 'merchant_settlement']);
+  });
 });
