@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { RewardService } from '../src/service.js';
 import { emptyState, type LedgerStore, type StoredState } from '../src/store.js';
+import type { Money } from '../src/types.js';
 
 class MemoryStore implements LedgerStore { private state: StoredState = emptyState(); read() { return structuredClone(this.state); } write(next: StoredState) { this.state = structuredClone(next); } update(mutator: (state: StoredState) => void) { const next = this.read(); mutator(next); this.write(next); return this.read(); } close() {} }
 const route = { status: 'active' as const, idempotencyKey: 'path', layers: [{ kind: 'card_issuer' as const, providerId: 'bank', evidenceIds: ['official-route'] }], funding: { kind: 'credit_card' as const, cardId: 'card-1' }, observedAt: '2026-09-01T00:00:00Z', sourceUrl: 'https://bank.example/offer', authority: 'issuer' as const, confidence: 'high' as const, evidenceIds: ['official-route'], confirmation: { confirmedAt: '2026-09-01T00:00:00Z', confirmedBy: 'user' } };
@@ -36,6 +37,18 @@ describe('proactive payment path recommendation', () => {
     const precise = { id: 'precise', baseCurrency: 'USD', quoteCurrency: 'TWD', ratePpm: 32_000_000, capturedAt: '2026-09-01T00:00:00Z', provider: 'edge', rateType: 'spot_selling' as const };
     const result = service.recommendPaymentPaths({ amount: { amountMinor: 1000, currency: 'TWD' }, asOf: '2026-09-02T00:00:00Z', routeIds: [route.id], routeFacts: [{ routeId: route.id, fx: fallback }, { routeId: route.id, edgeId: 'settle', fx: precise }] });
     expect(result.candidates[0]?.feeTotal).toEqual({ amountMinor: 3200, currency: 'TWD' });
+  });
+
+  it('compares route-specific FX costs and changes ordering after refresh', () => {
+    const store = new MemoryStore(); const service = new RewardService(store, 'u1');
+    const evidence = service.submitEvidence({ id: 'ranking-fx', requirementId: 'route', sourceIdentity: 'merchant', sourceType: 'official', authority: 'merchant', claim: { route: 'ranking-fx' }, observedAt: '2026-09-01T00:00:00Z', confidence: 'high', contentHash: 'ranking-fx', reviewState: 'accepted', sourceUrl: 'https://merchant.example/fees' });
+    const makeRoute = (id: string, fee: Money) => service.upsertPaymentRoute({ status: 'active', idempotencyKey: id, layers: [], funding: { kind: 'cash' }, observedAt: '2026-09-01T00:00:00Z', sourceUrl: 'https://merchant.example/fees', authority: 'merchant', confidence: 'high', evidenceIds: [evidence.id], nodes: [{ id: `${id}-cash`, kind: 'funding_source', displayName: 'cash' }, { id: `${id}-merchant`, kind: 'merchant', displayName: 'merchant' }], edges: [{ edgeId: `${id}-settle`, fromNodeId: `${id}-cash`, toNodeId: `${id}-merchant`, transition: 'direct_settlement', evidenceIds: [evidence.id], fee }], confirmation: { confirmedAt: '2026-09-01T00:00:00Z', confirmedBy: 'u1' } });
+    const usd = makeRoute('usd-ranking', { amountMinor: 100, currency: 'USD' });
+    const twd = makeRoute('twd-ranking', { amountMinor: 4000, currency: 'TWD' });
+    const first = service.recommendPaymentPaths({ amount: { amountMinor: 10000, currency: 'TWD' }, asOf: '2026-09-02T00:00:00Z', routeIds: [usd.id, twd.id], routeFacts: [{ routeId: usd.id, edgeId: 'usd-ranking-settle', fx: { id: 'fx-low', baseCurrency: 'USD', quoteCurrency: 'TWD', ratePpm: 32_000_000, capturedAt: '2026-09-01T00:00:00Z', provider: 'route-usd', rateType: 'spot_selling' } }] });
+    expect(first.candidates.map((candidate) => candidate.routeId)).toEqual([usd.id, twd.id]);
+    const second = service.recommendPaymentPaths({ amount: { amountMinor: 10000, currency: 'TWD' }, asOf: '2026-09-02T00:00:00Z', routeIds: [usd.id, twd.id], routeFacts: [{ routeId: usd.id, edgeId: 'usd-ranking-settle', fx: { id: 'fx-high', baseCurrency: 'USD', quoteCurrency: 'TWD', ratePpm: 50_000_000, capturedAt: '2026-09-01T00:00:00Z', provider: 'route-usd', rateType: 'spot_selling' } }] });
+    expect(second.candidates.map((candidate) => candidate.routeId)).toEqual([twd.id, usd.id]);
   });
   it('accepts valuation only when the official evidence claim matches and is user scoped', () => {
     const store = new MemoryStore(); const service = new RewardService(store, 'u1');

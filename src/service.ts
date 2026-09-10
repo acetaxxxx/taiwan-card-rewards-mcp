@@ -996,6 +996,14 @@ export class RewardService {
         .map((observation) => ({ routeId: observation.routeIdScope!, ...(observation.edgeIdScope === undefined ? {} : { edgeId: observation.edgeIdScope }), fx: observation }));
       const routeFactMap = new Map<string, { routeId: string; edgeId?: string; fx: FxSnapshot }>();
       for (const fact of [...persistedRouteFacts, ...(input.routeFacts ?? [])]) routeFactMap.set(`${fact.routeId}|${fact.edgeId ?? '*'}`, fact);
+      if (input.fxObservation) for (const route of routes) for (const edge of route.edges ?? []) {
+        const costs = [edge.fee, edge.markup, edge.foreignTransactionFee, edge.dcc?.selected ? edge.dcc.fee : undefined]
+          .filter((cost): cost is Money => cost !== undefined && cost.currency !== transaction.amount.currency);
+        if (costs.some((cost) => cost.currency === input.fxObservation!.baseCurrency && input.fxObservation!.quoteCurrency === transaction.amount.currency)) {
+          const key = `${route.id}|${edge.edgeId}`;
+          if (!routeFactMap.has(key)) routeFactMap.set(key, { routeId: route.id, edgeId: edge.edgeId, fx: input.fxObservation });
+        }
+      }
       const result = this.recommendPaymentPaths({
         amount: transaction.amount, asOf: evaluatedAt, ...(merchant ? { merchant } : {}),
         ...(country ? { country } : {}), ...(input.channel ? { channel: input.channel } : {}),
@@ -1022,7 +1030,8 @@ export class RewardService {
         }) ? (() => {
           const stale = fxCostEvents.some((event) => Math.abs(Date.parse(evaluatedAt) - Date.parse(event.fx!.capturedAt)) > (event.fx!.maxAgeSeconds ?? 7 * 24 * 3600) * 1000);
           const observation = fxCostEvents[0]!.fx!;
-          return { status: stale ? 'stale_estimate' as const : 'policy_current' as const, provider: observation.provider, capturedAt: observation.capturedAt, ...(observation.sourceUrl ? { sourceUrl: observation.sourceUrl } : {}), assumption: stale ? 'using a route FX snapshot beyond its freshness window; refresh before relying on the value' : 'using the route or edge FX snapshot for foreign-currency costs' };
+          const reference = input.fxObservation?.id === observation.id;
+          return { status: reference ? 'reference_estimate' as const : stale ? 'stale_estimate' as const : 'policy_current' as const, provider: observation.provider, capturedAt: observation.capturedAt, ...(observation.sourceUrl ? { sourceUrl: observation.sourceUrl } : {}), assumption: reference ? 'using an Agent-supplied public reference observation; route policy and final settlement cost remain unconfirmed' : stale ? 'using a route FX snapshot beyond its freshness window; refresh before relying on the value' : 'using the route or edge FX snapshot for foreign-currency costs' };
         })() : { status: 'unavailable' as const, assumption: 'foreign-currency route costs cannot be compared without a matching route or edge FX snapshot' };
         candidates.push({
           id: path.id, kind: 'payment_path', routeId: path.routeId, fundingSource: path.fundingSource,
