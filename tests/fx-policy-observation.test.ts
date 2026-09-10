@@ -45,6 +45,15 @@ describe('FX policy and observation persistence', () => {
     expect(result.candidates.find((candidate) => candidate.cardId === 'card-jpy')?.matchedRules[0]?.status).toBe('matched');
   });
 
+  it('does not reuse a route-scoped observation for a direct-card candidate', () => {
+    const service = new RewardService(new MemoryStore(), 'user-1');
+    service.registerCard({ id: 'card-route-scope', issuer: 'Bank', productName: 'Japan Card' });
+    service.upsertOffer({ id: 'route-scope-offer', url: 'https://bank.example/offer', fetchedAt: '2026-09-01T00:00:00Z', contentHash: 'route-scope-offer', parserVersion: '1', verified: true }, { id: 'route-scope-rule', cardId: 'card-route-scope', version: '1', sourceSnapshotId: 'route-scope-offer', status: 'active', validFrom: '2026-01-01T00:00:00Z', settlementCurrency: 'TWD', match: {}, reward: { kind: 'percentage', rateBps: 100 } });
+    service.upsertFxObservation({ baseCurrency: 'JPY', quoteCurrency: 'TWD', ratePpm: 215000, capturedAt: '2026-09-09T00:00:00Z', maxAgeSeconds: 86400, provider: 'Wallet', rateType: 'spot_selling', sourceUrl: 'https://wallet.example/rate', contentHash: 'route-scoped-rate', routeIdScope: 'route-only', edgeIdScope: 'edge-1', idempotencyKey: 'route-scoped-observation' });
+    const candidate = service.recommendIntent({ merchant: 'Shop', amount: { amountMinor: 1000, currency: 'JPY' }, occurredAt: '2026-09-10T00:00:00Z' }).candidates.find((item) => item.cardId === 'card-route-scope');
+    expect(candidate?.fxEstimate?.status).toBe('unavailable');
+  });
+
   it('returns a stale estimate with a refresh action instead of dropping the candidate', () => {
     const service = new RewardService(new MemoryStore(), 'user-1');
     service.registerCard({ id: 'card-jpy', issuer: 'Bank', productName: 'Japan Card' });
