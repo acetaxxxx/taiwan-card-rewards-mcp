@@ -1,6 +1,6 @@
 # 07: 從已驗證支付關係建立暫存付款路徑
 
-Status: ready-for-agent
+Status: ready-for-human
 
 **Blocked by:** 03, 06.
 
@@ -11,12 +11,12 @@ Status: ready-for-agent
 - [x] 新的 planned 組合不需 upsert durable route；待綁定／登記的路徑列為 action-required。
 - [x] 遵守 top-up／purchase 區別、funding provenance 與既有 stacking 政策；品牌名不推導受理關係。
 - [x] 有界探索能續查並揭露 coverage；Agent workflow 示範沒有已登記組合仍能探索付款方式。
-- [ ] 新生成的多層路徑回傳各層優惠與完整回饋拆解；以多條競爭路徑驗證共享規則不重複加總、互斥優惠不自動相加、top-up 不被當成直接 purchase。
+- [x] 新生成的多層路徑回傳各層優惠與完整回饋拆解；以多條競爭路徑驗證共享規則不重複加總、互斥優惠不自動相加、top-up 不被當成直接 purchase。
 
 ## 共通交付要求
 
-- [ ] 完成本票 public schema、dispatcher、service、必要保存、Agent 操作文件與對應端到端驗證，維持舊輸入相容。
-- [ ] 推薦不写交易或消耗 cap；unknown 不等於零；來源、scope 與 tenant 隔離有效。
+- [x] 完成本票 public schema、dispatcher、service、必要保存、Agent 操作文件與對應端到端驗證，維持舊輸入相容。
+- [x] 推薦不写交易或消耗 cap；unknown 不等於零；來源、scope 與 tenant 隔離有效。
 
 ## Comments
 
