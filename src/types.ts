@@ -649,8 +649,9 @@ export interface IntentCandidate {
   status: 'ready' | 'unknown' | 'blocked' | 'no_match';
   matchedRules: readonly IntentRule[];
   reward?: Money;
+  netSpend?: Money;
   exclusionReasons: readonly string[];
-  fxEstimate?: { status: 'policy_current' | 'stale_estimate' | 'reference_estimate' | 'unavailable'; provider?: string; capturedAt?: string; assumption: string };
+  fxEstimate?: { status: 'policy_current' | 'stale_estimate' | 'reference_estimate' | 'unavailable'; provider?: string; capturedAt?: string; sourceUrl?: string; assumption: string };
 }
 export interface IntentRule {
   ruleId: string;

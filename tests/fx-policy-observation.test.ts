@@ -58,4 +58,13 @@ describe('FX policy and observation persistence', () => {
     expect(observation.edgeIdScope).toBe('edge-1');
     expect(() => service.upsertFxObservation({ baseCurrency: 'USD', quoteCurrency: 'TWD', ratePpm: 32000000, capturedAt: '2026-09-10T00:00:00Z', provider: 'Wallet', rateType: 'spot_selling', sourceUrl: 'https://wallet.example/rate', contentHash: 'route-rate', edgeIdScope: 'edge-2', idempotencyKey: 'bad-scope' })).toThrow(/requires routeIdScope/);
   });
+
+  it('marks missing FX as unavailable instead of inventing a zero-cost estimate', () => {
+    const service = new RewardService(new MemoryStore(), 'user-1');
+    service.registerCard({ id: 'card-jpy', issuer: 'Bank', productName: 'Japan Card' });
+    service.upsertOffer({ id: 'offer-source', url: 'https://bank.example/offer', fetchedAt: '2026-09-01T00:00:00Z', contentHash: 'offer', parserVersion: '1', verified: true }, { id: 'jpy-rule', cardId: 'card-jpy', version: '1', sourceSnapshotId: 'offer-source', status: 'active', validFrom: '2026-01-01T00:00:00Z', settlementCurrency: 'TWD', match: {}, reward: { kind: 'percentage', rateBps: 100 } });
+    const candidate = service.recommendIntent({ merchant: 'Shop', amount: { amountMinor: 1000, currency: 'JPY' }, occurredAt: '2026-09-10T00:00:00Z' }).candidates.find((item) => item.cardId === 'card-jpy');
+    expect(candidate?.fxEstimate?.status).toBe('unavailable');
+    expect(candidate?.netSpend).toBeUndefined();
+  });
 });

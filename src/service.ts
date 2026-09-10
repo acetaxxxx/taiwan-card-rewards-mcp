@@ -872,7 +872,8 @@ export class RewardService {
         status: row?.status === 'ok' ? 'ready' : !tx || unresolved || !rules.length ? 'unknown' : 'no_match',
         matchedRules: projected,
         ...(row?.status === 'ok' && row.cappedReward ? { reward: row.cappedReward } : {}),
-        ...(reusable ? { fxEstimate: { status: reusable.stale ? 'stale_estimate' as const : 'policy_current' as const, provider: reusable.observation.provider, capturedAt: reusable.observation.capturedAt, assumption: reusable.stale ? 'using the stored observation within the planned-estimate maximum age; refresh before relying on the value' : 'using a fresh stored observation' } } : {}),
+        ...(row?.status === 'ok' && row.cappedReward && row.cappedReward.currency === transaction?.amount.currency ? { netSpend: { amountMinor: Math.max(0, (transaction?.amount.amountMinor ?? 0) - row.cappedReward.amountMinor), currency: transaction.amount.currency } } : {}),
+        ...(reusable ? { fxEstimate: { status: reusable.stale ? 'stale_estimate' as const : 'policy_current' as const, provider: reusable.observation.provider, capturedAt: reusable.observation.capturedAt, ...(reusable.observation.sourceUrl ? { sourceUrl: reusable.observation.sourceUrl } : {}), assumption: reusable.stale ? 'using the stored observation within the planned-estimate maximum age; refresh before relying on the value' : 'using a fresh stored observation' } } : ruleQuote ? { fxEstimate: { status: 'unavailable' as const, assumption: 'no applicable stored observation is available; reward and net spend remain unresolved until a validated quote is supplied' } } : {}),
         exclusionReasons: row?.unknownReasons ?? (!rules.length ? ['no known offer rules'] : []),
       });
     }
