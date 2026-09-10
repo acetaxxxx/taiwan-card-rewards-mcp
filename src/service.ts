@@ -944,7 +944,7 @@ export class RewardService {
           registerFxPolicyResearch({
             purpose: 'policy_research', scope: { kind: 'issuer', issuer: card.issuer },
             ...(sourceUrls.length ? { sourceUrls, sourceStatus: 'known' as const } : { sourceStatus: 'discovery_required' as const }),
-            requiredFields: ['scope', 'conversionOwner', 'rateType', 'rateDirection', 'conversionTiming', 'feeBasis', 'markupBasis', 'sourceUrl', 'evidenceId', 'validity period'],
+            requiredFields: ['scope', 'conversionOwner', 'rateType', 'rateDirection', 'conversionTiming', 'feeBasis', 'markupBasis', 'freshForSeconds', 'maxEstimateAgeSeconds', 'sourceUrl', 'evidenceId', 'validity period'],
             submission: { tool: 'upsert_fx_policy', field: 'policy' },
           }, `card:${card.id}`);
         }
