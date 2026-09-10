@@ -787,7 +787,7 @@ export class RewardService {
       ...(merchant ? { merchant } : {}), ...(country ? { country } : {}),
       ...(input.channel ? { channel: input.channel } : {}),
       ...(input.paymentMethod ? { paymentMethod: input.paymentMethod } : {}),
-      ...(input.fx ? { fx: input.fx } : {}),
+      ...(input.fx ? { fx: input.fx } : input.fxObservation ? { fx: input.fxObservation } : {}),
     }) : undefined;
     const context = this.context(state, evaluatedAt, transaction);
     const storedFx = (baseCurrency: string, quoteCurrency: string, card?: CardDescriptor): { observation: FxObservationRecord; stale: boolean } | undefined => {
@@ -869,11 +869,11 @@ export class RewardService {
         fundingSource: { kind: 'credit_card', cardId: card.id },
         nodes: [{ id: 'funding', kind: 'funding_source', displayName: card.productName }, { id: 'merchant', kind: 'merchant', displayName: rawMerchant }],
         events: tx ? [{ kind: 'purchase', fromNodeId: 'funding', toNodeId: 'merchant', amount: tx.amount, transition: 'card_authorization' }] : [],
-        status: row?.status === 'ok' ? 'ready' : !tx || unresolved || !rules.length ? 'unknown' : 'no_match',
+        status: row?.status === 'ok' && !input.fxObservation ? 'ready' : !tx || unresolved || !rules.length ? 'unknown' : input.fxObservation ? 'unknown' : 'no_match',
         matchedRules: projected,
         ...(row?.status === 'ok' && row.cappedReward ? { reward: row.cappedReward } : {}),
         ...(row?.status === 'ok' && row.cappedReward && row.cappedReward.currency === transaction?.amount.currency ? { netSpend: { amountMinor: Math.max(0, (transaction?.amount.amountMinor ?? 0) - row.cappedReward.amountMinor), currency: transaction.amount.currency } } : {}),
-        ...(reusable ? { fxEstimate: { status: reusable.stale ? 'stale_estimate' as const : 'policy_current' as const, provider: reusable.observation.provider, capturedAt: reusable.observation.capturedAt, ...(reusable.observation.sourceUrl ? { sourceUrl: reusable.observation.sourceUrl } : {}), assumption: reusable.stale ? 'using the stored observation within the planned-estimate maximum age; refresh before relying on the value' : 'using a fresh stored observation' } } : ruleQuote ? { fxEstimate: { status: 'unavailable' as const, assumption: 'no applicable stored observation is available; reward and net spend remain unresolved until a validated quote is supplied' } } : {}),
+        ...(input.fxObservation ? { fxEstimate: { status: 'reference_estimate' as const, provider: input.fxObservation.provider, capturedAt: input.fxObservation.capturedAt, ...(input.fxObservation.sourceUrl ? { sourceUrl: input.fxObservation.sourceUrl } : {}), assumption: 'using an Agent-supplied public reference observation; issuer, card-scheme, fee, and eligibility terms remain unconfirmed' } } : reusable ? { fxEstimate: { status: reusable.stale ? 'stale_estimate' as const : 'policy_current' as const, provider: reusable.observation.provider, capturedAt: reusable.observation.capturedAt, ...(reusable.observation.sourceUrl ? { sourceUrl: reusable.observation.sourceUrl } : {}), assumption: reusable.stale ? 'using the stored observation within the planned-estimate maximum age; refresh before relying on the value' : 'using a fresh stored observation' } } : ruleQuote ? { fxEstimate: { status: 'unavailable' as const, assumption: 'no applicable stored observation is available; Agent must obtain the public reference observation before an estimate can be calculated' } } : {}),
         exclusionReasons: row?.unknownReasons ?? (!rules.length ? ['no known offer rules'] : []),
       });
     }

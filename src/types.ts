@@ -636,6 +636,8 @@ export interface RecommendationIntent {
   limit?: number;
   cursor?: string;
   fx?: FxSnapshot;
+  /** Agent-supplied public reference observation, separate from policy/path FX. */
+  fxObservation?: FxRateObservation;
   routeFacts?: readonly { routeId: string; edgeId?: string; fx: FxSnapshot }[];
 }
 export interface IntentCandidate {
