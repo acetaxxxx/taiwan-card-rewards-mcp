@@ -324,6 +324,27 @@ export interface FxRateObservation extends FxSnapshot {
   confidence?: 'high' | 'medium' | 'low' | undefined;
 }
 
+export type FxPolicyScope = { kind: 'card' | 'issuer' | 'route' | 'route_edge'; cardId?: string; issuer?: string; routeId?: string; edgeId?: string };
+export interface FxPolicyRecord {
+  id: string;
+  policyKey: string;
+  version: string;
+  scope: FxPolicyScope;
+  conversionOwner: 'card_scheme' | 'issuer' | 'wallet' | 'merchant_dcc' | 'unknown';
+  rateType: FxRateType;
+  rateDirection: 'base_to_quote';
+  conversionTiming: 'transaction' | 'clearing' | 'settlement' | 'posting';
+  feeBasis?: string;
+  markupBasis?: string;
+  sourceUrl?: string;
+  evidenceId: string;
+  observedAt: string;
+  validFrom?: string;
+  validTo?: string;
+  idempotencyKey: string;
+  ownerUser?: string;
+}
+
 export interface AppliedFxRate {
   snapshotId: string;
   baseCurrency: Currency;

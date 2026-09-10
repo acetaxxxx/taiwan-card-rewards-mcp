@@ -1,10 +1,10 @@
 import * as crypto from 'node:crypto';
 import { type LedgerStore, type RecordedTransaction, type StoredState } from './store.js';
 import { EventRewardLedger, convertMinor, createPaymentEventRewardCandidate, decidePaymentEventRewards, evaluateOffer, evaluatePredicate, matchPaymentEvent, matchPaymentEventChain, rankCards, resolveCyclePeriodKey } from './evaluator.js';
-import type { CardDescriptor, CardSwitchInput, CardSwitchProjection, CardSwitchStatus, CapPeriod, CapPoolDefinition, EvaluationContext, MerchantIdentity, MerchantResolution, Money, OfferConfirmation, OfferRuleVersion, OfferSourceSnapshot, RankingEntry, RewardBreakdown, RewardComponentRecord, TransactionTuple, UserBenefitInput, UserBenefitStatus, RecommendationPreflight, RecommendationRequiredAction, RecommendationRequirement, Diagnostic, EvidenceRecord, PaymentRouteRecord, PaymentAccountRecord, EventRewardLedgerRecord, EventRewardReversalRecord, PaymentPathRequest, PaymentPathRecommendation, PaymentPathCandidate, PaymentPathEvent, EligibilityFact, RewardValuationSnapshot, FxResolutionRequest, FxRateObservation, AppliedFxRate, RecommendationIntent, RecommendationIntentResult, IntentCandidate } from './types.js';
+import type { CardDescriptor, CardSwitchInput, CardSwitchProjection, CardSwitchStatus, CapPeriod, CapPoolDefinition, EvaluationContext, MerchantIdentity, MerchantResolution, Money, OfferConfirmation, OfferRuleVersion, OfferSourceSnapshot, RankingEntry, RewardBreakdown, RewardComponentRecord, TransactionTuple, UserBenefitInput, UserBenefitStatus, RecommendationPreflight, RecommendationRequiredAction, RecommendationRequirement, Diagnostic, EvidenceRecord, PaymentRouteRecord, PaymentAccountRecord, EventRewardLedgerRecord, EventRewardReversalRecord, PaymentPathRequest, PaymentPathRecommendation, PaymentPathCandidate, PaymentPathEvent, EligibilityFact, RewardValuationSnapshot, FxResolutionRequest, FxRateObservation, AppliedFxRate, RecommendationIntent, RecommendationIntentResult, IntentCandidate, FxPolicyRecord } from './types.js';
 import type { StartupConfig } from './startup.js';
 import { RewardServiceError } from './errors.js';
-import { validateCard, validateCapPool, validateConfirmation, validateEligibilityFact, validateMerchant, validateRecommendationTransaction, validateRule, validateSnapshot, validateTransaction, validateEvidence, validateFactCandidate, validatePaymentRouteRecord, validatePaymentAccountRecord, validateEventRewardInput, validatePaymentEvent, validatePaymentEventChainRule, validatePaymentEventRule, validateRewardValuationSnapshot } from './validation.js';
+import { validateCard, validateCapPool, validateConfirmation, validateEligibilityFact, validateMerchant, validateRecommendationTransaction, validateRule, validateSnapshot, validateTransaction, validateEvidence, validateFactCandidate, validatePaymentRouteRecord, validatePaymentAccountRecord, validateEventRewardInput, validatePaymentEvent, validatePaymentEventChainRule, validatePaymentEventRule, validateRewardValuationSnapshot, validateFxPolicy } from './validation.js';
 import { cardSwitchStatus, projectionFromInput } from './card-switch.js';
 import { buildFxResolutionRequest, freezeAppliedFxRate, deriveConversionOwner } from './fx.js';
 import { validateRecommendationIntent } from './validation.js';
@@ -26,7 +26,7 @@ function merchantId(): string {
   for (let i = 0; i < 16; i += 1) encoded += ULID_ALPHABET[bytes[i % bytes.length]! % 32];
   return `mch_${encoded}`;
 }
-function ownedId(prefix: 'ev' | 'fact' | 'route' | 'acct' | 'valuation'): string {
+function ownedId(prefix: 'ev' | 'fact' | 'route' | 'acct' | 'valuation' | 'fxp'): string {
   let time = Date.now();
   let encoded = '';
   for (let i = 0; i < 10; i += 1) { encoded = ULID_ALPHABET[time % 32] + encoded; time = Math.floor(time / 32); }
@@ -164,6 +164,24 @@ export class RewardService {
   listRewardValuationSnapshots(): readonly RewardValuationSnapshot[] {
     if (!this.metadataUser) return [];
     return (this.store.read().valuationSnapshots ?? []).filter((snapshot) => snapshot.ownerUser === this.metadataUser);
+  }
+
+  upsertFxPolicy(input: unknown): FxPolicyRecord {
+    if (!this.metadataUser) throw new RewardServiceError('UNAUTHENTICATED', 'FX policy requires an authenticated user');
+    const parsed = validateFxPolicy(input);
+    const state = this.store.read();
+    const evidence = state.evidence.find((candidate) => candidate.id === parsed.evidenceId && candidate.ownerUser === this.metadataUser);
+    if (!evidence || evidence.sourceType !== 'official' || evidence.reviewState !== 'accepted' || evidence.authority === 'user') throw new RewardServiceError('NEEDS_REVIEW', 'FX policy requires accepted official evidence owned by the current user');
+    const existing = (state.fxPolicies ?? []).find((candidate) => candidate.ownerUser === this.metadataUser && candidate.idempotencyKey === parsed.idempotencyKey);
+    const desired = { ...parsed, id: existing?.id ?? ownedId('fxp'), ownerUser: this.metadataUser };
+    if (existing) { if (JSON.stringify({ ...existing, id: parsed.id, ownerUser: parsed.ownerUser }) !== JSON.stringify({ ...desired, id: parsed.id, ownerUser: parsed.ownerUser })) throw new RewardServiceError('IDEMPOTENCY_CONFLICT', 'idempotencyKey already belongs to a different FX policy'); return existing; }
+    this.store.update((next) => { next.fxPolicies = [...(next.fxPolicies ?? []), desired]; });
+    return desired;
+  }
+
+  listFxPolicies(): readonly FxPolicyRecord[] {
+    if (!this.metadataUser) return [];
+    return (this.store.read().fxPolicies ?? []).filter((policy) => policy.ownerUser === this.metadataUser);
   }
 
   upsertPaymentRoute(input: unknown): PaymentRouteRecord {

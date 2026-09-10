@@ -1,7 +1,7 @@
 import * as crypto from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import type { CardDescriptor, CardSwitchCampaign, CardSwitchEnrollment, CardSwitchProjection, CapPoolDefinition, MerchantIdentity, OfferRuleVersion, OfferSourceSnapshot, RewardBreakdown, RewardComponentRecord, TransactionTuple, EvidenceRecord, FactCandidate, PaymentRouteRecord, PaymentAccountRecord, EventRewardLedgerRecord, EventRewardReversalRecord, EventRewardCapUsageRecord, RewardValuationSnapshot, AppliedFxRate } from './types.js';
+import type { CardDescriptor, CardSwitchCampaign, CardSwitchEnrollment, CardSwitchProjection, CapPoolDefinition, MerchantIdentity, OfferRuleVersion, OfferSourceSnapshot, RewardBreakdown, RewardComponentRecord, TransactionTuple, EvidenceRecord, FactCandidate, PaymentRouteRecord, PaymentAccountRecord, EventRewardLedgerRecord, EventRewardReversalRecord, EventRewardCapUsageRecord, RewardValuationSnapshot, AppliedFxRate, FxPolicyRecord } from './types.js';
 import type { StartupConfig } from './startup.js';
 import { validateStoredState } from './validation.js';
 
@@ -30,13 +30,14 @@ export interface StoredState {
   paymentRoutes: PaymentRouteRecord[];
   paymentAccounts: PaymentAccountRecord[];
   valuationSnapshots?: RewardValuationSnapshot[];
+  fxPolicies?: FxPolicyRecord[];
   eventRewardSchemaVersion: 1;
   eventRewardLedger: EventRewardLedgerRecord[];
   eventRewardReversals: EventRewardReversalRecord[];
   eventRewardCapUsage: EventRewardCapUsageRecord[];
 }
 
-export const emptyState = (): StoredState => ({ schemaVersion: 2, cards: [], snapshots: [], rules: [], transactions: [], campaigns: [], switchEnrollments: [], cardSwitches: [], capPools: [], rewardComponents: [], merchants: [], evidence: [], factCandidates: [], paymentRoutes: [], paymentAccounts: [], valuationSnapshots: [], eventRewardSchemaVersion: 1, eventRewardLedger: [], eventRewardReversals: [], eventRewardCapUsage: [] });
+export const emptyState = (): StoredState => ({ schemaVersion: 2, cards: [], snapshots: [], rules: [], transactions: [], campaigns: [], switchEnrollments: [], cardSwitches: [], capPools: [], rewardComponents: [], merchants: [], evidence: [], factCandidates: [], paymentRoutes: [], paymentAccounts: [], valuationSnapshots: [], fxPolicies: [], eventRewardSchemaVersion: 1, eventRewardLedger: [], eventRewardReversals: [], eventRewardCapUsage: [] });
 
 export class StoreError extends Error {
   constructor(public readonly code: string, message: string) {
