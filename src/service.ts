@@ -236,6 +236,7 @@ export class RewardService {
 
   upsertPaymentRoute(input: unknown, fxPolicyRequirement?: FxPolicyRequirement): PaymentRouteRecord & { requiredActions?: readonly FxPolicyAction[] } {
     const source = typeof input === 'object' && input !== null ? input as Record<string, unknown> : {};
+    const requirement = fxPolicyRequirement === undefined ? undefined : validateFxPolicyRequirement(fxPolicyRequirement);
     const parsed = validatePaymentRouteRecord({ ...source, id: 'route_input', ...(source.status === undefined ? { status: 'active' } : {}), ...(source.ownerUser === undefined ? {} : { ownerUser: source.ownerUser }) });
     const state = this.store.read();
     const accountId = parsed.funding.kind === 'account' ? parsed.funding.accountId : undefined;
@@ -251,15 +252,13 @@ export class RewardService {
         if (!parsed.failure) throw new RewardServiceError('INVALID_INPUT', 'failed payment routes require failure details');
         const failed: PaymentRouteRecord = { ...existing, status: 'failed', failure: parsed.failure };
         this.store.update((next) => { next.paymentRoutes = next.paymentRoutes.map((route) => route.id === existing.id ? failed : route); });
-        return failed;
+        return requirement !== undefined && !this.hasFxPolicy(requirement) ? { ...failed, requiredActions: [this.fxPolicyResearchAction(requirement, failed.sourceUrl)] } : failed;
       }
-      if (JSON.stringify({ ...existing, id: parsed.id, ownerUser: parsed.ownerUser }) !== JSON.stringify({ ...desired, id: parsed.id, ownerUser: parsed.ownerUser })) throw new RewardServiceError('IDEMPOTENCY_CONFLICT', 'idempotencyKey already belongs to a different payment route'); return existing;
+      if (JSON.stringify({ ...existing, id: parsed.id, ownerUser: parsed.ownerUser }) !== JSON.stringify({ ...desired, id: parsed.id, ownerUser: parsed.ownerUser })) throw new RewardServiceError('IDEMPOTENCY_CONFLICT', 'idempotencyKey already belongs to a different payment route');
+      return requirement !== undefined && !this.hasFxPolicy(requirement) ? { ...existing, requiredActions: [this.fxPolicyResearchAction(requirement, existing.sourceUrl)] } : existing;
     }
     this.store.update((next) => { next.paymentRoutes.push(desired); });
-    if (fxPolicyRequirement !== undefined) {
-      const requirement = validateFxPolicyRequirement(fxPolicyRequirement);
-      if (!this.hasFxPolicy(requirement)) return { ...desired, requiredActions: [this.fxPolicyResearchAction(requirement, desired.sourceUrl)] };
-    }
+    if (requirement !== undefined && !this.hasFxPolicy(requirement)) return { ...desired, requiredActions: [this.fxPolicyResearchAction(requirement, desired.sourceUrl)] };
     return desired;
   }
 

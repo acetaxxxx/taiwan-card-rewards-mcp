@@ -34,6 +34,8 @@ describe('FX policy and observation persistence', () => {
     expect(card.requiredActions).toEqual(expect.arrayContaining([expect.objectContaining({ action: 'research_fx_policy', fxPolicyResearchRequest: expect.objectContaining({ sourceStatus: 'discovery_required' }) })]));
     const route = service.upsertPaymentRoute({ layers: [], funding: { kind: 'credit_card', cardId: 'card-jpy' }, observedAt: '2026-09-10T00:00:00Z', idempotencyKey: 'route-fx-gap' }, { ...requirement, scope: { kind: 'route' as const, routeId: 'route-fx-gap' } });
     expect(route.requiredActions).toEqual(expect.arrayContaining([expect.objectContaining({ action: 'research_fx_policy', path: 'fxPolicy' })]));
+    const retry = service.upsertPaymentRoute({ layers: [], funding: { kind: 'credit_card', cardId: 'card-jpy' }, observedAt: '2026-09-10T00:00:00Z', idempotencyKey: 'route-fx-gap' }, { ...requirement, scope: { kind: 'route' as const, routeId: 'route-fx-gap' } });
+    expect(retry.requiredActions).toEqual(expect.arrayContaining([expect.objectContaining({ action: 'research_fx_policy' })]));
   });
 
   it('stores policy and observation separately with tenant ownership and idempotency', () => {
