@@ -114,6 +114,8 @@ describe("MCP Contract and Agent Boundary", () => {
     expect(search.properties).toEqual(expect.objectContaining({ canonicalMerchantId: expect.any(Object), market: expect.any(Object), mcc: expect.any(Object) }));
 
     const upsertOffer = mcpTools.find((tool) => tool.name === "upsert_offer")!.inputSchema as any;
+    const registerCard = mcpTools.find((tool) => tool.name === "register_card")!.inputSchema as any;
+    expect(registerCard.properties.fxPolicyRequirement.required).toEqual(["baseCurrency", "quoteCurrency", "scope"]);
     expect(upsertOffer.properties.capPools.type).toBe("array");
     expect(upsertOffer.properties.capPools.items.type).toBe("object");
     expect(upsertOffer.properties.merchant.additionalProperties).toBe(false);
@@ -123,6 +125,7 @@ describe("MCP Contract and Agent Boundary", () => {
     expect(upsertOffer.properties.fxPolicyRequirement.properties.scope.properties.kind.enum).toEqual(["card", "issuer", "route", "route_edge"]);
 
     const upsertRoute = mcpTools.find((tool) => tool.name === "upsert_payment_route")!.inputSchema as any;
+    expect(upsertRoute.properties.fxPolicyRequirement.properties.scope.properties.kind.enum).toEqual(["card", "issuer", "route", "route_edge"]);
     const edge = upsertRoute.properties.route.properties.edges.items;
     expect(edge.additionalProperties).toBe(false);
     expect(edge.properties.direction.enum).toEqual(["inbound", "outbound"]);

@@ -27,6 +27,15 @@ describe('FX policy and observation persistence', () => {
     ]));
   });
 
+  it('returns the same research action contract for card and route ingestion', () => {
+    const service = new RewardService(new MemoryStore(), 'user-1');
+    const requirement = { baseCurrency: 'JPY', quoteCurrency: 'TWD', scope: { kind: 'card' as const, cardId: 'card-jpy' } };
+    const card = service.registerCard({ id: 'card-jpy', issuer: 'Example Bank', productName: 'Japan Card' }, requirement);
+    expect(card.requiredActions).toEqual(expect.arrayContaining([expect.objectContaining({ action: 'research_fx_policy', fxPolicyResearchRequest: expect.objectContaining({ sourceStatus: 'discovery_required' }) })]));
+    const route = service.upsertPaymentRoute({ layers: [], funding: { kind: 'credit_card', cardId: 'card-jpy' }, observedAt: '2026-09-10T00:00:00Z', idempotencyKey: 'route-fx-gap' }, { ...requirement, scope: { kind: 'route' as const, routeId: 'route-fx-gap' } });
+    expect(route.requiredActions).toEqual(expect.arrayContaining([expect.objectContaining({ action: 'research_fx_policy', path: 'fxPolicy' })]));
+  });
+
   it('stores policy and observation separately with tenant ownership and idempotency', () => {
     const service = new RewardService(new MemoryStore(), 'user-1');
     const evidence = service.submitEvidence({ id: 'evidence-fx-policy', requirementId: 'fx-policy:issuer', sourceIdentity: 'issuer.example', sourceType: 'official', authority: 'issuer', claim: { policyKey: 'issuer-jpy', rateType: 'cash_selling' }, observedAt: '2026-09-10T00:00:00Z', confidence: 'high', contentHash: 'policy-hash', reviewState: 'accepted', sourceUrl: 'https://issuer.example/fx' });

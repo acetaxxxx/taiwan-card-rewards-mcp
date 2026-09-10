@@ -39,9 +39,23 @@ function accountId(): string { return ownedId('acct'); }
 function normalizedMerchantKey(value: string): string {
   return value.normalize('NFKC').toLocaleLowerCase('und').replace(/[\p{P}\p{S}]+/gu, ' ').replace(/\s+/gu, ' ').trim();
 }
+type FxPolicyAction = RecommendationIntentResult['requiredActions'][number];
 
 export class RewardService {
   constructor(readonly store: LedgerStore, readonly metadataUser: string | undefined) {}
+
+  private hasFxPolicy(requirement: FxPolicyRequirement): boolean {
+    return (this.store.read().fxPolicies ?? []).some((policy) => policy.ownerUser === this.metadataUser && policy.baseCurrency === requirement.baseCurrency && policy.quoteCurrency === requirement.quoteCurrency && JSON.stringify(policy.scope) === JSON.stringify(requirement.scope));
+  }
+
+  private fxPolicyResearchAction(requirement: FxPolicyRequirement, sourceUrl?: string): FxPolicyAction {
+    const request: FxPolicyResearchRequest = {
+      purpose: 'policy_research', scope: requirement.scope, sourceStatus: sourceUrl ? 'known' : 'discovery_required', ...(sourceUrl ? { sourceUrls: [sourceUrl] } : {}),
+      requiredFields: ['scope', 'baseCurrency', 'quoteCurrency', 'conversionOwner', 'rateType', 'rateDirection', 'conversionTiming', 'feeBasis', 'markupBasis', 'freshForSeconds', 'maxEstimateAgeSeconds', 'sourceUrl', 'evidenceId', 'validity period'],
+      submission: { tool: 'upsert_fx_policy', field: 'policy' },
+    };
+    return { id: `fx-policy:${crypto.createHash('sha256').update(JSON.stringify(requirement)).digest('hex').slice(0, 16)}`, action: 'research_fx_policy', owner: 'agent', path: 'fxPolicy', requiredFacts: request.requiredFields, submission: request.submission, completionCondition: 'repeat the ingestion or recommend flow after storing a validated policy backed by accepted official evidence', fxPolicyResearchRequest: request };
+  }
 
   recordEventReward(input: unknown): EventRewardLedgerRecord {
     if (!this.metadataUser) throw new RewardServiceError('UNAUTHENTICATED', 'event reward recording requires an authenticated user');
@@ -220,7 +234,7 @@ export class RewardService {
 
   listPaymentCapabilities(): readonly PaymentCapabilityRecord[] { return this.store.read().paymentCapabilities ?? []; }
 
-  upsertPaymentRoute(input: unknown): PaymentRouteRecord {
+  upsertPaymentRoute(input: unknown, fxPolicyRequirement?: FxPolicyRequirement): PaymentRouteRecord & { requiredActions?: readonly FxPolicyAction[] } {
     const source = typeof input === 'object' && input !== null ? input as Record<string, unknown> : {};
     const parsed = validatePaymentRouteRecord({ ...source, id: 'route_input', ...(source.status === undefined ? { status: 'active' } : {}), ...(source.ownerUser === undefined ? {} : { ownerUser: source.ownerUser }) });
     const state = this.store.read();
@@ -242,6 +256,10 @@ export class RewardService {
       if (JSON.stringify({ ...existing, id: parsed.id, ownerUser: parsed.ownerUser }) !== JSON.stringify({ ...desired, id: parsed.id, ownerUser: parsed.ownerUser })) throw new RewardServiceError('IDEMPOTENCY_CONFLICT', 'idempotencyKey already belongs to a different payment route'); return existing;
     }
     this.store.update((next) => { next.paymentRoutes.push(desired); });
+    if (fxPolicyRequirement !== undefined) {
+      const requirement = validateFxPolicyRequirement(fxPolicyRequirement);
+      if (!this.hasFxPolicy(requirement)) return { ...desired, requiredActions: [this.fxPolicyResearchAction(requirement, desired.sourceUrl)] };
+    }
     return desired;
   }
 
@@ -374,7 +392,7 @@ export class RewardService {
     });
   }
 
-  registerCard(card: CardDescriptor): CardDescriptor {
+  registerCard(card: CardDescriptor, fxPolicyRequirement?: FxPolicyRequirement): CardDescriptor & { requiredActions?: readonly FxPolicyAction[] } {
     card = validateCard(card);
     if (!card.id || !card.issuer || !card.productName) throw new RewardServiceError('INVALID_CARD', 'card id, issuer, and productName are required');
     let result!: CardDescriptor;
@@ -384,6 +402,10 @@ export class RewardService {
       else state.cards.push(card);
       result = card;
     });
+    if (fxPolicyRequirement !== undefined) {
+      const requirement = validateFxPolicyRequirement(fxPolicyRequirement);
+      if (!this.hasFxPolicy(requirement)) return { ...result, requiredActions: [this.fxPolicyResearchAction(requirement)] };
+    }
     return result;
   }
 

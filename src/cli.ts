@@ -135,7 +135,7 @@ async function callTool(service: RewardService, params: Record<string, unknown>)
     return projectPage(projected, { page: effectivePage, limit: effectiveLimit, maxItems, maxBytes: 256 * 1024, evaluatedAt: new Date().toISOString(), dataVersion: contentHash(JSON.stringify(projected)).slice(0, 16), sortKey });
   };
   switch (name) {
-    case 'register_card': return service.registerCard(validateCard(args.card));
+    case 'register_card': return service.registerCard(validateCard(args.card), args.fxPolicyRequirement as any);
     case 'list_cards': { const rows = service.listCards(); return (args.limit !== undefined || args.page !== undefined || args.projection !== undefined) ? paged(rows, typeof args.projection === 'string' ? args.projection : undefined, typeof args.page === 'number' ? args.page : undefined, typeof args.limit === 'number' ? args.limit : undefined, (item) => String((item as CardDescriptor).id), 50) : rows; }
     case 'upsert_offer': return service.upsertOffer(validateSnapshot(args.snapshot), validateRule(args.rule), args.confirmation !== undefined ? validateConfirmation(args.confirmation) : undefined, args.capPools === undefined ? undefined : (Array.isArray(args.capPools) ? args.capPools.map(validateCapPool) : []), args.merchant as any, args.fxPolicyRequirement as any);
     case 'upsert_fx_policy': return service.upsertFxPolicy(args.policy);
@@ -154,7 +154,7 @@ async function callTool(service: RewardService, params: Record<string, unknown>)
     case 'recommendation_preflight': return args.transaction === undefined
       ? service.recommendIntent(args)
       : service.preflightRecommendation(validateRecommendationTransaction(args.transaction), { ...(args.context === undefined ? {} : { context: validateContext(args.context) }) });
-    case 'upsert_payment_route': return service.upsertPaymentRoute(args.route);
+    case 'upsert_payment_route': return service.upsertPaymentRoute(args.route, args.fxPolicyRequirement as any);
     case 'list_payment_routes': { const rows = [...service.listPaymentRoutes()]; return (args.limit !== undefined || args.page !== undefined || args.projection !== undefined) ? paged(rows, typeof args.projection === 'string' ? args.projection : undefined, typeof args.page === 'number' ? args.page : undefined, typeof args.limit === 'number' ? args.limit : undefined, (item) => String((item as { id: string }).id), 50) : rows; }
     case 'upsert_payment_capability': return service.upsertPaymentCapability(args.capability);
     case 'list_payment_capabilities': return service.listPaymentCapabilities();
