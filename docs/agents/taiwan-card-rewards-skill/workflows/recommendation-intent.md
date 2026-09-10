@@ -13,13 +13,14 @@ supported.
    Add only known `amount` (`amountMinor` + `currency`), `country`, `market`,
    `channel`, `paymentMethod`, and ISO `occurredAt`. Add `cardIds` or `routeIds`
    only when the user explicitly limits comparison. `limit` is 1..128 (default
-   page size 10). Use `cursor` only to continue the same result. Never choose a
-   `ruleId`.
+   page size 10), and `page` is 1-based (default 1). Use `limit` + `page` for
+   normal continuation; `cursor` is retained only for legacy callers. Never
+   choose a `ruleId`.
 2. Call `recommend` with that intent. If using the optional diagnostic instead,
    call `recommendation_preflight` with the same intent. Do not convert a
    preflight result into a separate transaction or choose a card from it.
 3. Read `status`, typed `candidates`, `requiredActions`, `coverage`,
-   `pageSize`, `hasMore`, `nextCursor`, `resultVersion`, and `evaluatedAt`. Each candidate has `kind` (`direct_card` or `payment_path`),
+   `page`, `pageSize`, `hasMore`, `resultVersion`, and `evaluatedAt`. Each candidate has `kind` (`direct_card` or `payment_path`),
    `status`, `matchedRules`, and `exclusionReasons`; show those facts without
    turning `unknown`/`blocked` into zero reward.
 4. Branch on the result:
@@ -64,9 +65,16 @@ should be reused, preserving `sourceKind: public_reference` for public rates.
 If research fails, retain the candidate's `unknown`/estimate label and report the
 source failure. Never invent a source, rate, field, or completion.
 
+## Pagination recovery
+
+When `hasMore` is true, request the next 1-based `page` with the same intent,
+`limit`, and `occurredAt`. Keep `resultVersion` stable across pages. If the
+result version changes, restart at page 1 and report that the underlying user
+data changed. `nextCursor` may be used only by legacy integrations.
+
 ## Scope limits
 
 Results are bounded to the current user state and declared coverage. Continue
-with `nextCursor` while `hasMore` is true; `coverage.total` is authoritative
+with `page` while `hasMore` is true; `coverage.total` is authoritative
 only when `explorationComplete` is true. Public reference estimates remain
 estimates until the applicable provider policy is confirmed.
