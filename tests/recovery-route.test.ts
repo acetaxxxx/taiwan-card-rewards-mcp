@@ -35,6 +35,7 @@ describe('payment-route FX recovery', () => {
     const missing = service.recommendIntent(intent);
     const action = missing.requiredActions.find((candidate) => candidate.fxResolutionRequest);
     expect(missing.candidates[0]?.status).toBe('blocked');
+    expect(missing.candidates[0]?.fxEstimate?.status).toBe('unavailable');
     expect(action).toEqual(expect.objectContaining({ owner: 'agent', candidateIds: [missing.candidates[0]!.id], submission: { tool: 'recommend', field: 'routeFacts' } }));
     expect(action?.fxResolutionRequest).toEqual(expect.objectContaining({ baseCurrency: 'USD', quoteCurrency: 'TWD', scope: { kind: 'route_edge', routeId: route.id, edgeId: 'settle' }, rateDirection: 'base_to_quote' }));
 

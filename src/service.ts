@@ -1000,12 +1000,24 @@ export class RewardService {
         });
         const supported = path.status === 'ready' && path.matchedRules.length > 0 &&
           path.matchedRules.every(rule => rule.reward.currency === transaction.amount.currency);
+        const fxCostEvents = path.events.filter((event) => [event.fee, event.markup, event.foreignTransactionFee, event.dcc?.selected ? event.dcc.fee : undefined]
+          .some((cost) => cost !== undefined && cost.currency !== transaction.amount.currency));
+        const fxEstimate = fxCostEvents.length === 0 ? undefined : fxCostEvents.every((event) => {
+          const costs = [event.fee, event.markup, event.foreignTransactionFee, event.dcc?.selected ? event.dcc.fee : undefined]
+            .filter((cost): cost is Money => cost !== undefined && cost.currency !== transaction.amount.currency);
+          return costs.every((cost) => event.fx?.baseCurrency === cost.currency && event.fx.quoteCurrency === transaction.amount.currency);
+        }) ? (() => {
+          const stale = fxCostEvents.some((event) => Math.abs(Date.parse(evaluatedAt) - Date.parse(event.fx!.capturedAt)) > (event.fx!.maxAgeSeconds ?? 7 * 24 * 3600) * 1000);
+          const observation = fxCostEvents[0]!.fx!;
+          return { status: stale ? 'stale_estimate' as const : 'policy_current' as const, provider: observation.provider, capturedAt: observation.capturedAt, ...(observation.sourceUrl ? { sourceUrl: observation.sourceUrl } : {}), assumption: stale ? 'using a route FX snapshot beyond its freshness window; refresh before relying on the value' : 'using the route or edge FX snapshot for foreign-currency costs' };
+        })() : { status: 'unavailable' as const, assumption: 'foreign-currency route costs cannot be compared without a matching route or edge FX snapshot' };
         candidates.push({
           id: path.id, kind: 'payment_path', routeId: path.routeId, fundingSource: path.fundingSource,
           nodes: path.nodes, events: path.events,
           status: supported ? 'ready' : path.status === 'blocked' ? 'blocked' : 'unknown',
           matchedRules: projected, ...(supported ? { reward: path.cappedReward } : {}),
           ...(supported && path.netValue ? { netSpend: { amountMinor: transaction.amount.amountMinor - path.netValue.amountMinor, currency: transaction.amount.currency } } : {}),
+          ...(fxEstimate ? { fxEstimate } : {}),
           exclusionReasons: path.exclusionReasons,
         });
         if (path.status === 'blocked') {
