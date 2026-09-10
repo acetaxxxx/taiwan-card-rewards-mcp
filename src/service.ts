@@ -853,6 +853,7 @@ export class RewardService {
       const ruleQuote = transaction ? rules.find((rule) => rule.settlementCurrency.toUpperCase() !== transaction.amount.currency.toUpperCase())?.settlementCurrency : undefined;
       if (transaction && ruleQuote) {
         const matchingPolicies = (state.fxPolicies ?? []).filter((candidate) => candidate.ownerUser === this.metadataUser &&
+          candidate.baseCurrency === transaction.amount.currency.toUpperCase() && candidate.quoteCurrency === ruleQuote.toUpperCase() &&
           ((candidate.scope.kind === 'card' && candidate.scope.cardId === card.id) ||
            (candidate.scope.kind === 'issuer' && candidate.scope.issuer === card.issuer)) &&
           (!candidate.validFrom || Date.parse(candidate.validFrom) <= Date.parse(evaluatedAt)) &&

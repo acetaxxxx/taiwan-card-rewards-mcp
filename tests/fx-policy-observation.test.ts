@@ -14,12 +14,12 @@ describe('FX policy and observation persistence', () => {
   it('stores policy and observation separately with tenant ownership and idempotency', () => {
     const service = new RewardService(new MemoryStore(), 'user-1');
     const evidence = service.submitEvidence({ id: 'evidence-fx-policy', requirementId: 'fx-policy:issuer', sourceIdentity: 'issuer.example', sourceType: 'official', authority: 'issuer', claim: { policyKey: 'issuer-jpy', rateType: 'cash_selling' }, observedAt: '2026-09-10T00:00:00Z', confidence: 'high', contentHash: 'policy-hash', reviewState: 'accepted', sourceUrl: 'https://issuer.example/fx' });
-    const policy = service.upsertFxPolicy({ policyKey: 'issuer-jpy', version: '1', scope: { kind: 'issuer', issuer: 'Example Bank' }, conversionOwner: 'issuer', rateType: 'cash_selling', rateDirection: 'base_to_quote', conversionTiming: 'settlement', evidenceId: evidence.id, observedAt: '2026-09-10T00:00:00Z', idempotencyKey: 'policy-1' });
+    const policy = service.upsertFxPolicy({ policyKey: 'issuer-jpy', version: '1', baseCurrency: 'JPY', quoteCurrency: 'TWD', scope: { kind: 'issuer', issuer: 'Example Bank' }, conversionOwner: 'issuer', rateType: 'cash_selling', rateDirection: 'base_to_quote', conversionTiming: 'settlement', evidenceId: evidence.id, observedAt: '2026-09-10T00:00:00Z', idempotencyKey: 'policy-1' });
     const observation = service.upsertFxObservation({ baseCurrency: 'JPY', quoteCurrency: 'TWD', ratePpm: 215000, capturedAt: '2026-09-10T00:00:00Z', provider: 'Example Bank', rateType: 'cash_selling', conversionOwner: 'issuer', sourceUrl: 'https://issuer.example/rates', contentHash: 'rate-hash', idempotencyKey: 'observation-1' });
 
     expect(service.listFxPolicies()).toEqual([policy]);
     expect(service.listFxObservations()).toEqual([observation]);
-    expect(service.upsertFxPolicy({ policyKey: 'issuer-jpy', version: '1', scope: { kind: 'issuer', issuer: 'Example Bank' }, conversionOwner: 'issuer', rateType: 'cash_selling', rateDirection: 'base_to_quote', conversionTiming: 'settlement', evidenceId: evidence.id, observedAt: '2026-09-10T00:00:00Z', idempotencyKey: 'policy-1' })).toEqual(policy);
+    expect(service.upsertFxPolicy({ policyKey: 'issuer-jpy', version: '1', baseCurrency: 'JPY', quoteCurrency: 'TWD', scope: { kind: 'issuer', issuer: 'Example Bank' }, conversionOwner: 'issuer', rateType: 'cash_selling', rateDirection: 'base_to_quote', conversionTiming: 'settlement', evidenceId: evidence.id, observedAt: '2026-09-10T00:00:00Z', idempotencyKey: 'policy-1' })).toEqual(policy);
     expect(service.store.read().fxPolicies).toHaveLength(1);
     expect(service.store.read().fxObservations).toHaveLength(1);
   });
@@ -27,12 +27,12 @@ describe('FX policy and observation persistence', () => {
   it('rejects observations without provenance and policies without accepted official evidence', () => {
     const service = new RewardService(new MemoryStore(), 'user-1');
     expect(() => service.upsertFxObservation({ baseCurrency: 'JPY', quoteCurrency: 'TWD', ratePpm: 215000, capturedAt: '2026-09-10T00:00:00Z', provider: 'Bank', rateType: 'cash_selling', idempotencyKey: 'observation-1' })).toThrow(/sourceUrl and contentHash/);
-    expect(() => service.upsertFxPolicy({ policyKey: 'issuer-jpy', version: '1', scope: { kind: 'issuer', issuer: 'Bank' }, conversionOwner: 'issuer', rateType: 'cash_selling', rateDirection: 'base_to_quote', conversionTiming: 'settlement', evidenceId: 'missing', observedAt: '2026-09-10T00:00:00Z', idempotencyKey: 'policy-1' })).toThrow(/accepted official evidence/);
+    expect(() => service.upsertFxPolicy({ policyKey: 'issuer-jpy', version: '1', baseCurrency: 'JPY', quoteCurrency: 'TWD', scope: { kind: 'issuer', issuer: 'Bank' }, conversionOwner: 'issuer', rateType: 'cash_selling', rateDirection: 'base_to_quote', conversionTiming: 'settlement', evidenceId: 'missing', observedAt: '2026-09-10T00:00:00Z', idempotencyKey: 'policy-1' })).toThrow(/accepted official evidence/);
   });
 
   it('requires the identifier matching an FX policy scope', () => {
     const service = new RewardService(new MemoryStore(), 'user-1');
-    expect(() => service.upsertFxPolicy({ policyKey: 'issuer-jpy', version: '1', scope: { kind: 'issuer' }, conversionOwner: 'issuer', rateType: 'cash_selling', rateDirection: 'base_to_quote', conversionTiming: 'settlement', evidenceId: 'missing', observedAt: '2026-09-10T00:00:00Z', idempotencyKey: 'policy-1' })).toThrow(/requires issuer/);
+    expect(() => service.upsertFxPolicy({ policyKey: 'issuer-jpy', version: '1', baseCurrency: 'JPY', quoteCurrency: 'TWD', scope: { kind: 'issuer' }, conversionOwner: 'issuer', rateType: 'cash_selling', rateDirection: 'base_to_quote', conversionTiming: 'settlement', evidenceId: 'missing', observedAt: '2026-09-10T00:00:00Z', idempotencyKey: 'policy-1' })).toThrow(/requires issuer/);
   });
 
   it('reuses a fresh stored observation during planned recommendation', () => {
@@ -73,7 +73,7 @@ describe('FX policy and observation persistence', () => {
     service.registerCard({ id: 'card-conflict', issuer: 'Example Bank', productName: 'Japan Card' });
     const evidence1 = service.submitEvidence({ id: 'policy-conflict-1', requirementId: 'fx-policy:issuer:terms', sourceIdentity: 'bank-terms', sourceType: 'official', authority: 'issuer', claim: { policy: 'settlement' }, observedAt: '2026-09-01T00:00:00Z', confidence: 'high', contentHash: 'policy-conflict-1', reviewState: 'accepted', sourceUrl: 'https://bank.example/terms' });
     const evidence2 = service.submitEvidence({ id: 'policy-conflict-2', requirementId: 'fx-policy:issuer:rate', sourceIdentity: 'bank-rate', sourceType: 'official', authority: 'issuer', claim: { policy: 'posting' }, observedAt: '2026-09-01T00:00:00Z', confidence: 'high', contentHash: 'policy-conflict-2', reviewState: 'accepted', sourceUrl: 'https://bank.example/rates' });
-    const base = { scope: { kind: 'issuer' as const, issuer: 'Example Bank' }, conversionOwner: 'issuer' as const, rateDirection: 'base_to_quote' as const, evidenceId: evidence1.id, observedAt: '2026-09-01T00:00:00Z' };
+    const base = { baseCurrency: 'JPY', quoteCurrency: 'TWD', scope: { kind: 'issuer' as const, issuer: 'Example Bank' }, conversionOwner: 'issuer' as const, rateDirection: 'base_to_quote' as const, evidenceId: evidence1.id, observedAt: '2026-09-01T00:00:00Z' };
     service.upsertFxPolicy({ ...base, policyKey: 'issuer-jpy', version: '1', rateType: 'cash_selling', conversionTiming: 'settlement', idempotencyKey: 'policy-conflict-1' });
     service.upsertFxPolicy({ ...base, evidenceId: evidence2.id, policyKey: 'issuer-jpy', version: '2', rateType: 'card_scheme', conversionTiming: 'posting', idempotencyKey: 'policy-conflict-2' });
     service.upsertOffer({ id: 'conflict-offer', url: 'https://bank.example/offer', fetchedAt: '2026-09-01T00:00:00Z', contentHash: 'conflict-offer', parserVersion: '1', verified: true }, { id: 'conflict-rule', cardId: 'card-conflict', version: '1', sourceSnapshotId: 'conflict-offer', status: 'active', validFrom: '2026-01-01T00:00:00Z', settlementCurrency: 'TWD', match: {}, reward: { kind: 'percentage', rateBps: 100 } });

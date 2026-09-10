@@ -22,4 +22,4 @@ Status: ready-for-agent
 
 使用者已核可八票拆分；補充要求為具體 FX 查詢來源／回填契約，以及多路徑與各層優惠比較。僅在前置票完成後開始實作。
 
-目前已完成第一個切片：外幣規則找不到適用 policy 時，recommend 會回傳去重的 `research_fx_policy` action，包含 scope、已知官方來源或 `discovery_required`、待補欄位與 `upsert_fx_policy` 提交入口；臺銀 reference estimate 仍與 policy 分開。Build 與完整測試通過。
+目前已完成第一個切片：外幣規則找不到適用 policy 時，recommend 會回傳去重的 `research_fx_policy` action，包含 scope、已知官方來源或 `discovery_required`、待補欄位與 `upsert_fx_policy` 提交入口；FX policy 現在也要求明確的 base/quote pair，衝突 policy 會要求 user 選擇，不會依保存順序任選。臺銀 reference estimate 仍與 policy 分開。Build 與完整測試通過。

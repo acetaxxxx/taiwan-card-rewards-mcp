@@ -338,6 +338,8 @@ export interface FxPolicyRecord {
   id: string;
   policyKey: string;
   version: string;
+  baseCurrency: Currency;
+  quoteCurrency: Currency;
   scope: FxPolicyScope;
   conversionOwner: 'card_scheme' | 'issuer' | 'wallet' | 'merchant_dcc' | 'unknown';
   rateType: FxRateType;
