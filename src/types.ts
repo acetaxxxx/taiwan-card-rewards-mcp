@@ -456,6 +456,7 @@ export interface FxResolutionRequest {
   retryAction: 'query_approved_fx_source' | 'ask_user' | 'refresh_external_data';
   userQuestion?: string | undefined;
   sourceUrls?: readonly string[];
+  referenceSourceUrls?: readonly string[];
   sourceStatus?: 'known' | 'discovery_required';
   purpose?: 'path_quote' | 'policy_research' | 'reference_estimate';
   rateDirection?: 'base_to_quote';

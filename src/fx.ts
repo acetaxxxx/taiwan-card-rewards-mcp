@@ -155,6 +155,7 @@ export function buildFxResolutionRequest(params: {
     sourceSelectionReason,
     retryAction,
     ...(usesPublicReference ? { sourceUrls: ['https://rate.bot.com.tw/xrt?Lang=zh-TW'] } : {}),
+    ...(transactionKind === 'planned' && !usesPublicReference ? { referenceSourceUrls: ['https://rate.bot.com.tw/xrt?Lang=zh-TW'] } : {}),
     sourceStatus: usesPublicReference ? 'known' : 'discovery_required',
     purpose: usesPublicReference ? 'reference_estimate' : transactionKind === 'planned' ? 'path_quote' : 'policy_research',
     rateDirection: 'base_to_quote',

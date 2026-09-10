@@ -49,6 +49,7 @@ describe('FX policy and observation persistence', () => {
     const candidate = result.candidates.find((item) => item.cardId === 'card-jpy');
     expect(candidate?.fxEstimate?.status).toBe('stale_estimate');
     expect(result.requiredActions.some((action) => action.fxResolutionRequest?.quoteCurrency === 'TWD')).toBe(true);
+    expect(result.requiredActions.find((action) => action.fxResolutionRequest?.quoteCurrency === 'TWD')?.fxResolutionRequest?.referenceSourceUrls).toEqual(['https://rate.bot.com.tw/xrt?Lang=zh-TW']);
   });
 
   it('preserves route and edge scope when persisting observations', () => {
