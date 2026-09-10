@@ -13,7 +13,7 @@ Implementation changes are committed incrementally on `enhance-user-exp`; the br
 | 05 | Implemented and verified | Public reference/stale/unavailable output, policy freshness windows, fallback source, route FX status, merchant-first net-spend projection, research fields for estimate windows, and multi-route fee/FX ranking are covered by targeted and full tests |
 | 06 | Implemented and verified | Stable intent cursor and canonical `limit + page` pagination, resultVersion-bound restart, 10-item pages, route rule-set coverage, actions and coverage semantics are covered by targeted and full tests |
 | 07 | Implemented and verified | Separate typed capability persistence, explicit transition requirements, ephemeral wallet/account route generation, capability-scoped binding actions, ADR 0009 ownership/version strategy, layered reward projection, and duplicate-rule protection are covered by targeted and full tests |
-| 08 | In progress | Canonical workflow, default usable routes, page pagination, FX recovery guidance, and public contract checks are aligned; final trace/document consistency audit remains |
+| 08 | In progress | Canonical workflow, default usable routes, page pagination, FX recovery guidance, and public contract checks are aligned; deterministic public trace now covers direct recommendation, FX recovery/retry, observation refresh, and page continuation; actual model trace remains |
 
 Each slice is reviewed against the public contract and independent acceptance tests. A passing fixture alone is insufficient: rule matching, uncertainty, and candidate-specific recovery are reviewed before advancing dependencies.
 
