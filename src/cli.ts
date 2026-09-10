@@ -10,7 +10,7 @@ import { RewardServiceError } from './errors.js';
 import { mcpInstructions, mcpTools } from './mcp-contract.js';
 import { evaluateOffer, rankCards } from './evaluator.js';
 import { validateUserBenefitInput, validateContext, validateToolArgs, validateRecommendationTransaction, validateTransaction, validateCard, validateCapPool, validateConfirmation, validateRule, validateSnapshot } from './validation.js';
-import { projectPage, ProjectionTooLargeError } from './projections.js';
+import { projectPage, ProjectionInputError, ProjectionTooLargeError } from './projections.js';
 import { SharedMcpClient, SharedMcpOwner, connectSharedBridge } from './shared-mcp.js';
 import { runStdioBridge } from './shared-cli.js';
 import type { CardDescriptor, RankingEntry, PaymentPathRequest } from './types.js';
@@ -60,7 +60,7 @@ async function processJsonRpc(service: RewardService, request: JsonRpc): Promise
     if (request.method === 'tools/call') return { jsonrpc: '2.0', id: request.id ?? null, result: toolResult(await callTool(service, request.params ?? {})) };
     return { jsonrpc: '2.0', id: request.id ?? null, error: { code: -32601, message: `Method not found: ${request.method ?? ''}` } };
   } catch (error) {
-    const code = error instanceof RewardServiceError || error instanceof StartupContractError ? error.code : error instanceof ProjectionTooLargeError ? 'PAYLOAD_TOO_LARGE' : 'INTERNAL_ERROR';
+    const code = error instanceof RewardServiceError || error instanceof StartupContractError ? error.code : error instanceof ProjectionInputError ? error.code : error instanceof ProjectionTooLargeError ? 'PAYLOAD_TOO_LARGE' : 'INTERNAL_ERROR';
     const data = error instanceof RewardServiceError && error.details !== undefined ? { code, details: error.details } : { code };
     return { jsonrpc: '2.0', id: request.id ?? null, error: { code: -32000, message: code, data } };
   }
@@ -122,7 +122,7 @@ async function callTool(service: RewardService, params: Record<string, unknown>)
     const allowedPath = ['amount', 'merchant', 'mcc', 'country', 'channel', 'paymentMethod', 'asOf', 'routeIds', 'limit', 'maxHops', 'maxEvents', 'maxBranchesPerNode'];
     for (const key of Object.keys(args.payment_path as object)) if (!allowedPath.includes(key)) throw new RewardServiceError('UNKNOWN_FIELD', `recommend.payment_path contains unsupported field: ${key}`);
   }
-  const paged = (value: unknown[], projection: string | undefined, page: number | undefined, limit: number | undefined, sortKey: (item: unknown) => string): unknown => {
+  const paged = (value: unknown[], projection: string | undefined, page: number | undefined, limit: number | undefined, sortKey: (item: unknown) => string, maxItems = 20): unknown => {
     if (projection !== undefined && !['summary', 'detail', 'calculation', 'audit'].includes(projection)) throw new RewardServiceError('INVALID_INPUT', 'projection is invalid');
     const projected = projection === 'summary' ? value.map((item) => {
       if (!item || typeof item !== 'object') return item;
@@ -131,11 +131,11 @@ async function callTool(service: RewardService, params: Record<string, unknown>)
     }) : value;
     const effectivePage = page ?? 1;
     const effectiveLimit = limit ?? 10;
-    return projectPage(projected, { page: effectivePage, limit: effectiveLimit, maxItems: 20, maxBytes: 256 * 1024, evaluatedAt: new Date().toISOString(), dataVersion: contentHash(JSON.stringify(projected)).slice(0, 16), sortKey });
+    return projectPage(projected, { page: effectivePage, limit: effectiveLimit, maxItems, maxBytes: 256 * 1024, evaluatedAt: new Date().toISOString(), dataVersion: contentHash(JSON.stringify(projected)).slice(0, 16), sortKey });
   };
   switch (name) {
     case 'register_card': return service.registerCard(validateCard(args.card));
-    case 'list_cards': { const rows = service.listCards(); return (args.limit !== undefined || args.page !== undefined || args.projection !== undefined) ? paged(rows, typeof args.projection === 'string' ? args.projection : undefined, typeof args.page === 'number' ? args.page : undefined, typeof args.limit === 'number' ? args.limit : undefined, (item) => String((item as CardDescriptor).id)) : rows; }
+    case 'list_cards': { const rows = service.listCards(); return (args.limit !== undefined || args.page !== undefined || args.projection !== undefined) ? paged(rows, typeof args.projection === 'string' ? args.projection : undefined, typeof args.page === 'number' ? args.page : undefined, typeof args.limit === 'number' ? args.limit : undefined, (item) => String((item as CardDescriptor).id), 50) : rows; }
     case 'upsert_offer': return service.upsertOffer(validateSnapshot(args.snapshot), validateRule(args.rule), args.confirmation !== undefined ? validateConfirmation(args.confirmation) : undefined, args.capPools === undefined ? undefined : (Array.isArray(args.capPools) ? args.capPools.map(validateCapPool) : []), args.merchant as any);
     case 'recommend': {
       if (args.kind === 'payment_path' && args.payment_path && typeof args.payment_path === 'object') {
@@ -146,9 +146,9 @@ async function callTool(service: RewardService, params: Record<string, unknown>)
     }
     case 'recommendation_preflight': return service.preflightRecommendation(validateRecommendationTransaction(args.transaction), { ...(args.context === undefined ? {} : { context: validateContext(args.context) }) });
     case 'upsert_payment_route': return service.upsertPaymentRoute(args.route);
-    case 'list_payment_routes': { const rows = [...service.listPaymentRoutes()]; return (args.limit !== undefined || args.page !== undefined || args.projection !== undefined) ? paged(rows, typeof args.projection === 'string' ? args.projection : undefined, typeof args.page === 'number' ? args.page : undefined, typeof args.limit === 'number' ? args.limit : undefined, (item) => String((item as { id: string }).id)) : rows; }
+    case 'list_payment_routes': { const rows = [...service.listPaymentRoutes()]; return (args.limit !== undefined || args.page !== undefined || args.projection !== undefined) ? paged(rows, typeof args.projection === 'string' ? args.projection : undefined, typeof args.page === 'number' ? args.page : undefined, typeof args.limit === 'number' ? args.limit : undefined, (item) => String((item as { id: string }).id), 50) : rows; }
     case 'register_payment_account': return service.upsertPaymentAccount(args.account);
-    case 'list_payment_accounts': { const rows = [...service.listPaymentAccounts()]; return (args.limit !== undefined || args.page !== undefined || args.projection !== undefined) ? paged(rows, typeof args.projection === 'string' ? args.projection : undefined, typeof args.page === 'number' ? args.page : undefined, typeof args.limit === 'number' ? args.limit : undefined, (item) => String((item as { id: string }).id)) : rows; }
+    case 'list_payment_accounts': { const rows = [...service.listPaymentAccounts()]; return (args.limit !== undefined || args.page !== undefined || args.projection !== undefined) ? paged(rows, typeof args.projection === 'string' ? args.projection : undefined, typeof args.page === 'number' ? args.page : undefined, typeof args.limit === 'number' ? args.limit : undefined, (item) => String((item as { id: string }).id), 50) : rows; }
     case 'recommend_payment_paths_v1': return service.recommendPaymentPaths({ amount: args.amount as PaymentPathRequest['amount'], ...(typeof args.merchant === 'string' ? { merchant: args.merchant } : {}), ...(typeof args.mcc === 'string' ? { mcc: args.mcc } : {}), ...(typeof args.country === 'string' ? { country: args.country } : {}), ...(typeof args.channel === 'string' ? { channel: args.channel } : {}), ...(typeof args.paymentMethod === 'string' ? { paymentMethod: args.paymentMethod } : {}), ...(typeof args.asOf === 'string' ? { asOf: args.asOf } : {}), ...(Array.isArray(args.routeIds) ? { routeIds: args.routeIds as string[] } : {}), ...(typeof args.limit === 'number' ? { limit: args.limit } : {}), ...(Array.isArray(args.eligibilityFacts) ? { eligibilityFacts: args.eligibilityFacts as PaymentPathRequest['eligibilityFacts'] } : {}) });
     case 'record_transaction': return service.recordTransaction(validateTransaction(args.transaction));
     case 'record_event_reward':

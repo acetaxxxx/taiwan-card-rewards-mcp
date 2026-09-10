@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.11.1
+
+- Fix bounded list projections used by Aion agents: `list_cards`, `list_payment_accounts`, and `list_payment_routes` now accept the documented `limit` range up to 50.
+- Report invalid projection bounds as `INVALID_INPUT` instead of masking them as `INTERNAL_ERROR`.
+
 ## 0.11.0
 
 - Added shared MCP owner/stdio bridge auto-attach for agents using the same
