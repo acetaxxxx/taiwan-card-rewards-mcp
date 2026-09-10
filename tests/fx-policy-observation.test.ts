@@ -52,6 +52,17 @@ describe('FX policy and observation persistence', () => {
     expect(result.requiredActions.find((action) => action.fxResolutionRequest?.quoteCurrency === 'TWD')?.fxResolutionRequest?.referenceSourceUrls).toEqual(['https://rate.bot.com.tw/xrt?Lang=zh-TW']);
   });
 
+  it('requests policy research separately from the FX observation refresh', () => {
+    const service = new RewardService(new MemoryStore(), 'user-1');
+    service.registerCard({ id: 'card-jpy', issuer: 'Example Bank', productName: 'Japan Card' });
+    service.upsertOffer({ id: 'policy-offer-source', url: 'https://bank.example/offer', fetchedAt: '2026-09-01T00:00:00Z', contentHash: 'policy-offer', parserVersion: '1', verified: true }, { id: 'policy-jpy-rule', cardId: 'card-jpy', version: '1', sourceSnapshotId: 'policy-offer-source', status: 'active', validFrom: '2026-01-01T00:00:00Z', settlementCurrency: 'TWD', match: {}, reward: { kind: 'percentage', rateBps: 100 } });
+    const result = service.recommendIntent({ merchant: 'Shop', amount: { amountMinor: 1000, currency: 'JPY' }, occurredAt: '2026-09-10T00:00:00Z' });
+    const action = result.requiredActions.find((candidate) => candidate.action === 'research_fx_policy');
+    expect(action).toEqual(expect.objectContaining({ owner: 'agent', submission: { tool: 'upsert_fx_policy', field: 'policy' } }));
+    expect(action?.fxPolicyResearchRequest).toEqual(expect.objectContaining({ purpose: 'policy_research', scope: { kind: 'issuer', issuer: 'Example Bank' }, sourceStatus: 'discovery_required' }));
+    expect(action?.requiredFacts).toEqual(expect.arrayContaining(['conversionOwner', 'rateType', 'conversionTiming', 'evidenceId']));
+  });
+
   it('preserves route and edge scope when persisting observations', () => {
     const service = new RewardService(new MemoryStore(), 'user-1');
     const observation = service.upsertFxObservation({ baseCurrency: 'USD', quoteCurrency: 'TWD', ratePpm: 32000000, capturedAt: '2026-09-10T00:00:00Z', provider: 'Wallet', rateType: 'spot_selling', sourceUrl: 'https://wallet.example/rate', contentHash: 'route-rate', routeIdScope: 'route-1', edgeIdScope: 'edge-1', idempotencyKey: 'route-obs-1' });

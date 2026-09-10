@@ -353,6 +353,14 @@ export interface FxPolicyRecord {
   idempotencyKey: string;
   ownerUser?: string;
 }
+export interface FxPolicyResearchRequest {
+  purpose: 'policy_research';
+  scope: FxPolicyScope;
+  sourceUrls?: readonly string[];
+  sourceStatus: 'known' | 'discovery_required';
+  requiredFields: readonly string[];
+  submission: { tool: 'upsert_fx_policy'; field: 'policy' };
+}
 
 export interface AppliedFxRate {
   snapshotId: string;
@@ -677,7 +685,7 @@ export interface IntentRule {
 export interface RecommendationIntentResult {
   status: 'ready' | 'partial' | 'needs_input' | 'no_match';
   candidates: readonly IntentCandidate[];
-  requiredActions: readonly { id: string; action: string; owner: 'agent' | 'user'; path?: string; requiredFacts: readonly string[]; candidateIds?: readonly string[]; submission?: { tool: string; field: string }; completionCondition?: string; fxResolutionRequest?: FxResolutionRequest }[];
+  requiredActions: readonly { id: string; action: string; owner: 'agent' | 'user'; path?: string; requiredFacts: readonly string[]; candidateIds?: readonly string[]; submission?: { tool: string; field: string }; completionCondition?: string; fxResolutionRequest?: FxResolutionRequest; fxPolicyResearchRequest?: FxPolicyResearchRequest }[];
   coverage: { scope: string; discoveredCount: number; bounded: boolean; explorationComplete: boolean; total?: number; notes: readonly string[] };
   evaluatedAt: string;
   fxResolutionRequest?: FxResolutionRequest;

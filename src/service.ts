@@ -1,7 +1,7 @@
 import * as crypto from 'node:crypto';
 import { type LedgerStore, type RecordedTransaction, type StoredState } from './store.js';
 import { EventRewardLedger, convertMinor, createPaymentEventRewardCandidate, decidePaymentEventRewards, evaluateOffer, evaluatePredicate, matchPaymentEvent, matchPaymentEventChain, rankCards, resolveCyclePeriodKey } from './evaluator.js';
-import type { CardDescriptor, CardSwitchInput, CardSwitchProjection, CardSwitchStatus, CapPeriod, CapPoolDefinition, EvaluationContext, MerchantIdentity, MerchantResolution, Money, OfferConfirmation, OfferRuleVersion, OfferSourceSnapshot, RankingEntry, RewardBreakdown, RewardComponentRecord, TransactionTuple, UserBenefitInput, UserBenefitStatus, RecommendationPreflight, RecommendationRequiredAction, RecommendationRequirement, Diagnostic, EvidenceRecord, PaymentRouteRecord, PaymentAccountRecord, EventRewardLedgerRecord, EventRewardReversalRecord, PaymentPathRequest, PaymentPathRecommendation, PaymentPathCandidate, PaymentPathEvent, EligibilityFact, RewardValuationSnapshot, FxResolutionRequest, FxRateObservation, AppliedFxRate, RecommendationIntent, RecommendationIntentResult, IntentCandidate, FxPolicyRecord, FxObservationRecord, FxSnapshot } from './types.js';
+import type { CardDescriptor, CardSwitchInput, CardSwitchProjection, CardSwitchStatus, CapPeriod, CapPoolDefinition, EvaluationContext, MerchantIdentity, MerchantResolution, Money, OfferConfirmation, OfferRuleVersion, OfferSourceSnapshot, RankingEntry, RewardBreakdown, RewardComponentRecord, TransactionTuple, UserBenefitInput, UserBenefitStatus, RecommendationPreflight, RecommendationRequiredAction, RecommendationRequirement, Diagnostic, EvidenceRecord, PaymentRouteRecord, PaymentAccountRecord, EventRewardLedgerRecord, EventRewardReversalRecord, PaymentPathRequest, PaymentPathRecommendation, PaymentPathCandidate, PaymentPathEvent, EligibilityFact, RewardValuationSnapshot, FxResolutionRequest, FxRateObservation, AppliedFxRate, RecommendationIntent, RecommendationIntentResult, IntentCandidate, FxPolicyRecord, FxPolicyResearchRequest, FxObservationRecord, FxSnapshot } from './types.js';
 import type { StartupConfig } from './startup.js';
 import { RewardServiceError } from './errors.js';
 import { validateCard, validateCapPool, validateConfirmation, validateEligibilityFact, validateMerchant, validateRecommendationTransaction, validateRule, validateSnapshot, validateTransaction, validateEvidence, validateFactCandidate, validatePaymentRouteRecord, validatePaymentAccountRecord, validateEventRewardInput, validatePaymentEvent, validatePaymentEventChainRule, validatePaymentEventRule, validateRewardValuationSnapshot, validateFxPolicy, validateFxObservation } from './validation.js';
@@ -775,11 +775,18 @@ export class RewardService {
       ...(input.channel ? { channel: input.channel } : {}),
     });
     const actions: Array<RecommendationIntentResult['requiredActions'][number]> = [];
+    const fxPolicyRequests = new Map<string, { request: FxPolicyResearchRequest; candidateIds: Set<string> }>();
     const addAction = (action: RecommendationIntentResult['requiredActions'][number]) => {
       const existing = actions.find((candidate) => candidate.id === action.id);
       if (!existing) { actions.push(action); return; }
       const candidateIds = [...new Set([...(existing.candidateIds ?? []), ...(action.candidateIds ?? [])])].sort();
       if (candidateIds.length) (existing as { candidateIds?: readonly string[] }).candidateIds = candidateIds;
+    };
+    const registerFxPolicyResearch = (request: FxPolicyResearchRequest, candidateId: string) => {
+      const key = JSON.stringify(request.scope);
+      const existing = fxPolicyRequests.get(key);
+      if (existing) existing.candidateIds.add(candidateId);
+      else fxPolicyRequests.set(key, { request, candidateIds: new Set([candidateId]) });
     };
     if (resolution.resolutionStatus !== 'confirmed') addAction({
       id: 'merchant', action: resolution.resolutionStatus === 'ambiguous' ? 'resolve_merchant' : 'research_merchant',
@@ -844,6 +851,26 @@ export class RewardService {
     if (input.routeIds === undefined) for (const card of cards) {
       const rules = applicable(card.id);
       const ruleQuote = transaction ? rules.find((rule) => rule.settlementCurrency.toUpperCase() !== transaction.amount.currency.toUpperCase())?.settlementCurrency : undefined;
+      if (transaction && ruleQuote) {
+        const policy = (state.fxPolicies ?? []).find((candidate) => candidate.ownerUser === this.metadataUser &&
+          ((candidate.scope.kind === 'card' && candidate.scope.cardId === card.id) ||
+           (candidate.scope.kind === 'issuer' && candidate.scope.issuer === card.issuer)) &&
+          (!candidate.validFrom || Date.parse(candidate.validFrom) <= Date.parse(evaluatedAt)) &&
+          (!candidate.validTo || Date.parse(candidate.validTo) >= Date.parse(evaluatedAt)));
+        if (!policy) {
+          const sourceUrls = state.evidence
+            .filter((evidence) => evidence.ownerUser === this.metadataUser && evidence.sourceType === 'official' && evidence.authority === 'issuer' && evidence.sourceUrl)
+            .map((evidence) => evidence.sourceUrl!)
+            .filter((url, index, all) => all.indexOf(url) === index)
+            .sort();
+          registerFxPolicyResearch({
+            purpose: 'policy_research', scope: { kind: 'issuer', issuer: card.issuer },
+            ...(sourceUrls.length ? { sourceUrls, sourceStatus: 'known' as const } : { sourceStatus: 'discovery_required' as const }),
+            requiredFields: ['scope', 'conversionOwner', 'rateType', 'rateDirection', 'conversionTiming', 'feeBasis', 'markupBasis', 'sourceUrl', 'evidenceId', 'validity period'],
+            submission: { tool: 'upsert_fx_policy', field: 'policy' },
+          }, `card:${card.id}`);
+        }
+      }
       const reusable = transaction && ruleQuote ? storedFx(transaction.amount.currency, ruleQuote, card) : undefined;
       const reusableFx = reusable?.observation;
       const estimateFx = reusable?.stale ? { ...reusable.observation, maxAgeSeconds: 30 * 24 * 3600 } : reusableFx;
@@ -963,6 +990,13 @@ export class RewardService {
     for (const [key, { request, candidateIds, diagnostic }] of fxRequests) {
       addAction({ id: `fx:${crypto.createHash('sha256').update(key).digest('hex').slice(0, 16)}`, action: request.retryAction, owner: request.retryAction === 'ask_user' ? 'user' : 'agent', path: request.submission?.field ?? 'fx', requiredFacts: request.requiredFacts, candidateIds: [...candidateIds].sort(), ...(request.submission ? { submission: request.submission } : {}), completionCondition: `repeat recommend after supplying a validated ${request.baseCurrency}/${request.quoteCurrency} observation; without new evidence, stop retrying ${diagnostic}`, fxResolutionRequest: request });
     }
+    for (const { request, candidateIds } of fxPolicyRequests.values()) addAction({
+      id: `fx-policy:${crypto.createHash('sha256').update(JSON.stringify(request.scope)).digest('hex').slice(0, 16)}`,
+      action: 'research_fx_policy', owner: 'agent', path: 'fxPolicy', requiredFacts: request.requiredFields,
+      candidateIds: [...candidateIds].sort(), submission: request.submission,
+      completionCondition: 'repeat recommend after storing a validated policy backed by accepted official evidence',
+      fxPolicyResearchRequest: request,
+    });
     for (const action of actions) if (action.candidateIds === undefined) {
       const affected = action.id === 'merchant'
         ? candidates.filter((candidate) => candidate.matchedRules.some((rule) => Boolean(rule.conditions.merchants?.length))).map((candidate) => candidate.id)
