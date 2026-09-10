@@ -54,4 +54,21 @@ describe('public payment capability persistence', () => {
     const result = service.recommendIntent({ merchant: 'shop', amount: { amountMinor: 1000, currency: 'TWD' }, occurredAt: '2026-09-02T00:00:00Z' });
     expect(result.requiredActions).toEqual(expect.arrayContaining([expect.objectContaining({ id: `capability:${capability.id}`, action: 'bind_payment_method', owner: 'user', submission: { tool: 'register_card', field: 'card' }, requiredFacts: ['held credit_card'] })]));
   });
+
+  it('projects layered rewards onto a generated wallet route without treating top-up as a purchase', () => {
+    const service = new RewardService(new MemoryStore(), 'u1');
+    service.registerCard({ id: 'layered-card', issuer: 'Bank', productName: 'Layered Card' });
+    const evidence = service.submitEvidence({ id: 'layered-evidence', requirementId: 'payment-capability', sourceIdentity: 'wallet.example', sourceType: 'official', authority: 'wallet', claim: { capability: 'layered wallet payment' }, observedAt: '2026-09-01T00:00:00Z', confidence: 'high', contentHash: 'layered-hash', reviewState: 'accepted', sourceUrl: 'https://wallet.example/terms' });
+    const source = { id: 'layered-offer-source', url: 'https://wallet.example/terms', fetchedAt: '2026-09-01T00:00:00Z', contentHash: 'layered-offer', parserVersion: '1', verified: true as const };
+    service.upsertOffer(source, { id: 'layered-provider-rule', version: '1', sourceSnapshotId: source.id, status: 'active', validFrom: '2026-01-01T00:00:00Z', settlementCurrency: 'TWD', match: {}, reward: { kind: 'flat', amountMinor: 80, currency: 'TWD' }, componentKind: 'payment_provider', sponsor: 'Wallet', benefitGroup: 'wallet', stacking: 'confirmed', combination: { mode: 'additive', groupId: 'layered-provider', version: '1' }, eventRule: { id: 'layered-provider-event', version: '1', eventKind: 'purchase' } });
+    service.upsertOffer(source, { id: 'layered-loyalty-rule', version: '1', sourceSnapshotId: source.id, status: 'active', validFrom: '2026-01-01T00:00:00Z', settlementCurrency: 'TWD', match: {}, reward: { kind: 'flat', amountMinor: 20, currency: 'TWD' }, componentKind: 'merchant_loyalty', sponsor: 'Merchant', benefitGroup: 'merchant', stacking: 'confirmed', combination: { mode: 'additive', groupId: 'layered-loyalty', version: '1' }, eventRule: { id: 'layered-loyalty-event', version: '1', eventKind: 'purchase' } });
+    const capability = service.upsertPaymentCapability({ providerId: 'wallet.example', consumerAppId: 'wallet-app', acceptanceProviderId: 'qr-network', fundingKinds: ['credit_card'], transitions: ['wallet_top_up', 'wallet_debit', 'merchant_settlement'], evidenceIds: [evidence.id], observedAt: '2026-09-01T00:00:00Z', idempotencyKey: 'layered-capability' });
+    const result = service.recommendIntent({ merchant: 'shop', amount: { amountMinor: 1000, currency: 'TWD' }, occurredAt: '2026-09-02T00:00:00Z' });
+    const candidate = result.candidates.find((item) => item.routeId === `generated_${capability.id}_layered-card`);
+    expect(candidate).toEqual(expect.objectContaining({ kind: 'payment_path', status: 'ready', reward: { amountMinor: 100, currency: 'TWD' } }));
+    expect(candidate?.matchedRules.map((rule) => rule.component)).toEqual(expect.arrayContaining(['payment_provider', 'merchant_loyalty']));
+    expect(candidate?.events.map((event) => event.kind)).toEqual(['top_up', 'purchase', 'purchase']);
+    expect(candidate?.events[0]?.transition).toBe('wallet_top_up');
+    expect(candidate?.events.some((event) => event.transition === 'card_authorization')).toBe(false);
+  });
 });
