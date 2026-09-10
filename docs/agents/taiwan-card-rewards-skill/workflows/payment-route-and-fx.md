@@ -153,11 +153,11 @@ $$\text{ratePpm} = \text{匯率 (1 單位外幣折合新台幣金額)} \times 1,
 
 ## 6. FX 自動化解析合約與匯率來源仲裁流程 (FX Resolution Contract & Provenance Automation)
 
-為消除 Host Agent 與 MCP 核心之間的外幣資訊落差，同時恪守「核心零直接網路 I/O、失敗即關閉 (Fail-Closed)」之架構承諾，系統建立標準化 `FxResolutionRequest` 與原子匯率觀測值攝入流程。
+為消除 Host Agent 與 MCP 核心之間的外幣資訊落差，同時恪守「核心零直接網路 I/O、失敗即關閉 (Fail-Closed)」之架構承諾，系統回傳標準化 `FxResolutionRequest`，供 Agent 查詢並以本次 typed evidence 重試。可重用的 observation 保存屬後續能力；本文件不把它宣稱為現行入口。
 
 ### 6.1 `FxResolutionRequest` 合約架構
 
-當交易幣別與回饋規則／清算幣別不一致（即跨幣別消費）時，Pre-flight 與 Mutation 錯誤均會附帶結構化的 `FxResolutionRequest`：
+當交易幣別與回饋規則／清算幣別不一致（即跨幣別消費）時，推薦結果、Pre-flight 或 Mutation 錯誤可附帶結構化的 `FxResolutionRequest`。它是待查要求，不是已取得的 `fxObservation`：
 
 ```typescript
 export interface FxResolutionRequest {
@@ -169,8 +169,16 @@ export interface FxResolutionRequest {
   suggestedRateTypes: Array<'card_scheme' | 'cash_selling' | 'spot_selling' | 'mid_market'>;
   requiredFacts: readonly string[];
   sourceSelectionReason: string;
-  retryAction: 'query_approved_fx_source' | 'ask_user';
+  retryAction: 'query_approved_fx_source' | 'ask_user' | 'refresh_external_data';
   userQuestion?: string;
+  sourceUrls?: readonly string[];
+  sourceStatus?: 'known' | 'discovery_required';
+  purpose?: 'path_quote' | 'policy_research' | 'reference_estimate';
+  rateDirection?: 'base_to_quote';
+  scope?: { kind: 'public_reference' | 'card' | 'issuer' | 'route' | 'route_edge'; cardId?: string; issuer?: string; routeId?: string; edgeId?: string };
+  freshness?: { maxAgeSeconds?: number; targetTime?: string };
+  requiredFields?: readonly string[];
+  submission?: { tool: string; field: string };
 }
 ```
 
@@ -184,15 +192,15 @@ export interface FxResolutionRequest {
 | **`issuer`** | 銀行端結匯或雙幣卡請款、`bank`、`issuer` | `cash_selling` | 發卡銀行當日現鈔／現金賣出牌告匯率 |
 | **`wallet`** | 電子錢包跨境掃碼結帳、`wallet`、`payment_provider` | `spot_selling`, `mid_market` | 錢包合作銀行即時即期賣出匯率或錢包公告中價 |
 | **`merchant_dcc`** | 觸發動態貨幣轉換（DCC）、`dcc: true`、`merchant` | `spot_selling`, `cash_selling` | 商家端 POS 即時加價換匯匯率 |
-| **`unknown`** | 尚未指定路徑或缺乏換匯主體事實 | `mid_market`, `spot_selling` (planned)<br>`card_scheme`, `cash_selling` (actual) | 規劃試算階段允許使用中價參考匯率；實際入帳嚴禁猜測 |
+| **`unknown`** | 尚未指定路徑或缺乏換匯主體事實 | 依 request 提示查詢；actual 仍需明確主體 | 目前回傳查詢要求與缺項；不把未知轉成自動估算 |
 
 > [!CAUTION]
 > **實際入帳交易嚴禁 `mid_market`**：`mid_market` 僅允許用於 `planned` 試算推薦。若 `record_transaction` 或 `record_event_reward` 在 `mode: 'actual'` 下傳入 `rateType: 'mid_market'`，系統將強制拒絕並拋出 `NEEDS_REVIEW`。
 
 ### 6.3 寫入操作原子性保證與 Fail-Closed 機制
 
-1. **強制原子攝入**：
-   在呼叫 `record_transaction` 或 `record_event_reward` 時，跨幣別交易必須在 payload 中原子性傳入驗證過的 `fx: FxSnapshot` 或 `event.fx: FxSnapshot`。
+1. **本次 typed evidence**：
+   Agent 查詢並驗證報價後，將 typed FX observation/evidence 帶回原本的 planned intent（一般 `fx` 或指定 `routeFacts` 的 route/edge scope），再呼叫 `recommend` 讓 MCP 重新計算。Actual `record_transaction` 或 `record_event_reward` 仍必須傳入驗證過的 `fx: FxSnapshot`；recommend 本身不保存可重用 observation。
 2. **`fx_missing` 結構化錯誤回傳**：
    若未提供匯率觀測值，核心引擎立即拋出 `fx_missing` 錯誤，並在 `error.details` 中完整附帶 `fxResolutionRequest`，引導外部 Agent 透過核可管道查詢補齊後重試。
 3. **歷史入帳凍結與退款匯率豁免 (Frozen Provenance & Refund Immunity)**：
@@ -207,10 +215,10 @@ export interface FxResolutionRequest {
 3. **權威來源優先級**：`central_bank` / `card_scheme` (權重 100) > `issuer` / `wallet` (權重 80) > `merchant` (權重 60) > `secondary` (權重 40)。
 4. **顯著分歧衝突阻斷**：當兩個具備相同權重之同級權威來源之間匯率差異超過 5% 時，系統判定為 `conflict`，要求 Agent 提交審查或詢問使用者，不得擅自採納或折衷。
 
-### 6.5 最少詢問原則 (Minimal Question Strategy)
+### 6.5 查詢與重試原則 (Query and Retry Strategy)
 
 為確保使用者體驗不被打擾，系統遵循嚴格的提問策略：
-- 在 `mode: 'planned'` 階段，若換匯主導者不明，系統自動選用 `mid_market` 或 `spot_selling` 生成試算推薦，**不中斷提問**。
-- 僅在 `mode: 'actual'` 且換匯主導者完全未知時，才觸發單一精確提問：
-  > 「這筆交易是由商店做 DCC 換成台幣，還是由發卡行／卡組織換匯？若不確定，我可以先用中價匯率做 planned estimate，但不會直接當成實際入帳匯率。」
+- `FxResolutionRequest` 是 request，`fxObservation` 是 Agent 查詢後取得的資料，兩者不可互換。
+- Agent 依 request 指定的幣別對、時間、主體、rate type、方向與 scope 查詢核准來源；只有 planned `sourceStatus: known`、`purpose: reference_estimate` 才可使用臺灣銀行牌告頁（`https://rate.bot.com.tw/xrt?Lang=zh-TW`）作公共參考候選。Actual 或 `discovery_required` 不得使用 BOT fallback；它不是任何卡片／錢包的實際政策或結算報價。
+- 查詢並驗證後，將 typed FX 資料帶回同一 intent，再呼叫 `recommend` 重算；目前不提供保存／重用 observation 或自動 reference estimate。Actual conversion owner 不明時，依 request 的 `userQuestion` 詢問使用者。
 - 一旦使用者或資料源給定事實，系統即刻推導並固化，絕不就匯率問題進行重複對話。

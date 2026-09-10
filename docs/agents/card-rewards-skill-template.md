@@ -25,22 +25,28 @@ refunds. Use this skill for questions, confirmation, external research, and pres
    bounds, enums, and closed object shapes.
 3. Stop with an unavailable message if validation fails.
 
-## Pre-flight and Read flow
+## Recommendation and pre-flight flows
 
 Research official bank/network terms for rounding, registration, stacking, and caps before creating rules. Keep third-party findings explicitly as candidates and ask the user to resolve uncertainty.
 
 Refresh checklist: search issuer card/campaign/registration pages, app notices, network, wallet, merchant, and official terms/FAQ/PDF sources. Capture period repetition, quota/first-N, open/close/effective dates, eligibility, reward unit/rounding/step, `capPoolRefs`, and additive/replace/best_of/exclusive/prerequisite policy. Community/blog/forum/video/user reports are lead-only evidence; retain provenance and seek official corroboration. Ask when registration/plan selection happened, expose confirmed benefits as `availableNow` and unmet actions as `availableAfterActions`, and ask about a Backfilled Purchase when a past transaction was omitted.
 
-1. Execute `recommendation_preflight` with current transaction context.
-2. Route on `requiredActions`:
+1. For a normal merchant question, execute merchant-first `recommend` directly with
+   the known intent; do not list cards or routes first. Follow the canonical
+   `recommendation-intent` workflow and inspect its bounded status/actions result.
+2. For an older host or explicit transaction diagnostic, execute
+   `recommendation_preflight` with current transaction context.
+3. Route on `requiredActions`:
    - `clarify_merchant` / `choose_market`: invoke `resolve_merchant` and present candidates to user.
-   - `refresh_external_data` (`fx_rate`): query official rate, quantize to PPM, and supply `FxSnapshot`.
+   - `refresh_external_data` (`fx_rate`): treat `fxResolutionRequest` as a lookup request (not an observation), query the specified pair/type/time from an approved source, then return typed FX evidence with the same intent and call `recommend` again. Do not claim the observation was saved or made reusable.
    - `research_evidence` / `refresh_offer`: research official sources, obtain `OfferConfirmation`, and submit via `upsert_offer`.
    - `register_card`: onboard card descriptor via `register_card`.
    - `review_conflict`: prompt user to arbitrate contradictory terms.
-3. Rerun `recommendation_preflight` until `ready == true`.
-4. Execute `recommend` (with configurable bounded limit and cursor pagination).
-5. Display ranked results with component breakdown, cap consumption, and explainable status.
+4. In the legacy diagnostic flow, rerun `recommendation_preflight` until its
+   diagnostic permits recommendation.
+5. Execute `recommend` (bounded limit; use only pagination capabilities confirmed
+   by the current contract).
+6. Display ranked results with component breakdown, cap consumption, and explainable status.
 
 ## Write flow
 

@@ -78,7 +78,7 @@ activation is folded directly into `upsert_offer`.
 | `register_card` | Mutating | Register or update a card product descriptor (`id`, `issuer`, `productName`, `network`, `country`). | `INVALID_CARD`, `STORE_UNAVAILABLE` |
 | `list_cards` | Read-only | List all registered cards in the user's store. | `STORE_UNAVAILABLE` |
 | `upsert_offer` | Mutating | Ingest an official or candidate source snapshot and versioned rule; activates candidate if valid confirmation is supplied. | `INVALID_OFFER`, `INVALID_CONFIRMATION`, `STORE_UNAVAILABLE` |
-| `recommend` | Read-only | Recommend a bounded page of cards (default 10) evaluated against registered cards and actual ledger usage without mutating usage; the Agent selects what to present. | `INSUFFICIENT_FACTS`, `NEEDS_REVIEW`, `STALE` |
+| `recommend` | Read-only | Merchant-first planned recommendation reads registered cards and verified routes; optional legacy transaction and payment-path branches remain supported. Results are bounded (default 10) and do not mutate usage. | `INSUFFICIENT_FACTS`, `NEEDS_REVIEW`, `STALE` |
 | `recommendation_preflight` | Read-only | Check typed transaction, merchant, offer, payment-route, FX, freshness, and conflict prerequisites without mutation or network access. | `INVALID_INPUT`, `INSUFFICIENT_FACTS`, `NEEDS_REVIEW`, `STALE` |
 | `upsert_payment_route` | Mutating | Register a confirmed or candidate payment route; MCP assigns its route identity and stores no credentials. | `INVALID_INPUT`, `IDEMPOTENCY_CONFLICT`, `SENSITIVE_FIELD_FORBIDDEN` |
 | `list_payment_routes` | Read-only | List the current user's registered payment routes as bounded projections. | `INVALID_INPUT`, `STORE_UNAVAILABLE` |
@@ -98,8 +98,10 @@ activation is folded directly into `upsert_offer`.
 ## 4. Workflow Guidelines for AI Agents
 
 ### A. Card Management & Discovery
-1. Call `list_cards` to inspect existing cards held by the user.
+1. For a recommendation, call `recommend` directly with the merchant-first intent. `list_cards` is for management, explicit inventory requests, or onboarding checks; it is not a normal recommendation prerequisite.
 2. If the user holds a new card, call `register_card` with card descriptors (e.g. `{ id: "esun-kumamon", issuer: "ESunBank", productName: "Kumamon Card", network: "JCB", country: "TW" }`).
+
+For the merchant-first recommendation shape, follow [`recommendation-intent.md`](taiwan-card-rewards-skill/workflows/recommendation-intent.md). The older transaction-shaped `recommend` branch and `recommendation_preflight` remain compatibility/diagnostic paths; they are not required before the normal intent call.
 
 ### B. Offer Ingestion, OCR & Candidate Activation
 1. **Official Web Sources**: The Agent or UI retrieves official bank pages using its own approved browsing or ingestion path, then supplies an unverified structured source snapshot with provenance and content fingerprint. The MCP does not retrieve web content.
@@ -161,7 +163,16 @@ activation is folded directly into `upsert_offer`.
   - `billing_cycle`: Computed from the card or cap pool's explicit IANA `timezone`; missing timezone is fail-closed.
 - **Foreign Currency Spend**:
 - If transaction currency differs from rule settlement currency (e.g. JPY spend on TWD card), an `fx` object with `ratePpm`, `capturedAt`, and `maxAgeSeconds` is required. Include `provider` and `rateType` when available, plus `sourceUrl`/`contentHash` for auditability.
-  - Missing or stale FX snapshots fail closed (`unknown` or `stale`).
+- Missing or stale FX snapshots fail closed (`unknown` or `stale`).
+
+For the merchant-first intent, treat `fxResolutionRequest` as a typed request for
+external lookup, not as an `fxObservation`. Use its currency pair, conversion owner,
+suggested rate types, time, and required facts to query an approved source. The Bank
+of Taiwan quote page may be a public reference candidate, but it is not the actual
+policy or settlement rate of a card, wallet, or issuer. Return the validated typed FX
+evidence with the same intent and call `recommend` again so MCP recomputes the result.
+Observation persistence and reusable estimates are not available in this workflow;
+do not claim they are saved or reused.
 
 ### F. Top-ups, Wallet Purchases & Cross-Event Rewards
 

@@ -1,5 +1,10 @@
 # Agent Research Skill 與 Recommendation Pre-flight 標準作業程序 (SOP)
 
+> 正常商家消費意圖請直接呼叫 `recommend`，依
+> [`recommendation-intent.md`](taiwan-card-rewards-skill/workflows/recommendation-intent.md)
+> 執行；本 SOP 僅供舊 transaction branch 或明確診斷需求。正常流程不要求先列卡片
+> 或先跑 `recommendation_preflight`。
+
 **文件狀態**：正式營運指引 (Normative Agent SOP)
 **適用範圍**：canonical 19-tool MCP contract（release tag 僅供部署管理）
 **語言**：繁體中文
@@ -94,8 +99,8 @@ flowchart TD
     Step9 -- 否 --> Step10
 ```
 
-### Step 1: 發起前置檢查 (`recommendation_preflight`)
-Agent 在收到使用者查詢後，首先組裝目前已知的交易條件（金額、幣別、商家口語、支付方式、國家等），呼叫 `recommendation_preflight`。
+### Step 1: 發起前置檢查 (`recommendation_preflight`, legacy)
+在使用舊 transaction branch 或需要獨立診斷時，Agent 組裝目前已知的交易條件（金額、幣別、商家口語、支付方式、國家等），呼叫 `recommendation_preflight`。商家意圖的正常入口直接呼叫 `recommend`，不經此步驟。
 
 ### Step 2: 解析 `requiredActions` 與診斷分流
 檢查回傳的 `ready` 旗標：

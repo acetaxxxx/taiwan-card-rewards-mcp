@@ -116,6 +116,8 @@ export function buildFxResolutionRequest(params: {
   rules?: OfferRuleVersion[] | undefined;
   card?: CardDescriptor | undefined;
   targetCurrency?: string | undefined;
+  scope?: FxResolutionRequest['scope'];
+  submission?: FxResolutionRequest['submission'];
 }): FxResolutionRequest {
   const baseCurrency = params.transaction.amount.currency.toUpperCase();
   const quoteCurrency = (
@@ -140,6 +142,7 @@ export function buildFxResolutionRequest(params: {
   const requiredFacts = needsUserQuestion
     ? ['transaction.routeContext.conversionOwner', 'transaction.fx']
     : ['transaction.fx'];
+  const usesPublicReference = transactionKind === 'planned' && conversionOwner === 'unknown';
 
   return {
     baseCurrency,
@@ -151,6 +154,14 @@ export function buildFxResolutionRequest(params: {
     requiredFacts,
     sourceSelectionReason,
     retryAction,
+    ...(usesPublicReference ? { sourceUrls: ['https://rate.bot.com.tw/xrt?Lang=zh-TW'] } : {}),
+    sourceStatus: usesPublicReference ? 'known' : 'discovery_required',
+    purpose: usesPublicReference ? 'reference_estimate' : transactionKind === 'planned' ? 'path_quote' : 'policy_research',
+    rateDirection: 'base_to_quote',
+    ...(params.scope ? { scope: params.scope } : {}),
+    freshness: { maxAgeSeconds: params.transaction.fx?.maxAgeSeconds ?? 7 * 24 * 3600, targetTime: params.transaction.occurredAt },
+    requiredFields: ['baseCurrency', 'quoteCurrency', 'ratePpm', 'capturedAt', 'provider', 'rateType', 'sourceUrl', 'contentHash'],
+    submission: params.submission ?? { tool: transactionKind === 'planned' ? 'recommend' : 'record_transaction', field: transactionKind === 'planned' ? 'fx' : 'transaction.fx' },
     ...(needsUserQuestion ? { userQuestion: FX_USER_QUESTION } : {}),
   };
 }

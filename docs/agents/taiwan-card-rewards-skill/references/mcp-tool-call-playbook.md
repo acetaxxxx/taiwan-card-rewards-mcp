@@ -3,15 +3,39 @@
 這是給 Agent 的呼叫順序與 JSON 骨架；canonical 19-tool 清單與欄位定義在
 [`mcp-tools.md`](mcp-tools.md)。每個 object 都是 closed schema。以下 ID、URL、rule、amount 是 illustrative，不能當成銀行產品或 production evidence。
 
-## A. 直接卡片推薦
+## A. 商家消費意圖推薦（正常入口）
 
-1. 先呼叫 `list_cards`：
+正常推薦只需商家；已知金額與情境可一併提供。MCP 會讀取目前 user-scoped
+cards 及已驗證 routes，回傳同一個 `status/candidates/requiredActions/coverage`
+結果。不要先列 cards/routes，也不要先選 card ID 或 route ID。
+
+```json
+{
+  "merchant": "示例商家",
+  "amount": { "amountMinor": 10000, "currency": "TWD" },
+  "country": "TW",
+  "channel": "in_store",
+  "limit": 10
+}
+```
+
+只提供商家時，回應可包含尚未計算的候選與 `ask_user` action；未知金額不當作
+零。商家歧義依 `requiredActions` 處理，再用相同意圖重新呼叫。候選範圍是目前
+tenant 已知資料的有界集合，不宣稱涵蓋所有市場優惠。
+
+## B. 舊交易形狀卡片推薦（相容入口）
+
+舊 host 或需要明確 transaction facts 時，才使用以下相容流程。`list_cards` 是
+管理／明確清單用途；`recommendation_preflight` 是診斷用途，兩者都不是商家意圖
+推薦的必要前置。
+
+1. （相容流程可選）呼叫 `list_cards`：
 
 ```json
 { "limit": 20, "page": 1, "projection": "summary" }
 ```
 
-2. 需要診斷時呼叫 `recommendation_preflight`：
+2. 需要診斷時才呼叫 `recommendation_preflight`：
 
 ```json
 {
@@ -29,7 +53,7 @@
 }
 ```
 
-3. preflight ready 後，同樣的 nested transaction 呼叫 `recommend`：
+3. 依舊契約（或診斷允許後）用同樣的 nested transaction 呼叫 `recommend`：
 
 ```json
 {
@@ -52,9 +76,9 @@
 回應是 bounded ranking array（card recommendation）而非自訂的
 `recommendations` wrapper。只呈現 MCP response 的 reward/status；planned 不扣 cap。
 
-## B. 多層 payment path
+## C. 舊 payment-path envelope（相容／明確查詢）
 
-對 account/card → wallet → acceptance → merchant，先列 account/route，確認
+只有 host 或使用者明確要求舊 payment-path envelope 時，對 account/card → wallet → acceptance → merchant 先列 account/route，確認
 route 是該 user 的 active、confirmed、官方 HTTPS evidence，再呼叫 `recommend`
 的 closed payment-path branch：
 

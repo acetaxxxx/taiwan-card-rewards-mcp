@@ -1,4 +1,6 @@
-# Example: planned card recommendation
+# Example: planned card recommendation (legacy transaction branch)
+
+For the normal merchant-first entry, use [`workflows/recommendation-intent.md`](../workflows/recommendation-intent.md); this example remains a compatibility shape.
 
 這是 card branch 的合法骨架。`card_illustrative` 與回應數字都是 illustrative；Agent 必須先以 `list_cards` 確認使用者實際持有的 opaque card ID，並以 MCP 回應為準，不自行計算回饋。
 

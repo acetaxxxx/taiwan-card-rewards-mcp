@@ -92,12 +92,16 @@ describe("MCP Contract and Agent Boundary", () => {
         for (const child of Object.values(schema.properties ?? {})) walk(child);
       }
       if (schema.type === "array") walk(schema.items);
+      for (const union of [schema.oneOf, schema.anyOf, schema.allOf]) if (Array.isArray(union)) union.forEach(walk);
     };
     for (const tool of mcpTools) walk(tool.inputSchema);
   });
   it("publishes the public contract distinctions that validators enforce", () => {
     const recommend = mcpTools.find((tool) => tool.name === "recommend")!.inputSchema as any;
-    expect(recommend.oneOf).toHaveLength(2);
+    expect(recommend.oneOf).toHaveLength(3);
+    const intentBranch = recommend.oneOf.find((branch: any) => branch.properties?.merchant && !branch.properties?.transaction);
+    expect(intentBranch.required).toContain("merchant");
+    expect(intentBranch.properties.limit.maximum).toBe(20);
     const cardBranch = recommend.oneOf.find((branch: any) => branch.properties?.transaction);
     expect(cardBranch.properties.transaction.required).not.toContain("cardId");
     expect(cardBranch.properties.cardIds.items.type).toBe("string");
@@ -143,6 +147,20 @@ describe("MCP Contract and Agent Boundary", () => {
         params: { name: "list_cards", arguments: { limit: 51, projection: "calculation" } },
       });
       expect(invalid.error?.message).toBe("INVALID_INPUT");
+    } finally {
+      await client.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+  it("dispatches merchant-only intent recommendations and rejects unknown intent fields", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "mcp-recommend-intent-"));
+    const client = new McpProcessClient(dir);
+    try {
+      const response = await client.send({ id: "intent", method: "tools/call", params: { name: "recommend", arguments: { merchant: "Shop" } } });
+      expect(response.error).toBeUndefined();
+      expect(response.result.structuredContent).toEqual(expect.objectContaining({ status: "needs_input", candidates: expect.any(Array), requiredActions: expect.arrayContaining([expect.objectContaining({ action: "ask_user" })]), coverage: expect.objectContaining({ bounded: false }) }));
+      const invalid = await client.send({ id: "intent-invalid", method: "tools/call", params: { name: "recommend", arguments: { merchant: "Shop", unsupported: true } } });
+      expect(invalid.error?.message).toBe("UNKNOWN_FIELD");
     } finally {
       await client.close();
       rmSync(dir, { recursive: true, force: true });
@@ -196,7 +214,8 @@ describe("MCP Contract and Agent Boundary", () => {
         expect(tool.name).toBeTypeOf("string");
         expect(tool.description).toBeTypeOf("string");
         expect(tool.inputSchema).toBeTypeOf("object");
-        if (tool.name === "recommend") expect(tool.inputSchema.oneOf).toHaveLength(2);
+        if (tool.name === "recommend") expect(tool.inputSchema.oneOf).toHaveLength(3);
+        else if (tool.name === "recommendation_preflight") expect(tool.inputSchema.oneOf).toHaveLength(2);
         else expect(tool.inputSchema.type).toBe("object");
       }
     } finally {

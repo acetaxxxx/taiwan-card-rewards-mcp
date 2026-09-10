@@ -2,6 +2,7 @@ import type { CardDescriptor, CardProduct, CapPeriod, CapPoolDefinition, CardSwi
 import type { StoredState } from './store.js';
 import type { EvidenceRecord, FactCandidate } from './types.js';
 import { RewardServiceError } from './errors.js';
+import type { RecommendationIntent } from './types.js';
 
 const ID = /^[A-Za-z0-9][A-Za-z0-9_:-]{0,127}$/;
 const HOST = /^(?=.{1,253}$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/;
@@ -799,8 +800,47 @@ function validateRewardComponentRecord(value: unknown, index: number): RewardCom
 
 export function validateToolArgs(name: string, value: unknown): Record<string, unknown> {
   const args = object(value, 'tool arguments');
+  if (name === 'recommend' && args.transaction === undefined && args.kind === undefined) return { ...validateRecommendationIntent(args) };
+  if (name === 'recommendation_preflight' && args.transaction === undefined) return { ...validateRecommendationIntent(args) };
   const allowed: Record<string, string[]> = { register_card: ['card'], list_cards: ['limit', 'page', 'projection'], upsert_offer: ['snapshot', 'rule', 'confirmation', 'capPools', 'merchant'], recommend: ['transaction', 'cardIds', 'merchant', 'context', 'limit', 'page', 'projection', 'kind', 'payment_path'], recommendation_preflight: ['transaction', 'context'], upsert_payment_route: ['route'], list_payment_routes: ['limit', 'page', 'projection'], register_payment_account: ['account'], list_payment_accounts: ['limit', 'page', 'projection'], recommend_payment_paths_v1: ['amount', 'merchant', 'mcc', 'country', 'channel', 'paymentMethod', 'asOf', 'routeIds', 'limit', 'eligibilityFacts'], record_transaction: ['transaction'], record_event_reward: ['event', 'sourceEvents', 'rule', 'chainRule', 'candidate', 'idempotencyKey'], record_event_reward_v1: ['event', 'candidate', 'idempotencyKey'], record_event_reward_v2: ['event', 'sourceEvents', 'rule', 'chainRule', 'candidate', 'idempotencyKey'], reverse_event_reward: ['event', 'idempotencyKey'], reverse_event_reward_v1: ['event', 'idempotencyKey'], remaining_caps: ['cardId', 'asOf', 'limit', 'page', 'projection'], calculate_reward: ['rule', 'transaction', 'context'], rank_cards: ['cards', 'rules', 'transaction', 'context'], get_user_benefit_status: ['kind', 'cardId', 'asOfUtc', 'projection'], upsert_user_benefit_status: ['input'], resolve_merchant: ['rawQuery', 'country', 'market', 'mcc', 'channel'], search_active_offers: ['rawQuery', 'cardId', 'canonicalMerchantId', 'country', 'market', 'mcc', 'channel', 'asOf', 'limit', 'page', 'projection'] };
   if (!allowed[name]) throw new RewardServiceError('TOOL_NOT_FOUND', `unknown tool: ${name}`);
   keys(args, allowed[name], `tool ${name}`);
   return args;
+}
+
+export function validateRecommendationIntent(value: unknown): RecommendationIntent {
+  const input = object(value, 'recommend intent');
+  keys(input, ['merchant', 'amount', 'country', 'market', 'channel', 'paymentMethod', 'occurredAt', 'cardIds', 'routeIds', 'limit', 'fx', 'routeFacts'], 'recommend intent');
+  let merchant: RecommendationIntent['merchant'];
+  if (typeof input.merchant === 'string') merchant = requiredString(input.merchant, 'merchant');
+  else {
+    const fields = object(input.merchant, 'merchant');
+    keys(fields, ['name', 'rawStatement', 'canonicalId', 'canonicalNameZhHant', 'country', 'market'], 'merchant');
+    for (const [key, field] of Object.entries(fields)) requiredString(field, `merchant.${key}`);
+    if (!['name', 'rawStatement', 'canonicalId', 'canonicalNameZhHant'].some(key => fields[key] !== undefined)) throw new RewardServiceError('INVALID_INPUT', 'merchant identity is required');
+    merchant = fields;
+    for (const field of ['country', 'market']) if (input[field] !== undefined && fields[field] !== undefined && input[field] !== fields[field]) throw new RewardServiceError('INVALID_INPUT', `conflicting merchant ${field}`);
+  }
+  const limit = input.limit === undefined ? 10 : safeInt(input.limit, 'limit', 1);
+  if (limit > 20) throw new RewardServiceError('INVALID_INPUT', 'limit must be 1..20');
+  return {
+    merchant, limit,
+    ...(input.amount === undefined ? {} : { amount: validateMoney(input.amount, 'amount') }),
+    ...(input.country === undefined ? {} : { country: requiredString(input.country, 'country') }),
+    ...(input.market === undefined ? {} : { market: requiredString(input.market, 'market') }),
+    ...(input.channel === undefined ? {} : { channel: requiredString(input.channel, 'channel') }),
+    ...(input.paymentMethod === undefined ? {} : { paymentMethod: requiredString(input.paymentMethod, 'paymentMethod') }),
+    ...(input.occurredAt === undefined ? {} : { occurredAt: iso(input.occurredAt, 'occurredAt') }),
+    ...(input.cardIds === undefined ? {} : { cardIds: list(input.cardIds, 'cardIds')! }),
+    ...(input.routeIds === undefined ? {} : { routeIds: list(input.routeIds, 'routeIds')! }),
+    ...(input.fx === undefined ? {} : { fx: validateFxSnapshot(input.fx, 'recommend fx') }),
+    ...(input.routeFacts === undefined ? {} : { routeFacts: (() => {
+      if (!Array.isArray(input.routeFacts)) throw new RewardServiceError('INVALID_INPUT', 'routeFacts must be an array');
+      if (input.routeFacts.length > 128) throw new RewardServiceError('INVALID_INPUT', 'routeFacts must contain at most 128 entries');
+      const facts = input.routeFacts.map((entry, index) => { const row = object(entry, `routeFacts[${index}]`); keys(row, ['routeId', 'edgeId', 'fx'], `routeFacts[${index}]`); return { routeId: requiredString(row.routeId, `routeFacts[${index}].routeId`, true), ...(row.edgeId === undefined ? {} : { edgeId: requiredString(row.edgeId, `routeFacts[${index}].edgeId`, true) }), fx: validateFxSnapshot(row.fx, `routeFacts[${index}].fx`) }; });
+      const scopes = facts.map((fact) => `${fact.routeId}|${fact.edgeId ?? '*'}`);
+      if (new Set(scopes).size !== scopes.length) throw new RewardServiceError('INVALID_INPUT', 'routeFacts contains duplicate route/edge scope');
+      return facts;
+    })() }),
+  };
 }

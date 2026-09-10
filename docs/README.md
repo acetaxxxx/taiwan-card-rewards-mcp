@@ -5,8 +5,9 @@ integration contract for `taiwan-card-rewards-mcp`.
 
 ## Start here
 
-- [推薦體驗改善提案：單一 recommend、完整付款路徑與缺項回復（尚未實作）](../.scratch/recommend-experience/spec.md)
-- [新版 Agent workflow：登記、推薦、匯率更新與完整分頁（待實作契約）](../.scratch/recommend-experience/agent-workflow.md)
+- [推薦體驗規劃與實作票：單一 recommend、完整付款路徑與缺項回復](../.scratch/recommend-experience/spec.md)
+- [目前可用的商家意圖推薦流程](agents/taiwan-card-rewards-skill/workflows/recommendation-intent.md)
+- [目標 Agent workflow：登記、推薦、匯率更新與完整分頁](../.scratch/recommend-experience/agent-workflow.md)
 - [AI Agent usage guide](agents/usage-guide.md)
 - [Agent skill-authoring guide](agents/skill-authoring-guide.md)
 - [Canonical Taiwan Card Rewards Skill Bundle](agents/taiwan-card-rewards-skill/SKILL.md)

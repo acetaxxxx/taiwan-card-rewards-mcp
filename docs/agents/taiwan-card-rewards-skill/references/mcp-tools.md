@@ -12,7 +12,7 @@
 | `list_cards` | read | 列出 user-scoped card 清冊 |
 | `upsert_offer` | write | 寫入 source snapshot/rule；需符合 official evidence 與 confirmation gate |
 | `recommend` | read | closed card/payment_path union 的 bounded recommendation |
-| `recommendation_preflight` | read | 診斷 transaction、merchant、offer、FX、benefit 與衝突，不修改狀態 |
+| `recommendation_preflight` | read | intent-shaped 呼叫沿用 `recommend` 的候選診斷；legacy transaction 仍提供相容 preflight，不修改狀態 |
 | `upsert_payment_route` | write | 登記有界 route graph 與 funding identity |
 | `list_payment_routes` | read | 列出 user-scoped route |
 | `register_payment_account` | write | 登記 wallet/linked bank account 的 opaque identity 與 evidence |
@@ -29,6 +29,25 @@
 每個工具的 input object 都是 `additionalProperties: false`。所有 arrays、page/limit、route graph、event source list 都有上限。
 
 ## `recommend` 的 closed union
+
+正常入口是 merchant-first intent：`merchant` 必填，其餘消費條件與 `cardIds`／
+`routeIds` 篩選皆可省略。省略篩選時由 MCP 讀取目前 user state；回應使用 typed
+candidate envelope，並帶狀態、required actions 與 bounded coverage。這個入口不
+要求先呼叫任何 list tool 或 `recommendation_preflight`。
+
+跨路徑報價可暫時以 `routeFacts: [{"routeId":"route_illustrative","edgeId":"edge_illustrative","fx":{...}}]` 提供；同一 route/edge scope 不可重複，資料只供本次 matching pair/scope 使用，不會保存。
+
+```json
+{
+  "merchant": { "rawStatement": "示例商家", "country": "JP" },
+  "amount": { "amountMinor": 10000, "currency": "JPY" },
+  "channel": "in_store",
+  "limit": 10
+}
+```
+
+`recommend` 仍保留以下舊 transaction branch 與 payment-path branch 供相容／明確
+查詢；它們不是正常意圖流程的前置步驟。
 
 一般卡片 branch：
 
@@ -50,7 +69,9 @@
 }
 ```
 
-推薦 branch 的 `cardId` 可由 service 的 ranking seam 代入 placeholder，但使用者展示結果前應先 `list_cards` 並使用真實的已登記 opaque card ID。
+舊 transaction branch 的 `cardId` 可由 service 的 ranking seam 代入 placeholder；
+正常商家 intent 不要求 Agent 先 `list_cards`。使用者要求明確卡片篩選或管理清單
+時，才使用真實的已登記 opaque card ID。
 
 多層 path branch 必須只有以下 envelope 形狀：
 

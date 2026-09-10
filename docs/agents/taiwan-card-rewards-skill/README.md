@@ -45,7 +45,7 @@ docs/agents/taiwan-card-rewards-skill/
 │   ├── mcp-tool-call-playbook.md              # 合法呼叫骨架與順序
 │   ├── architecture-and-boundaries.md        # Agent/MCP 權責與零網路邊界
 │   └── lifecycle-and-privacy.md               # storage、evidence、敏感資料
-├── workflows/                                 # onboarding、research、preflight、route、event SOP
+├── workflows/                                 # intent、onboarding、research、preflight、route、event SOP
 └── examples/
     ├── planned-recommendation.md              # card branch 的 planned recommendation
     ├── payment-path-recommendation.md         # account/card → wallet → acceptance → merchant
@@ -58,6 +58,7 @@ docs/agents/taiwan-card-rewards-skill/
 ## 使用原則
 
 - `recommend` 是 closed union：一般卡片推薦使用 `transaction`；多層路徑使用 `{ "kind": "payment_path", "payment_path": { ... } }`。
+- 正常商家推薦直接送出 merchant-first intent；`list_cards`、account/route 清單與 `recommendation_preflight` 是管理、明確查詢或相容診斷用途。
 - `record_event_reward` 與 `reverse_event_reward` 是 canonical public names。歷史 versioned aliases 只在 migration/compat 說明，不能放進新呼叫。
 - `record_transaction` 只接受 actual purchase/refund；planned evaluations 絕不扣 caps 或寫 ledger。
 - unknown/stale/needs_review、未證實銀行/sidecar/Chromium 路徑、缺官方 evidence 都要明示，不得包裝成已支援。

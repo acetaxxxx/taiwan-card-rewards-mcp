@@ -36,7 +36,7 @@ function parseRecommendationInput(args: Record<string, unknown>): { transaction:
   if (args.merchant !== undefined) {
     if (!args.merchant || typeof args.merchant !== 'object' || Array.isArray(args.merchant)) throw new RewardServiceError('INVALID_INPUT', 'merchant must be an object');
     const merchant = args.merchant as Record<string, unknown>;
-    for (const key of Object.keys(merchant)) if (!['canonicalId', 'canonicalNameZhHant', 'rawStatement', 'market', 'country'].includes(key)) throw new RewardServiceError('UNKNOWN_FIELD', `recommend.merchant contains unsupported field: ${key}`);
+    for (const key of Object.keys(merchant)) if (!['canonicalId', 'canonicalNameZhHant', 'rawStatement', 'name', 'market', 'country'].includes(key)) throw new RewardServiceError('UNKNOWN_FIELD', `recommend.merchant contains unsupported field: ${key}`);
     for (const key of ['canonicalId', 'canonicalNameZhHant', 'rawStatement', 'market', 'country']) if (merchant[key] !== undefined && (typeof merchant[key] !== 'string' || !merchant[key].trim())) throw new RewardServiceError('INVALID_INPUT', `recommend.merchant.${key} must be a non-empty string`);
     if (transaction.merchant === undefined && typeof merchant.rawStatement === 'string') transaction = { ...transaction, merchant: merchant.rawStatement };
     if (transaction.country === undefined && typeof merchant.country === 'string') transaction = { ...transaction, country: merchant.country };
@@ -52,6 +52,7 @@ function parseRecommendationInput(args: Record<string, unknown>): { transaction:
   const context = args.context === undefined ? undefined : validateContext(args.context);
   return { transaction, options: { ...(cardIds === undefined ? {} : { cardIds }), ...(context === undefined ? {} : { context }) } };
 }
+
 
 async function processJsonRpc(service: RewardService, request: JsonRpc): Promise<Reply> {
   try {
@@ -142,9 +143,12 @@ async function callTool(service: RewardService, params: Record<string, unknown>)
         const body = args.payment_path as Record<string, unknown>;
         return service.recommendPaymentPaths({ amount: body.amount as PaymentPathRequest['amount'], ...(typeof body.merchant === 'string' ? { merchant: body.merchant } : {}), ...(typeof body.mcc === 'string' ? { mcc: body.mcc } : {}), ...(typeof body.country === 'string' ? { country: body.country } : {}), ...(typeof body.channel === 'string' ? { channel: body.channel } : {}), ...(typeof body.paymentMethod === 'string' ? { paymentMethod: body.paymentMethod } : {}), ...(typeof body.asOf === 'string' ? { asOf: body.asOf } : {}), ...(Array.isArray(body.routeIds) ? { routeIds: body.routeIds as string[] } : {}), ...(typeof body.limit === 'number' ? { limit: body.limit } : {}), ...(typeof body.maxHops === 'number' ? { maxHops: body.maxHops } : {}), ...(typeof body.maxEvents === 'number' ? { maxEvents: body.maxEvents } : {}), ...(typeof body.maxBranchesPerNode === 'number' ? { maxBranchesPerNode: body.maxBranchesPerNode } : {}) });
       }
+      if (args.transaction === undefined) return service.recommendIntent(args);
       const recommendation = parseRecommendationInput(args); const hasPage = args.page !== undefined; const rows = service.recommend(recommendation.transaction, hasPage ? 20 : (typeof args.limit === 'number' ? args.limit : 10), recommendation.options); return hasPage ? paged(rows, undefined, typeof args.page === 'number' ? args.page : undefined, typeof args.limit === 'number' ? args.limit : undefined, (item) => String((item as RankingEntry).cardId)) : rows;
     }
-    case 'recommendation_preflight': return service.preflightRecommendation(validateRecommendationTransaction(args.transaction), { ...(args.context === undefined ? {} : { context: validateContext(args.context) }) });
+    case 'recommendation_preflight': return args.transaction === undefined
+      ? service.recommendIntent(args)
+      : service.preflightRecommendation(validateRecommendationTransaction(args.transaction), { ...(args.context === undefined ? {} : { context: validateContext(args.context) }) });
     case 'upsert_payment_route': return service.upsertPaymentRoute(args.route);
     case 'list_payment_routes': { const rows = [...service.listPaymentRoutes()]; return (args.limit !== undefined || args.page !== undefined || args.projection !== undefined) ? paged(rows, typeof args.projection === 'string' ? args.projection : undefined, typeof args.page === 'number' ? args.page : undefined, typeof args.limit === 'number' ? args.limit : undefined, (item) => String((item as { id: string }).id), 50) : rows; }
     case 'register_payment_account': return service.upsertPaymentAccount(args.account);

@@ -427,6 +427,14 @@ export interface FxResolutionRequest {
   sourceSelectionReason: string;
   retryAction: 'query_approved_fx_source' | 'ask_user' | 'refresh_external_data';
   userQuestion?: string | undefined;
+  sourceUrls?: readonly string[];
+  sourceStatus?: 'known' | 'discovery_required';
+  purpose?: 'path_quote' | 'policy_research' | 'reference_estimate';
+  rateDirection?: 'base_to_quote';
+  scope?: { kind: 'public_reference' | 'card' | 'issuer' | 'route' | 'route_edge'; cardId?: string; issuer?: string; routeId?: string; edgeId?: string };
+  freshness?: { maxAgeSeconds?: number; targetTime?: string };
+  requiredFields?: readonly string[];
+  submission?: { tool: string; field: string };
 }
 
 export interface RecommendationPreflight {
@@ -586,6 +594,60 @@ export interface RankingEntry extends RewardBreakdown {
   rank: number;
 }
 
+/** Merchant-first planned intent; absent amount means discovery, not zero spend. */
+export interface RecommendationIntent {
+  merchant: string | { rawStatement?: string; name?: string; canonicalId?: string; canonicalNameZhHant?: string; country?: string; market?: string };
+  amount?: Money;
+  country?: string;
+  market?: string;
+  channel?: string;
+  paymentMethod?: string;
+  occurredAt?: string;
+  cardIds?: readonly string[];
+  routeIds?: readonly string[];
+  limit?: number;
+  fx?: FxSnapshot;
+  routeFacts?: readonly { routeId: string; edgeId?: string; fx: FxSnapshot }[];
+}
+export interface IntentCandidate {
+  id: string;
+  kind: 'direct_card' | 'payment_path';
+  cardId?: string;
+  routeId?: string;
+  fundingSource?: FundingInstrument;
+  nodes: readonly PaymentPathNode[];
+  events: readonly PaymentPathEvent[];
+  status: 'ready' | 'unknown' | 'blocked' | 'no_match';
+  matchedRules: readonly IntentRule[];
+  reward?: Money;
+  exclusionReasons: readonly string[];
+}
+export interface IntentRule {
+  ruleId: string;
+  ruleVersion: string;
+  component: RewardComponentKind;
+  sourceSnapshotId: string;
+  sourceUrl?: string;
+  validFrom: string;
+  validTo?: string;
+  conditions: RuleMatch;
+  rewardTerms: RewardSpec;
+  combination?: RewardCombinationPolicy;
+  stacking?: 'confirmed' | 'possible';
+  status: 'matched' | 'potential' | 'unknown' | 'excluded';
+  reward?: Money;
+  reasons: readonly string[];
+}
+export interface RecommendationIntentResult {
+  status: 'ready' | 'partial' | 'needs_input' | 'no_match';
+  candidates: readonly IntentCandidate[];
+  requiredActions: readonly { id: string; action: string; owner: 'agent' | 'user'; path?: string; requiredFacts: readonly string[]; candidateIds?: readonly string[]; submission?: { tool: string; field: string }; completionCondition?: string; fxResolutionRequest?: FxResolutionRequest }[];
+  coverage: { scope: string; discoveredCount: number; bounded: boolean; notes: readonly string[] };
+  evaluatedAt: string;
+  fxResolutionRequest?: FxResolutionRequest;
+  fxResolutionRequests?: readonly FxResolutionRequest[];
+}
+
 export interface PaymentPathRequest {
   amount: Money;
   merchant?: string;
@@ -600,6 +662,7 @@ export interface PaymentPathRequest {
   maxEvents?: number;
   maxBranchesPerNode?: number;
   eligibilityFacts?: readonly EligibilityFact[] | undefined;
+  routeFacts?: readonly { routeId: string; edgeId?: string; fx: FxSnapshot }[] | undefined;
 }
 export interface PaymentPathNode { id: string; kind: string; displayName: string; }
 export interface PaymentPathEventEligibility { status: 'ready' | 'unknown' | 'no_match' | 'needs_facts'; reasons: readonly string[]; }

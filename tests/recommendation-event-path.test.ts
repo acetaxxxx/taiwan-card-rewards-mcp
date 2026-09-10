@@ -30,7 +30,7 @@ describe('recommendation cross-event payment path', () => {
   it('exposes the same event-path contract through recommend', () => {
     const tool = mcpTools.find((candidate) => candidate.name === 'recommend');
     expect(tool?.inputSchema).toHaveProperty('oneOf');
-    expect((tool?.inputSchema as any).oneOf[0]).toHaveProperty('properties.context');
+    expect((tool?.inputSchema as any).oneOf.find((branch: any) => branch.properties?.transaction)).toHaveProperty('properties.context');
     expect(() => validateToolArgs('recommend', {
       transaction: { kind: 'purchase', mode: 'planned', occurredAt: target.occurredAt, amount: target.amount },
       context: { paymentEvents: { target, sourceEvents: [source] } },

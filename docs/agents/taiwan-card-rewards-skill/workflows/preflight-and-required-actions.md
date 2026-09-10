@@ -1,4 +1,8 @@
-# Preflight and recommendation workflow
+# Preflight and recommendation workflow (legacy transaction branch)
+
+本文件描述舊 transaction-shaped 相容／診斷流程。正常商家消費意圖直接呼叫
+`recommend`，請先讀 [`recommendation-intent.md`](recommendation-intent.md)；不要求
+先 `list_cards` 或先跑 preflight。
 
 `recommendation_preflight` 是 read-only 診斷；它不連網、不修改 state。需要資料時 Agent 依 `requiredActions` 到 MCP 外查官方來源、詢問使用者或補齊已驗證 facts，再重跑 preflight。
 
@@ -24,7 +28,7 @@
 }
 ```
 
-所有 object 都是 closed；金額用 minor units。`cardId` 在 recommendation schema 可由 service ranking seam 代入 placeholder，但 Agent 應先 `list_cards`，展示時只用 user 已登記 card。
+所有 object 都是 closed；金額用 minor units。`cardId` 在 recommendation schema 可由 service ranking seam 代入 placeholder；本相容流程若需要展示卡片清單，才查 user 已登記 card。
 
 ## 2. 診斷循環
 

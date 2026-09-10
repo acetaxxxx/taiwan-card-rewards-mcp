@@ -1,12 +1,13 @@
 import * as crypto from 'node:crypto';
 import { type LedgerStore, type RecordedTransaction, type StoredState } from './store.js';
 import { EventRewardLedger, convertMinor, createPaymentEventRewardCandidate, decidePaymentEventRewards, evaluateOffer, evaluatePredicate, matchPaymentEvent, matchPaymentEventChain, rankCards, resolveCyclePeriodKey } from './evaluator.js';
-import type { CardDescriptor, CardSwitchInput, CardSwitchProjection, CardSwitchStatus, CapPeriod, CapPoolDefinition, EvaluationContext, MerchantIdentity, MerchantResolution, Money, OfferConfirmation, OfferRuleVersion, OfferSourceSnapshot, RankingEntry, RewardBreakdown, RewardComponentRecord, TransactionTuple, UserBenefitInput, UserBenefitStatus, RecommendationPreflight, RecommendationRequiredAction, RecommendationRequirement, Diagnostic, EvidenceRecord, PaymentRouteRecord, PaymentAccountRecord, EventRewardLedgerRecord, EventRewardReversalRecord, PaymentPathRequest, PaymentPathRecommendation, PaymentPathCandidate, PaymentPathEvent, EligibilityFact, RewardValuationSnapshot, FxResolutionRequest, FxRateObservation, AppliedFxRate } from './types.js';
+import type { CardDescriptor, CardSwitchInput, CardSwitchProjection, CardSwitchStatus, CapPeriod, CapPoolDefinition, EvaluationContext, MerchantIdentity, MerchantResolution, Money, OfferConfirmation, OfferRuleVersion, OfferSourceSnapshot, RankingEntry, RewardBreakdown, RewardComponentRecord, TransactionTuple, UserBenefitInput, UserBenefitStatus, RecommendationPreflight, RecommendationRequiredAction, RecommendationRequirement, Diagnostic, EvidenceRecord, PaymentRouteRecord, PaymentAccountRecord, EventRewardLedgerRecord, EventRewardReversalRecord, PaymentPathRequest, PaymentPathRecommendation, PaymentPathCandidate, PaymentPathEvent, EligibilityFact, RewardValuationSnapshot, FxResolutionRequest, FxRateObservation, AppliedFxRate, RecommendationIntent, RecommendationIntentResult, IntentCandidate } from './types.js';
 import type { StartupConfig } from './startup.js';
 import { RewardServiceError } from './errors.js';
 import { validateCard, validateCapPool, validateConfirmation, validateEligibilityFact, validateMerchant, validateRecommendationTransaction, validateRule, validateSnapshot, validateTransaction, validateEvidence, validateFactCandidate, validatePaymentRouteRecord, validatePaymentAccountRecord, validateEventRewardInput, validatePaymentEvent, validatePaymentEventChainRule, validatePaymentEventRule, validateRewardValuationSnapshot } from './validation.js';
 import { cardSwitchStatus, projectionFromInput } from './card-switch.js';
 import { buildFxResolutionRequest, freezeAppliedFxRate, deriveConversionOwner } from './fx.js';
+import { validateRecommendationIntent } from './validation.js';
 
 export { RewardServiceError } from './errors.js';
 
@@ -694,6 +695,206 @@ export class RewardService {
     return { ready: !blocking, knownFacts, requirements, requiredActions, diagnostics, evaluatedAt, dataVersion, ...(fxResolutionRequest ? { fxResolutionRequest } : {}) };
   }
 
+  /** Merchant-first recommendation entry point. It only reads the tenant
+   * store; the older transaction-shaped recommend remains unchanged. */
+  recommendIntent(value: unknown): RecommendationIntentResult {
+    const input = validateRecommendationIntent(value);
+    const details = typeof input.merchant === 'string' ? { name: input.merchant } : input.merchant;
+    const rawMerchant = details.canonicalId ?? details.name ?? details.rawStatement ?? details.canonicalNameZhHant!;
+    const country = input.country ?? details.country;
+    const market = input.market ?? details.market;
+    const state = this.store.read();
+    const evaluatedAt = input.occurredAt ?? nowIso();
+    const resolution = this.resolveMerchant(rawMerchant, {
+      ...(country ? { country } : {}), ...(market ? { market } : {}),
+      ...(input.channel ? { channel: input.channel } : {}),
+    });
+    const actions: Array<RecommendationIntentResult['requiredActions'][number]> = [];
+    const addAction = (action: RecommendationIntentResult['requiredActions'][number]) => {
+      const existing = actions.find((candidate) => candidate.id === action.id);
+      if (!existing) { actions.push(action); return; }
+      const candidateIds = [...new Set([...(existing.candidateIds ?? []), ...(action.candidateIds ?? [])])].sort();
+      if (candidateIds.length) (existing as { candidateIds?: readonly string[] }).candidateIds = candidateIds;
+    };
+    if (resolution.resolutionStatus !== 'confirmed') addAction({
+      id: 'merchant', action: resolution.resolutionStatus === 'ambiguous' ? 'resolve_merchant' : 'research_merchant',
+      owner: resolution.resolutionStatus === 'ambiguous' ? 'user' : 'agent',
+      path: 'merchant', requiredFacts: ['confirmed merchant identity and market'], submission: { tool: 'recommend', field: 'merchant' },
+      completionCondition: 'repeat recommend after merchant identity and market are resolved; without new facts, stop retrying',
+    });
+    if (!input.amount) addAction({ id: 'amount', action: 'ask_user', owner: 'user', path: 'amount', requiredFacts: ['amount.amountMinor', 'amount.currency'], submission: { tool: 'recommend', field: 'amount' }, completionCondition: 'repeat recommend with a positive amount and currency' });
+    const merchant = resolution.merchant?.canonicalId;
+    const transaction = input.amount ? validateRecommendationTransaction({
+      kind: 'purchase', mode: 'planned', occurredAt: evaluatedAt, amount: input.amount,
+      ...(merchant ? { merchant } : {}), ...(country ? { country } : {}),
+      ...(input.channel ? { channel: input.channel } : {}),
+      ...(input.paymentMethod ? { paymentMethod: input.paymentMethod } : {}),
+      ...(input.fx ? { fx: input.fx } : {}),
+    }) : undefined;
+    const context = this.context(state, evaluatedAt, transaction);
+    const cards = state.cards.filter(card => input.cardIds === undefined || input.cardIds.includes(card.id));
+    const routes = this.listPaymentRoutes().filter(route =>
+      (input.routeIds === undefined || input.routeIds.includes(route.id)) &&
+      (input.cardIds === undefined || (route.funding.kind === 'credit_card' && input.cardIds.includes(route.funding.cardId ?? ''))));
+    const applicable = (cardId?: string, routeId?: string) => state.rules.filter(rule =>
+      rule.status !== 'superseded' &&
+      (rule.cardId === undefined || rule.cardId === cardId) &&
+      (rule.routeId === undefined || rule.routeId === routeId));
+    const projectRule = (rule: OfferRuleVersion, result?: RewardBreakdown): IntentCandidate['matchedRules'][number] => ({
+      ruleId: rule.id, ruleVersion: rule.version, component: rule.componentKind ?? 'card_issuer',
+      sourceSnapshotId: rule.sourceSnapshotId,
+      ...(state.snapshots.find(source => source.id === rule.sourceSnapshotId)?.url
+        ? { sourceUrl: state.snapshots.find(source => source.id === rule.sourceSnapshotId)!.url } : {}),
+      validFrom: rule.validFrom, ...(rule.validTo ? { validTo: rule.validTo } : {}),
+      conditions: rule.match, rewardTerms: rule.reward,
+      ...(rule.combination ? { combination: rule.combination } : {}),
+      ...(rule.stacking ? { stacking: rule.stacking } : {}),
+      status: !result ? 'potential' : result.status === 'ok' ? 'matched' : result.status === 'no_match' ? 'excluded' : 'unknown',
+      ...(result?.status === 'ok' && result.cappedReward ? { reward: result.cappedReward } : {}),
+      reasons: result?.unknownReasons ?? ['amount or path facts required for evaluation'],
+    });
+    const candidates: IntentCandidate[] = [];
+    let fxResolutionRequest: FxResolutionRequest | undefined;
+    const fxRequests = new Map<string, { request: FxResolutionRequest; candidateIds: Set<string>; diagnostic: string }>();
+    const registerFxRequest = (request: FxResolutionRequest, candidateId: string, diagnostic: string) => {
+      const scope: NonNullable<FxResolutionRequest['scope']> = request.scope ?? { kind: 'public_reference' };
+      const key = [diagnostic, request.baseCurrency, request.quoteCurrency, request.conversionOwner ?? 'unknown', request.purpose ?? '', scope.routeId ?? '', scope.edgeId ?? '', scope.cardId ?? '', scope.issuer ?? ''].join('|');
+      const existing = fxRequests.get(key);
+      if (existing) existing.candidateIds.add(candidateId);
+      else fxRequests.set(key, { request, candidateIds: new Set([candidateId]), diagnostic });
+      fxResolutionRequest ??= request;
+    };
+    if (input.routeIds === undefined) for (const card of cards) {
+      const rules = applicable(card.id);
+      const applicableFx = transaction?.fx &&
+        (!transaction.fx.cardIdScope || transaction.fx.cardIdScope === card.id) &&
+        (!transaction.fx.issuerScope || transaction.fx.issuerScope === card.issuer)
+        ? transaction.fx : undefined;
+      const tx = transaction ? { ...transaction, cardId: card.id, route: { kind: 'direct_card' as const }, ...(applicableFx ? { fx: applicableFx } : { fx: undefined }) } : undefined;
+      const evaluations = rules.map(rule => ({ rule, result: tx ? evaluateOffer(rule, tx, context) : undefined }));
+      const projected = evaluations.map(({ rule, result }) => projectRule(rule, result));
+      const row = tx ? rankCards([card], rules, tx, context, 1)[0] : undefined;
+      const unresolved = projected.some(rule => rule.status === 'unknown' || rule.status === 'potential');
+      if (tx) {
+        for (const { rule, result } of evaluations) for (const diagnostic of result?.diagnostics ?? []) {
+          if (!['fx_missing', 'fx_stale', 'fx_pair_mismatch', 'fx_scope_mismatch'].includes(diagnostic.code)) continue;
+          const request = buildFxResolutionRequest({
+            transaction: tx, rules: [rule], card,
+            scope: { kind: 'card', cardId: card.id, issuer: card.issuer },
+            submission: { tool: 'recommend', field: 'fx' },
+          });
+          registerFxRequest(request, `card:${card.id}`, diagnostic.code);
+        }
+      }
+      candidates.push({
+        id: `card:${card.id}`, kind: 'direct_card', cardId: card.id,
+        fundingSource: { kind: 'credit_card', cardId: card.id },
+        nodes: [{ id: 'funding', kind: 'funding_source', displayName: card.productName }, { id: 'merchant', kind: 'merchant', displayName: rawMerchant }],
+        events: tx ? [{ kind: 'purchase', fromNodeId: 'funding', toNodeId: 'merchant', amount: tx.amount, transition: 'card_authorization' }] : [],
+        status: row?.status === 'ok' ? 'ready' : !tx || unresolved || !rules.length ? 'unknown' : 'no_match',
+        matchedRules: projected,
+        ...(row?.status === 'ok' && row.cappedReward ? { reward: row.cappedReward } : {}),
+        exclusionReasons: row?.unknownReasons ?? (!rules.length ? ['no known offer rules'] : []),
+      });
+    }
+    let pathTruncated = false;
+    if (transaction && this.metadataUser) {
+      const result = this.recommendPaymentPaths({
+        amount: transaction.amount, asOf: evaluatedAt, ...(merchant ? { merchant } : {}),
+        ...(country ? { country } : {}), ...(input.channel ? { channel: input.channel } : {}),
+        ...(input.paymentMethod ? { paymentMethod: input.paymentMethod } : {}),
+        ...(input.routeFacts ? { routeFacts: input.routeFacts } : {}),
+        routeIds: routes.map(route => route.id), limit: 20,
+      });
+      for (const path of result.candidates) {
+        const cardId = path.fundingSource.kind === 'credit_card' ? path.fundingSource.cardId : undefined;
+        const rules = applicable(cardId, path.routeId);
+        const projected = rules.map(rule => {
+          const matched = path.matchedRules.find(item => item.ruleId === rule.id && item.ruleVersion === rule.version);
+          const summary = projectRule(rule);
+          return matched ? { ...summary, status: 'matched' as const, reward: matched.reward, reasons: [] } : summary;
+        });
+        const supported = path.status === 'ready' && path.matchedRules.length > 0 &&
+          path.matchedRules.every(rule => rule.reward.currency === transaction.amount.currency);
+        candidates.push({
+          id: path.id, kind: 'payment_path', routeId: path.routeId, fundingSource: path.fundingSource,
+          nodes: path.nodes, events: path.events,
+          status: supported ? 'ready' : path.status === 'blocked' ? 'blocked' : 'unknown',
+          matchedRules: projected, ...(supported ? { reward: path.cappedReward } : {}),
+          exclusionReasons: path.exclusionReasons,
+        });
+        if (path.status === 'blocked') {
+          const route = routes.find((candidate) => candidate.id === path.routeId);
+          const card = cardId ? state.cards.find((candidate) => candidate.id === cardId) : undefined;
+          for (const event of path.events) {
+            const costs = [event.fee, event.markup, event.foreignTransactionFee, event.dcc?.selected ? event.dcc.fee : undefined]
+              .filter((value): value is Money => value !== undefined && value.currency !== transaction.amount.currency);
+            for (const cost of costs) {
+              const pairMatches = event.fx?.baseCurrency === cost.currency && event.fx.quoteCurrency === transaction.amount.currency;
+              const fresh = pairMatches && Math.abs(Date.parse(evaluatedAt) - Date.parse(event.fx!.capturedAt)) <= (event.fx!.maxAgeSeconds ?? 7 * 24 * 3600) * 1000;
+              if (fresh) continue;
+              const edgeId = event.routeEdgeIds?.length === 1 ? event.routeEdgeIds[0] : undefined;
+              const routeKind = route?.layers.some((layer) => layer.kind === 'wallet') ? 'wallet' as const : 'direct_card' as const;
+              const request = buildFxResolutionRequest({
+                transaction: { amount: cost, occurredAt: evaluatedAt, mode: 'planned', route: { kind: routeKind } },
+                card, targetCurrency: transaction.amount.currency,
+                scope: edgeId ? { kind: 'route_edge', routeId: path.routeId, edgeId } : { kind: 'route', routeId: path.routeId },
+                submission: { tool: 'recommend', field: 'routeFacts' },
+              });
+              request.requiredFacts = ['routeFacts[].routeId', ...(edgeId ? ['routeFacts[].edgeId'] : []), ...request.requiredFields!.map((field) => `routeFacts[].fx.${field}`)];
+              registerFxRequest(request, path.id, event.fx ? (pairMatches ? 'fx_stale' : 'fx_pair_mismatch') : 'fx_missing');
+            }
+          }
+        }
+      }
+      for (const blocked of result.blocked ?? []) {
+        pathTruncated ||= blocked.reason.includes('truncated_by_bound');
+        addAction({ id: `route:${blocked.routeId}:${blocked.reason}`, action: 'review_payment_route', owner: 'agent', path: `routes.${blocked.routeId}`, requiredFacts: [blocked.reason], candidateIds: [blocked.routeId], submission: { tool: 'upsert_payment_route', field: 'route' }, completionCondition: 'repeat recommend after the route has current accepted evidence' });
+      }
+      pathTruncated ||= result.candidates.length >= 20;
+    } else {
+      for (const route of routes) {
+        const cardId = route.funding.kind === 'credit_card' ? route.funding.cardId : undefined;
+        candidates.push({
+          id: `route:${route.id}`, kind: 'payment_path', routeId: route.id, fundingSource: route.funding,
+          nodes: route.nodes ?? route.layers.map((layer, index) => ({ id: `layer:${index}`, kind: layer.kind, displayName: layer.displayName ?? layer.providerId ?? layer.kind })),
+          events: [], status: 'unknown', matchedRules: applicable(cardId, route.id).map(rule => projectRule(rule)),
+          exclusionReasons: ['route acceptance, evidence and amount require evaluation'],
+        });
+      }
+    }
+    if (!candidates.length) addAction({ id: 'setup', action: 'ask_user', owner: 'user', path: 'cardIds', requiredFacts: ['cards or payment methods the user owns'], submission: { tool: 'register_card', field: 'card' }, completionCondition: 'repeat recommend after at least one owned card or payment route is registered' });
+    for (const candidate of candidates) if (candidate.status === 'unknown' || candidate.status === 'blocked' || candidate.matchedRules.some(rule => rule.status === 'potential' || rule.status === 'unknown')) {
+      if (![...fxRequests.values()].some(item => item.candidateIds.has(candidate.id))) addAction({ id: `candidate:${candidate.id}`, action: 'review_candidate', owner: 'agent', path: `candidates.${candidate.id}`,
+        requiredFacts: candidate.exclusionReasons.length ? candidate.exclusionReasons : ['current applicable offer evidence and transaction facts'], candidateIds: [candidate.id], submission: { tool: 'recommend', field: 'merchant' }, completionCondition: 'repeat recommend only after new evidence or user-owned facts are available' });
+    }
+    for (const [key, { request, candidateIds, diagnostic }] of fxRequests) {
+      addAction({ id: `fx:${crypto.createHash('sha256').update(key).digest('hex').slice(0, 16)}`, action: request.retryAction, owner: request.retryAction === 'ask_user' ? 'user' : 'agent', path: request.submission?.field ?? 'fx', requiredFacts: request.requiredFacts, candidateIds: [...candidateIds].sort(), ...(request.submission ? { submission: request.submission } : {}), completionCondition: `repeat recommend after supplying a validated ${request.baseCurrency}/${request.quoteCurrency} observation; without new evidence, stop retrying ${diagnostic}`, fxResolutionRequest: request });
+    }
+    for (const action of actions) if (action.candidateIds === undefined) {
+      const affected = action.id === 'merchant'
+        ? candidates.filter((candidate) => candidate.matchedRules.some((rule) => Boolean(rule.conditions.merchants?.length))).map((candidate) => candidate.id)
+        : candidates.map((candidate) => candidate.id);
+      (action as { candidateIds?: readonly string[] }).candidateIds = affected.sort();
+    }
+    const fxResolutionRequests = [...fxRequests.values()].map(({ request }) => request);
+    const ready = candidates.some(candidate => candidate.status === 'ready');
+    const pending = candidates.some(candidate => candidate.status === 'unknown' || candidate.status === 'blocked');
+    const status: RecommendationIntentResult['status'] = ready ? (actions.length || pending ? 'partial' : 'ready')
+      : pending || actions.length ? 'needs_input' : 'no_match';
+    candidates.sort((a, b) => Number(b.status === 'ready') - Number(a.status === 'ready') ||
+      (a.reward?.currency === b.reward?.currency ? (b.reward?.amountMinor ?? 0) - (a.reward?.amountMinor ?? 0) : 0) ||
+      a.id.localeCompare(b.id));
+    return {
+      status, candidates: candidates.slice(0, input.limit), requiredActions: actions, evaluatedAt,
+      ...(fxResolutionRequest ? { fxResolutionRequest } : {}),
+      ...(fxResolutionRequests.length ? { fxResolutionRequests } : {}),
+      coverage: { scope: 'registered cards and payment routes; route acceptance requires evidence',
+        discoveredCount: candidates.length, bounded: pathTruncated || candidates.length > input.limit!,
+        notes: ['not a market-wide catalog', 'planned calls do not consume caps', 'path exploration is bounded; complete continuation is not yet available'] },
+    };
+  }
+
   recommend(transaction: unknown, limit = 10, options: { cardIds?: readonly string[]; context?: EvaluationContext } = {}): RankingEntry[] {
     let parsedTransaction = validateRecommendationTransaction(transaction);
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > 20) throw new RewardServiceError('INVALID_INPUT', 'limit must be a safe integer from 1 to 20');
@@ -736,7 +937,27 @@ export class RewardService {
       factValues.set(key, value);
       verifiedFacts.push(fact);
     }
-    const visibleRoutes = this.listPaymentRoutes().filter((route) => requested === undefined || requested.has(route.id));
+    const routeFacts = input.routeFacts ?? [];
+    if (routeFacts.length > 128) throw new RewardServiceError('INVALID_INPUT', 'routeFacts must contain at most 128 entries');
+    const routeFactScopes = routeFacts.map((fact) => `${fact.routeId}|${fact.edgeId ?? '*'}`);
+    if (new Set(routeFactScopes).size !== routeFactScopes.length) throw new RewardServiceError('INVALID_INPUT', 'routeFacts contains duplicate route/edge scope');
+    const visibleRoutes = this.listPaymentRoutes().filter((route) => requested === undefined || requested.has(route.id)).map((route) => {
+      const fundingCardId = route.funding.kind === 'credit_card' ? route.funding.cardId : undefined;
+      const card = fundingCardId ? state.cards.find((candidate) => candidate.id === fundingCardId) : undefined;
+      if (!route.edges) return route;
+      return { ...route, edges: route.edges.map((edge) => {
+        const requiredCurrencies = [edge.fee, edge.markup, edge.foreignTransactionFee, edge.dcc?.selected ? edge.dcc.fee : undefined]
+          .filter((value): value is Money => value !== undefined && value.currency !== input.amount.currency)
+          .map((value) => value.currency);
+        const fact = routeFacts.find((candidate) => candidate.routeId === route.id &&
+          (candidate.edgeId === undefined || candidate.edgeId === edge.edgeId) &&
+          requiredCurrencies.includes(candidate.fx.baseCurrency) && candidate.fx.quoteCurrency === input.amount.currency &&
+          (!candidate.fx.cardIdScope || candidate.fx.cardIdScope === card?.id) &&
+          (!candidate.fx.issuerScope || candidate.fx.issuerScope === card?.issuer) &&
+          Math.abs(Date.parse(asOf) - Date.parse(candidate.fx.capturedAt)) <= (candidate.fx.maxAgeSeconds ?? 7 * 24 * 3600) * 1000);
+        return fact ? { ...edge, fx: fact.fx } : edge;
+      }) };
+    });
     const routes = visibleRoutes.filter((route) => {
       if (route.status !== 'active' || !route.confirmation) return false;
       if (route.authority === undefined || route.confidence !== 'high' || !route.sourceUrl?.startsWith('https://') || !route.evidenceIds?.length) return false;
@@ -969,7 +1190,8 @@ export class RewardService {
       const pathEvidence = [...new Set(events.flatMap((event) => event.evidenceIds ?? []))].map((id) => state.evidence.find((candidate) => candidate.id === id)).filter((evidence): evidence is NonNullable<typeof evidence> => evidence !== undefined);
       const evidenceTier = pathEvidence.length === 0 ? 0 : Math.min(...pathEvidence.map((evidence) => evidence.sourceType === 'official' && evidence.reviewState === 'accepted' ? 3 : evidence.sourceType === 'trusted_secondary' && evidence.reviewState === 'accepted' ? 2 : evidence.sourceType === 'community' && evidence.reviewState === 'accepted' ? 1 : 0));
       const evidenceFreshness = pathEvidence.length === 0 ? undefined : pathEvidence.map((evidence) => evidence.observedAt).sort()[0];
-      const pathSignature = JSON.stringify({ version: 1, nodes, edges: pathEdges ?? events, funding: route.funding, merchant: input.merchant, currency: input.amount.currency });
+      const stableEdges = pathEdges?.map(({ fx: _fx, ...edge }) => edge) ?? events.map(({ fx: _fx, ...event }) => event);
+      const pathSignature = JSON.stringify({ version: 1, nodes, edges: stableEdges, funding: route.funding, merchant: input.merchant, currency: input.amount.currency });
       return { id: `path:${pathSignature}`, routeId: route.id, nodes, events, fundingSource: route.funding, grossReward, netReward: cappedReward, cappedReward, ...(feeTotal === undefined ? {} : { feeTotal }), ...(netValue === undefined ? {} : { netValue }), requiredActions: feeMismatch ? ['confirm fee currency or provide a validated FX snapshot'] : nativeUnitMismatch ? ['provide a validated valuation snapshot for each reward unit'] : [], userEffort: feeMismatch || nativeUnitMismatch ? 1 : 0, evidenceTier, ...(evidenceFreshness === undefined ? {} : { evidenceFreshness }), matchedRules: blocked ? [] : valuedRules, pathSignature, status: blocked ? 'blocked' : 'ready', exclusionReasons: stackingAmbiguous ? ['ambiguous stacking policy'] : feeMismatch ? ['fee currency cannot be compared without validated FX'] : nativeUnitMismatch ? ['provide a fresh authoritative valuation for each reward unit'] : matchedRules.length ? evaluations.length === matchedRules.length ? [] : ['possible stacking policy excluded'] : ['no applicable verified card rule'] };
     });
     const statusRank = (status: PaymentPathCandidate['status']): number => status === 'ready' ? 0 : status === 'blocked' ? 2 : status === 'no_match' ? 3 : 1;
