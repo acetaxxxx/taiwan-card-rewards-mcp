@@ -108,4 +108,21 @@ describe('bounded recommendation pagination', () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  it('keeps all applicable rules attached to one route when candidate pages are small', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'card-rewards-route-rules-page-'));
+    const store = new FileStore({ dataDir: dir });
+    try {
+      const service = new RewardService(store, 'u1');
+      const evidence = service.submitEvidence({ id: 'route-page-evidence', requirementId: 'route', sourceIdentity: 'merchant', sourceType: 'official', authority: 'merchant', claim: { route: 'route-page' }, observedAt: '2026-09-01T00:00:00Z', confidence: 'high', contentHash: 'route-page', reviewState: 'accepted', sourceUrl: 'https://merchant.example/payment' });
+      const route = service.upsertPaymentRoute({ status: 'active', idempotencyKey: 'route-page', layers: [], funding: { kind: 'cash' }, observedAt: '2026-09-01T00:00:00Z', sourceUrl: 'https://merchant.example/payment', authority: 'merchant', confidence: 'high', evidenceIds: [evidence.id], nodes: [{ id: 'cash', kind: 'funding_source', displayName: 'cash' }, { id: 'merchant', kind: 'merchant', displayName: 'merchant' }], edges: [{ edgeId: 'settle', fromNodeId: 'cash', toNodeId: 'merchant', transition: 'direct_settlement', evidenceIds: [evidence.id] }], confirmation: { confirmedAt: '2026-09-01T00:00:00Z', confirmedBy: 'u1' } });
+      for (let index = 0; index < 12; index += 1) service.upsertOffer(source, { id: `route-rule-${index}`, routeId: route.id, version: '1', sourceSnapshotId: source.id, status: 'active', validFrom: '2026-01-01T00:00:00Z', settlementCurrency: 'TWD', match: {}, reward: { kind: 'flat', amountMinor: index + 1, currency: 'TWD' }, componentKind: 'payment_provider', stacking: 'confirmed', combination: { mode: 'additive', groupId: `route-rule-${index}`, version: '1' } });
+      const result = service.recommendIntent({ merchant: 'Shop', amount: { amountMinor: 1000, currency: 'TWD' }, occurredAt: '2026-09-02T00:00:00Z', routeIds: [route.id], limit: 1, page: 1 });
+      expect(result.candidates).toHaveLength(1);
+      expect(result.candidates[0]?.matchedRules).toHaveLength(12);
+    } finally {
+      store.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
