@@ -45,6 +45,17 @@ describe('FX policy and observation persistence', () => {
     expect(result.candidates.find((candidate) => candidate.cardId === 'card-jpy')?.matchedRules[0]?.status).toBe('matched');
   });
 
+  it('uses policy freshness and estimate-age windows when classifying stored FX', () => {
+    const service = new RewardService(new MemoryStore(), 'user-1');
+    service.registerCard({ id: 'policy-window-card', issuer: 'Window Bank', productName: 'Window Card' });
+    const evidence = service.submitEvidence({ id: 'window-policy-evidence', requirementId: 'fx-policy', sourceIdentity: 'window-bank', sourceType: 'official', authority: 'issuer', claim: { policy: 'window' }, observedAt: '2026-09-10T00:00:00Z', confidence: 'high', contentHash: 'window-policy', reviewState: 'accepted', sourceUrl: 'https://bank.example/fx-policy' });
+    service.upsertFxPolicy({ policyKey: 'window', version: '1', baseCurrency: 'JPY', quoteCurrency: 'TWD', scope: { kind: 'issuer', issuer: 'Window Bank' }, conversionOwner: 'issuer', rateType: 'card_scheme', rateDirection: 'base_to_quote', conversionTiming: 'settlement', evidenceId: evidence.id, freshForSeconds: 3600, maxEstimateAgeSeconds: 14400, observedAt: '2026-09-10T00:00:00Z', idempotencyKey: 'window-policy' });
+    service.upsertOffer({ id: 'window-offer', url: 'https://bank.example/offer', fetchedAt: '2026-09-01T00:00:00Z', contentHash: 'window-offer', parserVersion: '1', verified: true }, { id: 'window-rule', cardId: 'policy-window-card', version: '1', sourceSnapshotId: 'window-offer', status: 'active', validFrom: '2026-01-01T00:00:00Z', settlementCurrency: 'TWD', match: {}, reward: { kind: 'percentage', rateBps: 100 } });
+    service.upsertFxObservation({ baseCurrency: 'JPY', quoteCurrency: 'TWD', ratePpm: 215000, capturedAt: '2026-09-09T22:00:00Z', provider: 'Window Bank', rateType: 'card_scheme', sourceUrl: 'https://bank.example/rate', contentHash: 'window-rate', idempotencyKey: 'window-rate' });
+    const candidate = service.recommendIntent({ merchant: 'Shop', amount: { amountMinor: 1000, currency: 'JPY' }, occurredAt: '2026-09-10T00:00:00Z' }).candidates.find((item) => item.cardId === 'policy-window-card');
+    expect(candidate?.fxEstimate?.status).toBe('stale_estimate');
+  });
+
   it('does not reuse a route-scoped observation for a direct-card candidate', () => {
     const service = new RewardService(new MemoryStore(), 'user-1');
     service.registerCard({ id: 'card-route-scope', issuer: 'Bank', productName: 'Japan Card' });

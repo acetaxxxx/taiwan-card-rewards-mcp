@@ -366,6 +366,8 @@ export interface FxPolicyRecord {
   conversionTiming: 'transaction' | 'clearing' | 'settlement' | 'posting';
   feeBasis?: string;
   markupBasis?: string;
+  freshForSeconds?: number;
+  maxEstimateAgeSeconds?: number;
   sourceUrl?: string;
   evidenceId: string;
   observedAt: string;

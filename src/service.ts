@@ -827,16 +827,22 @@ export class RewardService {
     const context = this.context(state, evaluatedAt, transaction);
     const storedFx = (baseCurrency: string, quoteCurrency: string, card?: CardDescriptor): { observation: FxObservationRecord; stale: boolean } | undefined => {
       const target = Date.parse(evaluatedAt);
+      const policy = (state.fxPolicies ?? []).filter((candidate) => candidate.ownerUser === this.metadataUser && candidate.baseCurrency === baseCurrency.toUpperCase() && candidate.quoteCurrency === quoteCurrency.toUpperCase() &&
+        ((candidate.scope.kind === 'card' && candidate.scope.cardId === card?.id) || (candidate.scope.kind === 'issuer' && candidate.scope.issuer === card?.issuer)) &&
+        (!candidate.validFrom || Date.parse(candidate.validFrom) <= target) && (!candidate.validTo || Date.parse(candidate.validTo) >= target))
+        .sort((a, b) => Number(b.scope.kind === 'card') - Number(a.scope.kind === 'card'))[0];
+      const maxEstimateAge = (policy?.maxEstimateAgeSeconds ?? 30 * 24 * 3600) * 1000;
       const candidates = (state.fxObservations ?? [])
         .filter((observation) => observation.ownerUser === this.metadataUser && observation.baseCurrency === baseCurrency.toUpperCase() && observation.quoteCurrency === quoteCurrency.toUpperCase())
         .filter((observation) => observation.routeIdScope === undefined && observation.edgeIdScope === undefined)
         .filter((observation) => (!observation.cardIdScope || observation.cardIdScope === card?.id) && (!observation.issuerScope || observation.issuerScope === card?.issuer))
-        .filter((observation) => { const captured = Date.parse(observation.capturedAt); return Number.isFinite(captured) && captured <= target && target - captured <= 30 * 24 * 3600 * 1000; })
+        .filter((observation) => { const captured = Date.parse(observation.capturedAt); return Number.isFinite(captured) && captured <= target && target - captured <= maxEstimateAge; })
         .sort((a, b) => Date.parse(b.capturedAt) - Date.parse(a.capturedAt));
       const observation = candidates[0];
       if (!observation) return undefined;
       const age = target - Date.parse(observation.capturedAt);
-      return { observation, stale: age > (observation.maxAgeSeconds ?? 7 * 24 * 3600) * 1000 && age <= 30 * 24 * 3600 * 1000 };
+      const freshFor = (policy?.freshForSeconds ?? observation.maxAgeSeconds ?? 7 * 24 * 3600) * 1000;
+      return { observation, stale: age > freshFor && age <= maxEstimateAge };
     };
     const cards = state.cards.filter(card => input.cardIds === undefined || input.cardIds.includes(card.id));
     const registeredRoutes = this.listPaymentRoutes().filter(route =>
