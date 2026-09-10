@@ -493,6 +493,7 @@ export interface CardSwitchEnrollment {
   campaignId: string;
   cardId: string;
   enrolled: boolean;
+  enrolledAt?: string | undefined;
   usageByPeriod?: Readonly<Record<string, Money>> | undefined;
 }
 

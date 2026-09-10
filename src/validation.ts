@@ -627,10 +627,10 @@ export function validateCardSwitchCampaign(value: unknown): CardSwitchCampaign {
 
 export function validateCardSwitchEnrollment(value: unknown): CardSwitchEnrollment {
   const item = object(value, 'enrollment');
-  keys(item, ['campaignId', 'cardId', 'enrolled', 'usageByPeriod'], 'enrollment');
+  keys(item, ['campaignId', 'cardId', 'enrolled', 'enrolledAt', 'usageByPeriod'], 'enrollment');
   const usageByPeriod: Record<string, Money> = {};
   if (item.usageByPeriod !== undefined) for (const [key, money] of Object.entries(object(item.usageByPeriod, 'enrollment.usageByPeriod'))) usageByPeriod[requiredString(key, 'enrollment usage key', true)] = validateSignedMoney(money, `enrollment.usageByPeriod.${key}`);
-  return { campaignId: requiredString(item.campaignId, 'enrollment.campaignId', true), cardId: requiredString(item.cardId, 'enrollment.cardId', true), enrolled: item.enrolled === true, ...(Object.keys(usageByPeriod).length ? { usageByPeriod } : {}) };
+  return { campaignId: requiredString(item.campaignId, 'enrollment.campaignId', true), cardId: requiredString(item.cardId, 'enrollment.cardId', true), enrolled: item.enrolled === true, ...(item.enrolledAt === undefined ? {} : { enrolledAt: iso(item.enrolledAt, 'enrollment.enrolledAt') }), ...(Object.keys(usageByPeriod).length ? { usageByPeriod } : {}) };
 }
 
 export function validateCardSwitchConfirmation(value: unknown): CardSwitchConfirmation {

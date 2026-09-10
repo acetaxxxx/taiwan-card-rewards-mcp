@@ -93,6 +93,48 @@ describe("LedgerStore persistence seam and FileStore adapter", () => {
     }
   });
 
+  it("recovers a campaign enrollment timestamp written by RewardService", () => {
+    const dir = mkdtempSync(join(tmpdir(), "card-rewards-enrollment-restart-"));
+    try {
+      const store1 = new FileStore(config(dir));
+      const service = new RewardService(store1, "test-user");
+      service.registerCard(sampleCard);
+      service.upsertUserBenefitStatus({
+        kind: "campaign_registration",
+        action: "record",
+        cardId: sampleCard.id,
+        campaignId: "campaign-1",
+        timezone: "Asia/Taipei",
+        completedAt: "2026-09-10T12:00:00Z",
+        effectiveFrom: "2026-09-10T00:00:00Z",
+        benefit: "campaign enrollment",
+        sourceUrl: "https://bank.example/campaign",
+        sourceSnapshotAt: "2026-09-10T00:00:00Z",
+        ruleVersion: "2026-v1",
+        confirmation: {
+          confirmedBy: "user",
+          confirmedAtUtc: "2026-09-10T12:00:00Z",
+          completed: true,
+        },
+        idempotencyKey: "campaign-enrollment-1",
+      });
+      store1.close();
+
+      const store2 = new FileStore(config(dir));
+      expect(store2.read().switchEnrollments).toEqual([
+        {
+          campaignId: "campaign-1",
+          cardId: sampleCard.id,
+          enrolled: true,
+          enrolledAt: "2026-09-10T12:00:00Z",
+        },
+      ]);
+      store2.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("enforces exclusive locking and allows re-acquisition only after close", () => {
     const dir = mkdtempSync(join(tmpdir(), "card-rewards-lock-"));
     try {
