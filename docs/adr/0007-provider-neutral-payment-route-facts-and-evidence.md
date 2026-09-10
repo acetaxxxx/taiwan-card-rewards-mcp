@@ -14,7 +14,7 @@ Model a payment route as an ordered, role-labeled route graph plus distinct sett
 2. Route transitions identify how value moves between adjacent nodes, such as direct authorization, account debit, wallet top-up, or wallet settlement.
 3. Settlement facts preserve transaction, settlement, and billing currencies; conversion owner and timing; FX snapshot; markup and fees; and DCC choice.
 
-The route graph is necessary because a card used to top up a wallet is not automatically a card-funded merchant purchase. For example, a PayPay acceptance path may involve Taishin Pay+ and then either a Taishin Richart card or a Taishin Jieli Cun account; those are different funding and reward facts even when the acceptance brand and intermediate service are the same. These paths remain candidate routes until current evidence establishes the actual transitions.
+The route graph is necessary because a card used to top up a wallet is not automatically a card-funded merchant purchase. For example, a PayPay acceptance path may involve Taishin Pay+ and then either a Taishin Richart card or a Taishin Jieli Cun account; those are different funding and reward facts even when the acceptance brand and intermediate service are the same. Planned recommendations may use an evidence-backed route by default without asking the user to confirm every route; user confirmation is reserved for conflicts, ambiguous funding/settlement semantics, or explicit denial.
 
 The terminal funding instrument remains the stable coarse category `credit_card | account | cash`. Account subtypes are open to the known facts needed by the route, including `linked_bank_account`, `wallet_balance`, and `foreign_currency_account`.
 
@@ -48,7 +48,7 @@ These examples are distinct routes, even when they share a merchant QR brand:
 | PayPay QR → Taishin Pay+ → Taishin credit card | `credit_card` or card-top-up semantics only as the current bank terms define | Record the exact funding fact and current terms. Do not infer ordinary overseas-card treatment merely from the Pay+ or PayPay brand. |
 | TWQR acceptance → Taishin Pay+ | account or credit card | TWQR is an acceptance/interoperability standard, not a nested Taiwan Pay application. |
 
-The last two rows are intentionally fact-driven. A route is `candidate` until the funding and settlement semantics are supported by current official evidence and, when user-specific, user confirmation.
+The last two rows are intentionally fact-driven. A route is usable for planned recommendation when current official evidence supports its funding and settlement semantics and no conflicting user fact exists. A route with conflicting evidence or unresolved interpretation remains `candidate`/`needs_review`; a route explicitly denied by the user is marked `failed`/`rejected` and excluded from later recommendations. User confirmation is not a per-route prerequisite when the evidence is consistent.
 
 ## Evidence and fail-closed rules
 
@@ -68,7 +68,23 @@ The following are not global defaults:
 - a merchant QR brand implying every partner wallet/funding source;
 - a route layer implying that rewards stack.
 
-When any required fact is absent, stale, contradictory, or outside its validity window, `recommendation_preflight` returns actionable diagnostics and the evaluator does not invent a reward. For route-bound rules, an unregistered/stale/conflicting route or a route registered to a different card is `unknown`/`stale`/`needs_review`; it is never silently treated as a match.
+When any required fact is absent, stale, contradictory, or outside its validity window, `recommendation_preflight` returns actionable diagnostics and the evaluator does not invent a reward. For route-bound rules, an unregistered/stale/conflicting route or a route registered to a different card is `unknown`/`stale`/`needs_review`; it is never silently treated as a match. A route with consistent evidence may be used as a provisional planned candidate; explicit user denial is durable negative feedback, not an implicit confirmation requirement.
+
+## Default usability and conflict handling
+
+Route evidence establishes default usability for planned recommendations. The
+MCP should not ask for a separate confirmation for every discovered offer or
+route. It must ask the user when two authoritative sources disagree, when a
+route can be interpreted as either direct authorization or wallet top-up, when
+funding ownership/binding is ambiguous, or when a user-specific fact is needed
+to choose between competing paths. If the user says a proposed path is not
+available, the route is marked `failed`/`rejected` with the denial provenance
+and excluded from future planned recommendations until new evidence or an
+explicit user correction is supplied.
+
+This default applies only to planned discovery and comparison. It does not
+activate an Offer Rule without its existing Offer Confirmation, and it does
+not authorize actual transaction recording or rewrite historical ledger facts.
 
 ## Consequences
 

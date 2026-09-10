@@ -129,7 +129,7 @@ Response shape is `PaymentPathRecommendation`:
 }
 ```
 
-Illustrative response values above are shape-only. Production candidates require the current user’s active/confirmed route, accepted official HTTPS evidence, valid period, and admissible edges. Planned path events never write event ledger records.
+Illustrative response values above are shape-only. Production candidates require the current user’s active route, accepted official HTTPS evidence, valid period, and admissible edges; a consistent route does not require per-route confirmation. Planned path events never write event ledger records.
 
 ## Route and account payloads
 

@@ -79,7 +79,7 @@ tenant 已知資料的有界集合，不宣稱涵蓋所有市場優惠。
 ## C. 舊 payment-path envelope（相容／明確查詢）
 
 只有 host 或使用者明確要求舊 payment-path envelope 時，對 account/card → wallet → acceptance → merchant 先列 account/route，確認
-route 是該 user 的 active、confirmed、官方 HTTPS evidence，再呼叫 `recommend`
+route 是該 user 的 active、官方 HTTPS evidence；證據一致即可使用，衝突或歧義時才詢問，再呼叫 `recommend`
 的 closed payment-path branch：
 
 ```json

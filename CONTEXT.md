@@ -198,7 +198,7 @@ The typed relationship between adjacent Route Nodes, such as direct authorizatio
 _Avoid_: implicit link, assumed funding
 
 **Payment Route Record**:
-An evidence-backed concrete Payment Route containing ordered Route Nodes, Route Transitions, and relevant settlement facts for an observed or declared path. Its identifier is stable identity only; it does not contain the matching semantics.
+An evidence-backed concrete Payment Route containing ordered Route Nodes, Route Transitions, and relevant settlement facts for an observed or declared path. Consistent evidence makes it usable as a provisional planned candidate by default; explicit user denial makes it failed/rejected. Its identifier is stable identity only; it does not contain the matching semantics.
 _Avoid_: opaque route rule, route ID as policy
 
 **Payment Route Selector**:

@@ -33,7 +33,7 @@ export type FundingInstrument =
   | { kind: 'cash' };
 export interface PaymentRouteRecord {
   id: string;
-  status: 'candidate' | 'active' | 'stale' | 'conflict' | 'needs_review';
+  status: 'candidate' | 'active' | 'stale' | 'conflict' | 'needs_review' | 'failed';
   layers: readonly PaymentRouteLayer[];
   funding: FundingInstrument;
   sourceUrl?: string;
@@ -45,6 +45,7 @@ export interface PaymentRouteRecord {
   authority?: EvidenceAuthority;
   confidence?: 'high' | 'medium' | 'low';
   confirmation?: { confirmedAt: string; confirmedBy: string };
+  failure?: { failedAt: string; failedBy: string; reason: string };
   evidenceIds?: readonly string[];
   idempotencyKey: string;
   ownerUser?: string;

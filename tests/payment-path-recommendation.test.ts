@@ -45,6 +45,15 @@ describe('proactive payment path recommendation', () => {
     expect(result.candidates[0]).toEqual(expect.objectContaining({ routeId: expect.any(String), fundingSource: route.funding, grossReward: { amountMinor: 0, currency: 'TWD' } }));
     expect(result.candidates[0]?.events.length).toBeGreaterThan(0);
   });
+
+  it('uses a consistent evidenced route without per-route confirmation', () => {
+    const store = new MemoryStore(); const service = new RewardService(store, 'u1');
+    const evidence = service.submitEvidence({ id: 'default-route', requirementId: 'route', sourceIdentity: 'merchant', sourceType: 'official', authority: 'merchant', claim: { route: 'direct' }, observedAt: '2026-09-01T00:00:00Z', confidence: 'high', contentHash: 'default-route-hash', reviewState: 'accepted', sourceUrl: 'https://merchant.example/payment' });
+    const route = service.upsertPaymentRoute({ status: undefined, idempotencyKey: 'default-route', layers: [], funding: { kind: 'cash' }, observedAt: '2026-09-01T00:00:00Z', sourceUrl: 'https://merchant.example/payment', authority: 'merchant', confidence: 'high', evidenceIds: [evidence.id], nodes: [{ id: 'cash', kind: 'funding_source', displayName: 'cash' }, { id: 'merchant', kind: 'merchant', displayName: 'merchant' }], edges: [{ edgeId: 'direct', fromNodeId: 'cash', toNodeId: 'merchant', transition: 'direct_settlement', evidenceIds: [evidence.id] }] });
+    const result = service.recommendPaymentPaths({ amount: { amountMinor: 100, currency: 'TWD' }, routeIds: [route.id] });
+    expect(result.status).toBe('ok');
+    expect(result.candidates[0]?.routeId).toBe(route.id);
+  });
   it('fails closed for unverified or non-active routes and remains user scoped', () => {
     const store = new MemoryStore(); const one = new RewardService(store, 'u1'); const two = new RewardService(store, 'u2');
     one.upsertPaymentRoute({ ...route, status: 'candidate', confirmation: undefined, evidenceIds: undefined, idempotencyKey: 'candidate' });

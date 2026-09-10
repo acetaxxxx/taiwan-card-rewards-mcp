@@ -249,7 +249,7 @@ or `needs_review`; the Agent must not allocate the balance automatically.
 
 #### PayPay, EasyWallet, and card-funded wallet routes
 
-For proactive route selection, call `recommend` with the closed `{ "kind": "payment_path", "payment_path": { ... } }` envelope. It considers only the current user's active, confirmed routes with accepted official HTTPS evidence and returns bounded nodes, transitions, funding source, reward totals, matched rules, and explicit exclusions. It never invents mixed wallet funding, unregistered routes, or unverified cross-border paths; absent or expired evidence yields no candidate. The current CLI dispatcher does not forward `payment_path.eligibilityFacts`; treat Gold/member-dependent path recommendations as a parity gap until runtime is aligned.
+For proactive route selection, call `recommend` with the closed `{ "kind": "payment_path", "payment_path": { ... } }` envelope. It considers only the current user's active routes with accepted official HTTPS evidence and returns bounded nodes, transitions, funding source, reward totals, matched rules, and explicit exclusions. Consistent evidence is usable by default; ask only when facts conflict or are ambiguous, and mark a route failed when the user says it is unavailable. It never invents mixed wallet funding, unregistered routes, or unverified cross-border paths; absent or expired evidence yields no candidate. The current CLI dispatcher does not forward `payment_path.eligibilityFacts`; treat Gold/member-dependent path recommendations as a parity gap until runtime is aligned.
 
 Do not collapse these into one card purchase:
 

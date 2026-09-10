@@ -205,8 +205,7 @@ export class RewardService {
 
   upsertPaymentRoute(input: unknown): PaymentRouteRecord {
     const source = typeof input === 'object' && input !== null ? input as Record<string, unknown> : {};
-    const parsed = validatePaymentRouteRecord({ ...source, id: 'route_input', ...(source.status === undefined ? { status: source.confirmation ? 'active' : 'candidate' } : {}), ...(source.ownerUser === undefined ? {} : { ownerUser: source.ownerUser }) });
-    if (parsed.status === 'active' && !parsed.confirmation) throw new RewardServiceError('INVALID_CONFIRMATION', 'active payment routes require explicit user confirmation');
+    const parsed = validatePaymentRouteRecord({ ...source, id: 'route_input', ...(source.status === undefined ? { status: 'active' } : {}), ...(source.ownerUser === undefined ? {} : { ownerUser: source.ownerUser }) });
     const state = this.store.read();
     const accountId = parsed.funding.kind === 'account' ? parsed.funding.accountId : undefined;
     if (accountId !== undefined) {
@@ -216,7 +215,15 @@ export class RewardService {
     }
     const existing = state.paymentRoutes.find((route) => route.idempotencyKey === parsed.idempotencyKey && (route.ownerUser === this.metadataUser || (route.ownerUser === undefined && this.metadataUser === undefined)));
     const desired = { ...parsed, id: existing?.id ?? routeId(), ...(this.metadataUser === undefined ? {} : { ownerUser: this.metadataUser }) };
-    if (existing) { if (JSON.stringify({ ...existing, id: parsed.id, ownerUser: parsed.ownerUser }) !== JSON.stringify({ ...desired, id: parsed.id, ownerUser: parsed.ownerUser })) throw new RewardServiceError('IDEMPOTENCY_CONFLICT', 'idempotencyKey already belongs to a different payment route'); return existing; }
+    if (existing) {
+      if (parsed.status === 'failed' && existing.status !== 'failed') {
+        if (!parsed.failure) throw new RewardServiceError('INVALID_INPUT', 'failed payment routes require failure details');
+        const failed: PaymentRouteRecord = { ...existing, status: 'failed', failure: parsed.failure };
+        this.store.update((next) => { next.paymentRoutes = next.paymentRoutes.map((route) => route.id === existing.id ? failed : route); });
+        return failed;
+      }
+      if (JSON.stringify({ ...existing, id: parsed.id, ownerUser: parsed.ownerUser }) !== JSON.stringify({ ...desired, id: parsed.id, ownerUser: parsed.ownerUser })) throw new RewardServiceError('IDEMPOTENCY_CONFLICT', 'idempotencyKey already belongs to a different payment route'); return existing;
+    }
     this.store.update((next) => { next.paymentRoutes.push(desired); });
     return desired;
   }
@@ -1050,7 +1057,7 @@ export class RewardService {
       }) };
     });
     const routes = visibleRoutes.filter((route) => {
-      if (route.status !== 'active' || !route.confirmation) return false;
+      if (route.status !== 'active') return false;
       if (route.authority === undefined || route.confidence !== 'high' || !route.sourceUrl?.startsWith('https://') || !route.evidenceIds?.length) return false;
       if (route.validFrom && Date.parse(route.validFrom) > Date.parse(asOf)) return false;
       if (route.validTo && Date.parse(route.validTo) < Date.parse(asOf)) return false;
@@ -1296,7 +1303,7 @@ export class RewardService {
       || (a.userEffort ?? 0) - (b.userEffort ?? 0)
       || a.id.localeCompare(b.id));
     const accepted = new Set(routes.map((route) => route.id));
-    const blocked = [...visibleRoutes.filter((route) => !accepted.has(route.id)).map((route) => ({ routeId: route.id, reason: route.status !== 'active' || !route.confirmation ? 'route is not active and confirmed' : 'route has no admissible terminal branch' })), ...branchBlocked];
+    const blocked = [...visibleRoutes.filter((route) => !accepted.has(route.id)).map((route) => ({ routeId: route.id, reason: route.status !== 'active' ? 'route is not active' : 'route has no admissible terminal branch' })), ...branchBlocked];
     const diagnostics = [...new Set(branchBlocked.filter((item) => item.reason.startsWith('truncated_by_bound:')).map((item) => item.reason.split(':', 2)[0] ?? 'truncated_by_bound'))];
     return { status: candidates.length ? (candidates.some((candidate) => candidate.status === 'blocked') ? 'needs_review' : blocked.length ? 'partial' : 'ok') : (blocked.length ? 'needs_review' : 'no_match'), candidates, evaluatedAt: asOf, blocked, ...(diagnostics.length ? { diagnostics } : {}), limits: { maxCandidates: input.limit ?? 20, maxHops, maxEvents, maxBranchesPerNode } };
   }

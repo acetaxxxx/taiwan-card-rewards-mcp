@@ -69,12 +69,12 @@ MCP 合約中維持穩定封閉列舉：
 
 ### 2.4 Agent 自動提醒與加入支付路徑 (Route Onboarding Loop)
 
-當使用者說「我有一張新卡」或「我常用某個支付 App／帳戶」時，Agent 應把支付路徑當成可重用的使用者設定提醒，但不可在沒有確認時自行啟用：
+當使用者說「我有一張新卡」或「我常用某個支付 App／帳戶」時，Agent 應把支付路徑當成可重用的使用者設定提醒。官方證據一致時，planned recommendation 預設可使用；只有衝突、歧義或 user-specific binding 才詢問：
 
 1. 先詢問並記錄非敏感事實：受理網路或商家 App、消費者 App、是否有互通／中介、最終 funding 是信用卡／帳戶／現金，以及交易幣別與結算幣別。
 2. 先呼叫 `list_payment_routes`，避免重複建立；若存在但已過期或衝突，先標示 `needs_review`，不要覆蓋原紀錄。
 3. 缺資料時由 Agent Workspace 查官方 FAQ、費率、匯率、回饋與排除條款，建立逐層 `EvidenceRecord`；MCP 不自行上網，也不把品牌名稱當成清算事實。
-4. 用 `upsert_payment_route` 寫入 `candidate` 路徑。只有使用者明確確認、且必要證據已具備時，才可寫入 `active`；禁止寫入卡號、驗證碼、密碼或任何支付憑據。
+4. 用 `upsert_payment_route` 寫入有證據的路徑；一致證據可直接為 `active`，不需要逐筆 confirmation。若使用者表示不可用，使用相同 idempotency key、附 `failure` 將既有 route 標成 `failed`；禁止寫入卡號、驗證碼、密碼或任何支付憑據。
 5. 若有只適用此路徑的回饋規則，將規則以 `OfferRuleVersion.routeId` 綁定該 route；通用規則不綁 route，維持既有相容性。
 6. 推薦前把 `transaction.routeId` 與 route context 一起送入 `recommendation_preflight`。路徑不存在、過期、funding 不一致、匯率／費用／回饋條款衝突時，回傳 `requiredActions` 讓 Agent 補資料或詢問使用者，不能猜測。
 
@@ -118,7 +118,7 @@ MCP 合約中維持穩定封閉列舉：
 - 換匯由誰決定、在何時決定、使用哪種 rate type？是否另收 service fee、foreign transaction fee 或 DCC markup？
 - 條款有效期、地區、卡別、活動登錄與上限為何？
 
-任何一題無法由當期官方資料回答，就保留 `candidate` 或 `needs_review`，不把路徑當成可推薦事實。
+任何一題無法由當期官方資料回答，就保留 `candidate` 或 `needs_review`，不把路徑當成可推薦事實；若官方資料互相衝突，先詢問 user。
 
 ---
 

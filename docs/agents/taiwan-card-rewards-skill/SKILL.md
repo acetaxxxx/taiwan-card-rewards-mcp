@@ -24,7 +24,7 @@ description: 協助試算、比較與記錄台灣信用卡回饋；路由至 can
 |---|---|---|
 | 商家消費意圖推薦 | 直接以商家呼叫 `recommend`；可附金額、幣別、國家、通路、時間或可選的 card/route 篩選 | 讀回 `status`、`candidates`、`requiredActions`、`coverage`；按 action 補件後重送同一意圖 |
 | 舊交易形狀卡片推薦 | 依相容契約呼叫 `recommend` 的 card branch；必要時才用 `recommendation_preflight` | 回傳可解釋 ranking；未知條件與 required actions 原樣呈現 |
-| 舊 payment-path 相容查詢 | 只有 host／使用者明確要求舊 path envelope 時，才使用 `recommend` 的 `kind="payment_path"` branch；正常多路徑比較走商家消費意圖 | 只用該 user 的 active、confirmed、官方 HTTPS evidence route；events 有界且 planned 不寫 ledger |
+| 舊 payment-path 相容查詢 | 只有 host／使用者明確要求舊 path envelope 時，才使用 `recommend` 的 `kind="payment_path"` branch；正常多路徑比較走商家消費意圖 | 只用該 user 的 active、官方 HTTPS evidence route；證據衝突或歧義才詢問，events 有界且 planned 不寫 ledger |
 | 新卡/錢包/路徑 | `register_card`、`register_payment_account`、`upsert_payment_route` | 只存 opaque identity 與 evidence；不存 credential；官方 product path 未證實就留 candidate/blocked |
 | 官方優惠/商家研究 | Agent 取得官方來源，`resolve_merchant` / `upsert_offer` | snapshot、rule、期間、條件與 confirmation 可追溯；社群資料只能作線索 |
 | 實際交易/退款 | `record_transaction`（actual、stable `idempotencyKey`） | 重試同 payload 不重複；refund 必須 `refundOfId` 且 amount 不超過原交易 |

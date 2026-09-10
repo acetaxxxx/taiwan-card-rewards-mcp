@@ -30,6 +30,21 @@ describe('first-class payment route onboarding', () => {
     expect(service.upsertPaymentRoute({ ...input, status: 'candidate', confirmation: undefined }).layers[0]?.providerId).toBe('unknown-provider');
   });
 
+  it('defaults an observed route to active and records an explicit user denial as failed', () => {
+    const service = new RewardService(new MemoryStore(), 'u1');
+    const route = service.upsertPaymentRoute({ ...input, status: undefined, confirmation: undefined });
+    expect(route.status).toBe('active');
+    const failed = service.upsertPaymentRoute({
+      ...input,
+      status: 'failed',
+      confirmation: undefined,
+      failure: { failedAt: '2026-09-06T00:00:00Z', failedBy: 'user', reason: 'user says this route is unavailable' },
+    });
+    expect(failed.id).toBe(route.id);
+    expect(failed.status).toBe('failed');
+    expect(failed.failure?.reason).toContain('unavailable');
+  });
+
   it('records acceptance, app, interoperability, and account-funding facts without provider enums', () => {
     const service = new RewardService(new MemoryStore(), 'u1');
     const route = service.upsertPaymentRoute({
