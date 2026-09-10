@@ -56,6 +56,17 @@ describe('FX policy and observation persistence', () => {
     expect(candidate?.fxEstimate?.status).toBe('stale_estimate');
   });
 
+  it('does not reuse an observation with a policy-incompatible rate type', () => {
+    const service = new RewardService(new MemoryStore(), 'user-1');
+    service.registerCard({ id: 'policy-match-card', issuer: 'Policy Bank', productName: 'Policy Card' });
+    const evidence = service.submitEvidence({ id: 'policy-match-evidence', requirementId: 'fx-policy', sourceIdentity: 'policy-bank', sourceType: 'official', authority: 'issuer', claim: { policy: 'card-scheme' }, observedAt: '2026-09-10T00:00:00Z', confidence: 'high', contentHash: 'policy-match', reviewState: 'accepted', sourceUrl: 'https://bank.example/fx-policy' });
+    service.upsertFxPolicy({ policyKey: 'card-scheme', version: '1', baseCurrency: 'JPY', quoteCurrency: 'TWD', scope: { kind: 'issuer', issuer: 'Policy Bank' }, conversionOwner: 'issuer', rateType: 'card_scheme', rateDirection: 'base_to_quote', conversionTiming: 'settlement', evidenceId: evidence.id, observedAt: '2026-09-10T00:00:00Z', idempotencyKey: 'policy-match' });
+    service.upsertOffer({ id: 'policy-match-offer', url: 'https://bank.example/offer', fetchedAt: '2026-09-01T00:00:00Z', contentHash: 'policy-match-offer', parserVersion: '1', verified: true }, { id: 'policy-match-rule', cardId: 'policy-match-card', version: '1', sourceSnapshotId: 'policy-match-offer', status: 'active', validFrom: '2026-01-01T00:00:00Z', settlementCurrency: 'TWD', match: {}, reward: { kind: 'percentage', rateBps: 100 } });
+    service.upsertFxObservation({ baseCurrency: 'JPY', quoteCurrency: 'TWD', ratePpm: 215000, capturedAt: '2026-09-10T00:00:00Z', provider: 'Wallet', rateType: 'spot_selling', sourceUrl: 'https://wallet.example/rate', contentHash: 'wrong-policy-rate', idempotencyKey: 'wrong-policy-rate' });
+    const candidate = service.recommendIntent({ merchant: 'Shop', amount: { amountMinor: 1000, currency: 'JPY' }, occurredAt: '2026-09-10T00:00:00Z' }).candidates.find((item) => item.cardId === 'policy-match-card');
+    expect(candidate?.fxEstimate?.status).toBe('unavailable');
+  });
+
   it('does not reuse a route-scoped observation for a direct-card candidate', () => {
     const service = new RewardService(new MemoryStore(), 'user-1');
     service.registerCard({ id: 'card-route-scope', issuer: 'Bank', productName: 'Japan Card' });

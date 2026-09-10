@@ -835,6 +835,7 @@ export class RewardService {
       const candidates = (state.fxObservations ?? [])
         .filter((observation) => observation.ownerUser === this.metadataUser && observation.baseCurrency === baseCurrency.toUpperCase() && observation.quoteCurrency === quoteCurrency.toUpperCase())
         .filter((observation) => observation.routeIdScope === undefined && observation.edgeIdScope === undefined)
+        .filter((observation) => !policy || (observation.rateType === policy.rateType && (observation.conversionOwner === undefined || observation.conversionOwner === policy.conversionOwner)))
         .filter((observation) => (!observation.cardIdScope || observation.cardIdScope === card?.id) && (!observation.issuerScope || observation.issuerScope === card?.issuer))
         .filter((observation) => { const captured = Date.parse(observation.capturedAt); return Number.isFinite(captured) && captured <= target && target - captured <= maxEstimateAge; })
         .sort((a, b) => Date.parse(b.capturedAt) - Date.parse(a.capturedAt));
