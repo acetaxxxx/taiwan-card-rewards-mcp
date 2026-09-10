@@ -851,6 +851,7 @@ export class RewardService {
       (input.cardIds === undefined || (route.funding.kind === 'credit_card' && input.cardIds.includes(route.funding.cardId ?? ''))));
     const generatedRoutes: PaymentRouteRecord[] = [];
     if (transaction && this.metadataUser) {
+      const generatedCapabilityIds = new Set<string>();
       const validCapability = (capability: PaymentCapabilityRecord) => capability.status === 'active' &&
         (!capability.merchant || capability.merchant === rawMerchant || capability.merchant === merchant) &&
         (!capability.channel || capability.channel === input.channel) &&
@@ -880,6 +881,11 @@ export class RewardService {
             : [{ edgeId: 'debit', fromNodeId: 'funding', toNodeId: 'wallet', transition: 'account_debit' as const, evidenceIds }, { edgeId: 'pay', fromNodeId: 'wallet', toNodeId: 'acceptance', transition: 'wallet_debit' as const, evidenceIds }, { edgeId: 'settle', fromNodeId: 'acceptance', toNodeId: 'merchant', transition: 'merchant_settlement' as const, evidenceIds }];
           const sourceUrl = capability.sourceUrl ?? state.evidence.find((evidence) => evidence.id === evidenceIds[0])?.sourceUrl;
           generatedRoutes.push({ id: `generated_${capability.id}_${seed}`, status: 'active', layers: [{ kind: 'merchant_acceptance', providerId: capability.acceptanceProviderId ?? capability.providerId }, ...(capability.consumerAppId ? [{ kind: 'consumer_app' as const, appId: capability.consumerAppId }] : []), { kind: 'payment_provider', providerId: capability.providerId }], funding, ...(sourceUrl ? { sourceUrl } : {}), observedAt: capability.observedAt, ...(capability.validFrom ? { validFrom: capability.validFrom } : {}), ...(capability.validTo ? { validTo: capability.validTo } : {}), authority: 'wallet', confidence: 'high', evidenceIds, idempotencyKey: `generated:${capability.id}:${seed}`, nodes, edges });
+          generatedCapabilityIds.add(capability.id);
+        }
+        if (!generatedCapabilityIds.has(capability.id)) {
+          const fundingKind = capability.fundingKinds[0]!;
+          addAction({ id: `capability:${capability.id}`, action: 'bind_payment_method', owner: 'user', path: `paymentCapabilities.${capability.id}`, requiredFacts: capability.fundingKinds.map((kind) => `held ${kind}`), candidateIds: [], submission: fundingKind === 'credit_card' ? { tool: 'register_card', field: 'card' } : { tool: 'register_payment_account', field: 'account' }, completionCondition: `repeat recommend after registering or binding a ${fundingKind} supported by this payment capability` });
         }
       }
     }

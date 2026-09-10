@@ -46,4 +46,12 @@ describe('public payment capability persistence', () => {
     expect(candidate).toEqual(expect.objectContaining({ kind: 'payment_path', routeId: expect.stringContaining('generated_') }));
     expect(candidate?.events.map((event) => event.transition)).toEqual(['account_debit', 'wallet_debit', 'merchant_settlement']);
   });
+
+  it('returns a capability-scoped binding action when no matching funding is held', () => {
+    const service = new RewardService(new MemoryStore(), 'u1');
+    const evidence = service.submitEvidence({ id: 'binding-evidence', requirementId: 'payment-capability', sourceIdentity: 'wallet.example', sourceType: 'official', authority: 'wallet', claim: { capability: 'wallet acceptance' }, observedAt: '2026-09-01T00:00:00Z', confidence: 'high', contentHash: 'binding-hash', reviewState: 'accepted', sourceUrl: 'https://wallet.example/terms' });
+    const capability = service.upsertPaymentCapability({ providerId: 'wallet.example', acceptanceProviderId: 'qr-network', fundingKinds: ['credit_card'], transitions: ['wallet_top_up', 'wallet_debit', 'merchant_settlement'], evidenceIds: [evidence.id], observedAt: '2026-09-01T00:00:00Z', idempotencyKey: 'binding-capability' });
+    const result = service.recommendIntent({ merchant: 'shop', amount: { amountMinor: 1000, currency: 'TWD' }, occurredAt: '2026-09-02T00:00:00Z' });
+    expect(result.requiredActions).toEqual(expect.arrayContaining([expect.objectContaining({ id: `capability:${capability.id}`, action: 'bind_payment_method', owner: 'user', submission: { tool: 'register_card', field: 'card' }, requiredFacts: ['held credit_card'] })]));
+  });
 });
