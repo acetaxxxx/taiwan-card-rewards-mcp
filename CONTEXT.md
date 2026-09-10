@@ -205,6 +205,13 @@ _Avoid_: opaque route rule, route ID as policy
 A reusable declarative condition over Route Nodes and Route Transitions that an Offer Rule can use to match one node, one transition, or a complete route pattern. A selector may require a conjunction of roles without requiring every matching route to share one generated route ID.
 _Avoid_: hard-coded route name, combination-specific enum
 
+**Payment Capability**:
+An evidence-backed public ability of a payment service, acceptance network, or
+funding rail to participate in a stated market, channel, and transition. It
+describes what may be possible; it is not a user's Held Card, Payment Account,
+or a concrete Payment Route.
+_Avoid_: assumed acceptance, user binding, generated route identity
+
 ## Transactions and accounting
 
 **Payment Route**:
