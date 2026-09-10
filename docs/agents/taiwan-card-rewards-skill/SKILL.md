@@ -31,7 +31,7 @@ description: 協助試算、比較與記錄台灣信用卡回饋；路由至 can
 | event-scoped reward | `record_event_reward`；退款用 `reverse_event_reward` | exactly one event rule 或 `funded_by` chain；server 重算 eligibility；明確 stacking/cap 才可記帳 |
 | Gold/會員/自動扣繳 | `get_user_benefit_status`，用 authoritative evidence 建立 fact | Gold 是 eligibility fact，不是 payment-path node；evidence/valuation/FX/fee 不完整就 recovery 或 blocked |
 
-商家消費意圖以 [`workflows/recommendation-intent.md`](workflows/recommendation-intent.md) 為準；舊交易形狀與 FX/preflight recovery 仍以對應 workflow 為準。schema 與 25-tool 清單以
+商家消費意圖以 [`workflows/recommendation-intent.md`](workflows/recommendation-intent.md) 為準；支付 capability 生成與 ownership 以 [ADR 0009](../../adr/0009-public-payment-capability-route-generation.md) 為準；舊交易形狀與 FX/preflight recovery 仍以對應 workflow 為準。schema 與 25-tool 清單以
 [`references/mcp-tools.md`](references/mcp-tools.md) 為準。
 
 ## 三個必讀入口
