@@ -65,6 +65,8 @@ describe('public merchant intent path comparison', () => {
         expect.objectContaining({ ruleId: 'rule-direct', component: 'card_issuer', status: 'matched' }),
         expect.objectContaining({ ruleId: 'rule-loyalty', component: 'merchant_loyalty', status: 'matched' }),
       ]));
+      expect(result.candidates.find((candidate: any) => candidate.kind === 'direct_card').netSpend).toEqual({ amountMinor: 9880, currency: 'TWD' });
+      expect(result.candidates.filter((candidate: any) => candidate.kind === 'payment_path').every((candidate: any) => candidate.netSpend === undefined)).toBe(true);
       const rules = result.candidates.flatMap((candidate: any) => candidate.matchedRules);
       expect(rules).toEqual(expect.arrayContaining([expect.objectContaining({ ruleId: 'rule-direct', stacking: 'confirmed', combination: expect.objectContaining({ mode: 'additive' }) }), expect.objectContaining({ ruleId: 'rule-wallet', stacking: 'possible' }), expect.objectContaining({ ruleId: 'rule-account', stacking: 'confirmed' })]));
       expect(result.coverage).toEqual(expect.objectContaining({ bounded: false }));

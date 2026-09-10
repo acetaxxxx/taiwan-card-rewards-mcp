@@ -999,6 +999,7 @@ export class RewardService {
           nodes: path.nodes, events: path.events,
           status: supported ? 'ready' : path.status === 'blocked' ? 'blocked' : 'unknown',
           matchedRules: projected, ...(supported ? { reward: path.cappedReward } : {}),
+          ...(supported && path.netValue ? { netSpend: { amountMinor: transaction.amount.amountMinor - path.netValue.amountMinor, currency: transaction.amount.currency } } : {}),
           exclusionReasons: path.exclusionReasons,
         });
         if (path.status === 'blocked') {
