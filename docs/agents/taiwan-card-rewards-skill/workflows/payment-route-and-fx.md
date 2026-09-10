@@ -72,11 +72,11 @@ MCP 合約中維持穩定封閉列舉：
 當使用者說「我有一張新卡」或「我常用某個支付 App／帳戶」時，Agent 應把支付路徑當成可重用的使用者設定提醒。官方證據一致時，planned recommendation 預設可使用；只有衝突、歧義或 user-specific binding 才詢問：
 
 1. 先詢問並記錄非敏感事實：受理網路或商家 App、消費者 App、是否有互通／中介、最終 funding 是信用卡／帳戶／現金，以及交易幣別與結算幣別。
-2. 先呼叫 `list_payment_routes`，避免重複建立；若存在但已過期或衝突，先標示 `needs_review`，不要覆蓋原紀錄。
+2. 只有在管理／查重或使用者明確要求路徑清單時才呼叫 `list_payment_routes`；正常 merchant-first recommendation 不需要先列清單。若已知路徑過期或衝突，標示 `needs_review`，不要覆蓋原紀錄。
 3. 缺資料時由 Agent Workspace 查官方 FAQ、費率、匯率、回饋與排除條款，建立逐層 `EvidenceRecord`；MCP 不自行上網，也不把品牌名稱當成清算事實。
 4. 用 `upsert_payment_route` 寫入有證據的路徑；一致證據可直接為 `active`，不需要逐筆 confirmation。若使用者表示不可用，使用相同 idempotency key、附 `failure` 將既有 route 標成 `failed`；禁止寫入卡號、驗證碼、密碼或任何支付憑據。
 5. 若有只適用此路徑的回饋規則，將規則以 `OfferRuleVersion.routeId` 綁定該 route；通用規則不綁 route，維持既有相容性。
-6. 推薦前把 `transaction.routeId` 與 route context 一起送入 `recommendation_preflight`。路徑不存在、過期、funding 不一致、匯率／費用／回饋條款衝突時，回傳 `requiredActions` 讓 Agent 補資料或詢問使用者，不能猜測。
+6. 正常 merchant-first 流程直接送出 `recommend`；只有 legacy transaction 或明確診斷時才把 `transaction.routeId` 與 route context 送入 `recommendation_preflight`。路徑不存在、過期、funding 不一致、匯率／費用／回饋條款衝突時，回傳 `requiredActions` 讓 Agent 補資料或詢問使用者，不能猜測。
 
 新增支付服務只需要新的開放識別碼與官方證據；除非出現新的計算語意，否則不需要新增 PayPay、街口或其他品牌專用工具。
 

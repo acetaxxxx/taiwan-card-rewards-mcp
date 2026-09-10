@@ -24,7 +24,7 @@ claim: { factKey: "user.membership", value: "gold", version: "terms-1" }
 若條款是使用者自己的 status，而非公開 issuer/provider claim，不能升級成
 authoritative。Agent 應先走 evidence/research 流程，將官方 snapshot/rule
 交給 `upsert_offer`，並在需要時由 runtime 的 evidence ingestion API 建立
-user-owned accepted evidence。現行 public 19-tool surface 沒有獨立的
+user-owned accepted evidence。現行 public 25-tool surface 沒有獨立的
 `submit_evidence` 或 `submit_valuation_snapshot` tool，不能在文件中假裝它們
 存在。
 
@@ -128,7 +128,7 @@ version: valuation-terms-1
 evidenceId: ev_valuation_official_illustrative
 ```
 
-目前 public 19-tool surface 沒有提交此 valuation snapshot 的工具；若 durable
+目前 public 25-tool surface 沒有提交此 valuation snapshot 的工具；若 durable
 store 也沒有已驗證 snapshot，payment-path candidate 必須帶
 `requiredActions: ["provide a validated valuation snapshot for each reward unit"]`
 並為 `blocked`/`needs_review`。Agent 不可用「1 point = NT$1」臆測。
