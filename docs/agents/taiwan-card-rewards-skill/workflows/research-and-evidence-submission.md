@@ -34,7 +34,7 @@ Agent 在建立卡片、權益、支付路徑或促銷規則前，必須落實**
 
 | 等級 | 來源類別 | 範例與管道 | 處理與入庫原則 |
 |---|---|---|---|
-| 🥇 **等級 1：官方權威來源**<br>(`sourceType: "official"`) | 發卡銀行官網、官方條款 PDF、國際卡組織、電子支付官方公告 | 國泰世華/富邦/台新官網、LINE Pay/街口官方費率公告、Visa/Mastercard 活動專區 | 🌟 **唯一權威依據**。經 Agent 解析並取得使用者確認後，可直接建立或啟動 `active` 規則。 |
+| 🥇 **等級 1：官方權威來源**<br>(`sourceType: "official"`) | 發卡銀行官網、官方條款 PDF、國際卡組織、電子支付官方公告 | 國泰世華/富邦/台新官網、LINE Pay/街口官方費率公告、Visa/Mastercard 活動專區 | 🌟 **唯一權威依據**。經 Agent 解析且證據一致後，可直接建立或啟動 `active` 規則；只有衝突或歧義才詢問使用者。 |
 | 🥈 **等級 2：非官方引導性線索**<br>(EvidenceRecord `sourceType: "community"` 或 `"trusted_secondary"`) | 社群論壇、回饋整理站、比較平台、部落格評測 | PTT 卡板 (creditcard)、Dcard 信用卡板、卡優新聞網 CardU、Money101、iCard.AI | ⚠️ **僅供發現線索與交叉比對**。**嚴禁單獨入庫為 active 規則**。發現線索後必須至官方一手來源尋找佐證。<br>*註：MCP 之 `OfferSourceSnapshot.sourceType` 僅接受 `"official"` 或 `"user_input"`，非官方資料經官方查證後始得以 `"official"` 提交。* |
 
 ---

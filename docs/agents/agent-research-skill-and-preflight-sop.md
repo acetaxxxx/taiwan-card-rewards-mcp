@@ -71,7 +71,7 @@ path recommendation 在該 parity gap 修復前必須回報 blocked/needs_review
 
 ```mermaid
 flowchart TD
-    Start(["使用者提出推薦需求\n(例如：'在日本唐吉軻德刷哪張？')"]) --> Step1["Step 1: 執行 recommendation_preflight"]
+    Start(["使用者提出推薦需求\n(例如：'在日本唐吉軻德刷哪張？')"]) --> Step1["Step 1: 執行 recommend intent"]
     Step1 --> CheckReady{"Preflight 狀態\nready == true ?"}
 
     CheckReady -- Yes --> Step11["Step 11: 呼叫 recommend 產出確定性排序"]
