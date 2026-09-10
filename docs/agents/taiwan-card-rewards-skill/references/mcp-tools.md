@@ -1,8 +1,8 @@
 # Canonical MCP tools
 
-這份 reference 對應目前 source contract 的公開 surface：23 個工具。工具名稱、closed input、enum 與 fail-closed errors 以 `src/mcp-contract.ts`、`src/validation.ts` 和 `src/cli.ts` 為準；版本 tag 是發佈管理資訊，不是 public tool name。
+這份 reference 對應目前 source contract 的公開 surface：25 個工具。工具名稱、closed input、enum 與 fail-closed errors 以 `src/mcp-contract.ts`、`src/validation.ts` 和 `src/cli.ts` 為準；版本 tag 是發佈管理資訊，不是 public tool name。
 
-## 23-tool matrix
+## 25-tool matrix
 
 | Tool | Read/write | 用途 |
 |---|---|---|
@@ -19,6 +19,8 @@
 | `recommendation_preflight` | read | intent-shaped 呼叫沿用 `recommend` 的候選診斷；legacy transaction 仍提供相容 preflight，不修改狀態 |
 | `upsert_payment_route` | write | 登記有界 route graph 與 funding identity |
 | `list_payment_routes` | read | 列出 user-scoped route |
+| `upsert_payment_capability` | write | 保存與 user route 分離的官方支付能力 |
+| `list_payment_capabilities` | read | 列出可供 planned route generation 使用的公共支付能力 |
 | `register_payment_account` | write | 登記 wallet/linked bank account 的 opaque identity 與 evidence |
 | `list_payment_accounts` | read | 列出可供 route 引用的 account identity |
 | `record_transaction` | write | 寫入 actual purchase 或 linked refund、更新 cap usage |
@@ -215,6 +217,6 @@ Historical versioned tool aliases are compatibility-only and must not appear in 
 | `record_event_reward_v1` / `record_event_reward_v2` | `record_event_reward` | Supply exactly one `rule` or `chainRule` and bounded event inputs |
 | `reverse_event_reward_v1` | `reverse_event_reward` | Keep `{event,idempotencyKey}` and verify explicit refund relation |
 
-These names are not part of the 23-tool public matrix and are shown only so a
+These names are not part of the 25-tool public matrix and are shown only so a
 host can migrate old configuration. New Skill examples and tools/list checks
 must use canonical names.

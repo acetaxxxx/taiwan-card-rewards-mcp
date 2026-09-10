@@ -21,3 +21,5 @@ Status: ready-for-agent
 ## Comments
 
 使用者已核可八票拆分；補充要求為具體 FX 查詢來源／回填契約，以及多路徑與各層優惠比較。僅在前置票完成後開始實作。
+
+目前已完成第一個切片：新增 `upsert_payment_capability`／`list_payment_capabilities`，能力資料與 user route/account 分離；recommend 可將 active、官方 evidence 支持的 capability 與持有信用卡組合成 ephemeral planned route，候選不寫入 durable `paymentRoutes`。帳戶組合、transition 語意與完整 coverage 仍待補齊。

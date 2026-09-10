@@ -52,6 +52,24 @@ export interface PaymentRouteRecord {
   nodes?: readonly PaymentPathNode[];
   edges?: readonly PaymentPathEdge[];
 }
+export interface PaymentCapabilityRecord {
+  id: string;
+  status: 'candidate' | 'active' | 'stale' | 'conflict' | 'needs_review';
+  providerId: string;
+  acceptanceProviderId?: string;
+  consumerAppId?: string;
+  merchant?: string;
+  market?: string;
+  channel?: string;
+  fundingKinds: readonly ('credit_card' | 'account' | 'cash')[];
+  sourceUrl?: string;
+  evidenceIds: readonly string[];
+  observedAt: string;
+  validFrom?: string;
+  validTo?: string;
+  idempotencyKey: string;
+  ownerUser?: string;
+}
 export type PaymentPathNodeRole = 'funding_source' | 'wallet_balance' | 'payment_service' | 'acceptance_network' | 'merchant';
 export type PaymentPathTransition = 'card_authorization' | 'account_debit' | 'wallet_top_up' | 'wallet_debit' | 'service_to_acceptance' | 'merchant_settlement' | 'direct_settlement' | 'split_tender';
 export interface PaymentPathEdge { edgeId: string; fromNodeId: string; toNodeId: string; transition: PaymentPathTransition; evidenceIds: readonly string[]; provenance?: 'official' | 'model_fixture'; direction?: 'inbound' | 'outbound'; fromMarket?: string; toMarket?: string; market?: string; currency?: string; validFrom?: string; validTo?: string; fee?: Money; markup?: Money; foreignTransactionFee?: Money; fx?: FxSnapshot; dcc?: { selected: boolean; fee?: Money }; }
@@ -715,6 +733,8 @@ export interface PaymentPathRequest {
   routeFacts?: readonly { routeId: string; edgeId?: string; fx: FxSnapshot }[] | undefined;
   /** Internal continuation mode used by the merchant-first intent engine. */
   continuation?: boolean | undefined;
+  /** Internal planned candidates generated from public capabilities. */
+  routes?: readonly PaymentRouteRecord[] | undefined;
 }
 export interface PaymentPathNode { id: string; kind: string; displayName: string; }
 export interface PaymentPathEventEligibility { status: 'ready' | 'unknown' | 'no_match' | 'needs_facts'; reasons: readonly string[]; }

@@ -12,7 +12,7 @@ Implementation changes are committed incrementally on `enhance-user-exp`; the br
 | 04 | Core persistence/reuse implemented | Scoped FX observation persistence and recommendation reuse; full selector policy matching remains |
 | 05 | Core estimate semantics implemented | Public reference/stale/unavailable output and fallback source; route fee/net comparison remains |
 | 06 | Core continuation implemented | Stable intent cursor, 10-item pages, resultVersion and coverage semantics; deeper rule-set continuation remains |
-| 07 | Pending 03, 06 | Evidenced generated route candidates |
+| 07 | In progress | Added separate typed payment capability persistence and ephemeral wallet route generation from active capabilities plus held cards; account generation, capability transition semantics, and full candidate coverage remain |
 | 08 | Pending 05, 06, 07 | Final Agent workflow and public contract validation |
 
 Current work uses scoped sub-agents for implementation and documentation; the primary agent reviews source and adds independent acceptance tests. A passing fixture alone is insufficient: rule matching, uncertainty, and candidate-specific recovery are reviewed before advancing dependencies.

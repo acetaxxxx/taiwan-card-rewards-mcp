@@ -1,10 +1,10 @@
 import * as crypto from 'node:crypto';
 import { type LedgerStore, type RecordedTransaction, type StoredState } from './store.js';
 import { EventRewardLedger, convertMinor, createPaymentEventRewardCandidate, decidePaymentEventRewards, evaluateOffer, evaluatePredicate, matchPaymentEvent, matchPaymentEventChain, rankCards, resolveCyclePeriodKey } from './evaluator.js';
-import type { CardDescriptor, CardSwitchInput, CardSwitchProjection, CardSwitchStatus, CapPeriod, CapPoolDefinition, EvaluationContext, MerchantIdentity, MerchantResolution, Money, OfferConfirmation, OfferRuleVersion, OfferSourceSnapshot, RankingEntry, RewardBreakdown, RewardComponentRecord, TransactionTuple, UserBenefitInput, UserBenefitStatus, RecommendationPreflight, RecommendationRequiredAction, RecommendationRequirement, Diagnostic, EvidenceRecord, PaymentRouteRecord, PaymentAccountRecord, EventRewardLedgerRecord, EventRewardReversalRecord, PaymentPathRequest, PaymentPathRecommendation, PaymentPathCandidate, PaymentPathEvent, EligibilityFact, RewardValuationSnapshot, FxResolutionRequest, FxRateObservation, AppliedFxRate, RecommendationIntent, RecommendationIntentResult, IntentCandidate, FxPolicyRecord, FxPolicyResearchRequest, FxObservationRecord, FxSnapshot } from './types.js';
+import type { CardDescriptor, CardSwitchInput, CardSwitchProjection, CardSwitchStatus, CapPeriod, CapPoolDefinition, EvaluationContext, MerchantIdentity, MerchantResolution, Money, OfferConfirmation, OfferRuleVersion, OfferSourceSnapshot, RankingEntry, RewardBreakdown, RewardComponentRecord, TransactionTuple, UserBenefitInput, UserBenefitStatus, RecommendationPreflight, RecommendationRequiredAction, RecommendationRequirement, Diagnostic, EvidenceRecord, PaymentRouteRecord, PaymentCapabilityRecord, PaymentAccountRecord, EventRewardLedgerRecord, EventRewardReversalRecord, PaymentPathRequest, PaymentPathRecommendation, PaymentPathCandidate, PaymentPathEvent, EligibilityFact, RewardValuationSnapshot, FxResolutionRequest, FxRateObservation, AppliedFxRate, RecommendationIntent, RecommendationIntentResult, IntentCandidate, FxPolicyRecord, FxPolicyResearchRequest, FxObservationRecord, FxSnapshot } from './types.js';
 import type { StartupConfig } from './startup.js';
 import { RewardServiceError } from './errors.js';
-import { validateCard, validateCapPool, validateConfirmation, validateEligibilityFact, validateMerchant, validateRecommendationTransaction, validateRule, validateSnapshot, validateTransaction, validateEvidence, validateFactCandidate, validatePaymentRouteRecord, validatePaymentAccountRecord, validateEventRewardInput, validatePaymentEvent, validatePaymentEventChainRule, validatePaymentEventRule, validateRewardValuationSnapshot, validateFxPolicy, validateFxObservation } from './validation.js';
+import { validateCard, validateCapPool, validateConfirmation, validateEligibilityFact, validateMerchant, validateRecommendationTransaction, validateRule, validateSnapshot, validateTransaction, validateEvidence, validateFactCandidate, validatePaymentRouteRecord, validatePaymentCapability, validatePaymentAccountRecord, validateEventRewardInput, validatePaymentEvent, validatePaymentEventChainRule, validatePaymentEventRule, validateRewardValuationSnapshot, validateFxPolicy, validateFxObservation } from './validation.js';
 import { cardSwitchStatus, projectionFromInput } from './card-switch.js';
 import { buildFxResolutionRequest, freezeAppliedFxRate, deriveConversionOwner } from './fx.js';
 import { validateRecommendationIntent } from './validation.js';
@@ -26,7 +26,7 @@ function merchantId(): string {
   for (let i = 0; i < 16; i += 1) encoded += ULID_ALPHABET[bytes[i % bytes.length]! % 32];
   return `mch_${encoded}`;
 }
-function ownedId(prefix: 'ev' | 'fact' | 'route' | 'acct' | 'valuation' | 'fxp'): string {
+function ownedId(prefix: 'ev' | 'fact' | 'route' | 'acct' | 'valuation' | 'fxp' | 'cap'): string {
   let time = Date.now();
   let encoded = '';
   for (let i = 0; i < 10; i += 1) { encoded = ULID_ALPHABET[time % 32] + encoded; time = Math.floor(time / 32); }
@@ -202,6 +202,23 @@ export class RewardService {
     if (!this.metadataUser) return [];
     return (this.store.read().fxObservations ?? []).filter((observation) => observation.ownerUser === this.metadataUser);
   }
+
+  upsertPaymentCapability(input: unknown): PaymentCapabilityRecord {
+    if (!this.metadataUser) throw new RewardServiceError('UNAUTHENTICATED', 'payment capability requires an authenticated user');
+    const source = typeof input === 'object' && input !== null ? input as Record<string, unknown> : {};
+    const parsed = validatePaymentCapability({ ...source, id: source.id ?? 'capability_input', status: source.status ?? 'active' });
+    const state = this.store.read();
+    const evidence = parsed.evidenceIds.map((id) => state.evidence.find((candidate) => candidate.id === id && candidate.ownerUser === this.metadataUser));
+    if (evidence.some((candidate) => !candidate || candidate.sourceType !== 'official' || candidate.reviewState !== 'accepted')) throw new RewardServiceError('NEEDS_REVIEW', 'payment capability requires accepted official evidence owned by the current user');
+    const existing = (state.paymentCapabilities ?? []).find((candidate) => candidate.idempotencyKey === parsed.idempotencyKey);
+    const { ownerUser: _ownerUser, ...publicCapability } = parsed;
+    const desired: PaymentCapabilityRecord = { ...publicCapability, id: existing?.id ?? ownedId('cap') };
+    if (existing) { if (JSON.stringify({ ...existing, id: parsed.id }) !== JSON.stringify({ ...desired, id: parsed.id })) throw new RewardServiceError('IDEMPOTENCY_CONFLICT', 'idempotencyKey already belongs to a different payment capability'); return existing; }
+    this.store.update((next) => { next.paymentCapabilities = [...(next.paymentCapabilities ?? []), desired]; });
+    return desired;
+  }
+
+  listPaymentCapabilities(): readonly PaymentCapabilityRecord[] { return this.store.read().paymentCapabilities ?? []; }
 
   upsertPaymentRoute(input: unknown): PaymentRouteRecord {
     const source = typeof input === 'object' && input !== null ? input as Record<string, unknown> : {};
@@ -818,9 +835,41 @@ export class RewardService {
       return { observation, stale: age > (observation.maxAgeSeconds ?? 7 * 24 * 3600) * 1000 && age <= 30 * 24 * 3600 * 1000 };
     };
     const cards = state.cards.filter(card => input.cardIds === undefined || input.cardIds.includes(card.id));
-    const routes = this.listPaymentRoutes().filter(route =>
+    const registeredRoutes = this.listPaymentRoutes().filter(route =>
       (input.routeIds === undefined || input.routeIds.includes(route.id)) &&
       (input.cardIds === undefined || (route.funding.kind === 'credit_card' && input.cardIds.includes(route.funding.cardId ?? ''))));
+    const generatedRoutes: PaymentRouteRecord[] = [];
+    if (transaction && this.metadataUser) {
+      const validCapability = (capability: PaymentCapabilityRecord) => capability.status === 'active' &&
+        (!capability.merchant || capability.merchant === rawMerchant || capability.merchant === merchant) &&
+        (!capability.channel || capability.channel === input.channel) &&
+        (!capability.validFrom || Date.parse(capability.validFrom) <= Date.parse(evaluatedAt)) &&
+        (!capability.validTo || Date.parse(capability.validTo) >= Date.parse(evaluatedAt)) &&
+        capability.evidenceIds.length > 0 && capability.evidenceIds.every((id) => state.evidence.some((evidence) => evidence.id === id && evidence.ownerUser === this.metadataUser && evidence.sourceType === 'official' && evidence.reviewState === 'accepted' && (!evidence.validFrom || Date.parse(evidence.validFrom) <= Date.parse(evaluatedAt)) && (!evidence.validTo || Date.parse(evidence.validTo) >= Date.parse(evaluatedAt))));
+      for (const capability of this.listPaymentCapabilities().filter(validCapability)) {
+        const fundingOptions: PaymentRouteRecord['funding'][] = [];
+        if (capability.fundingKinds.includes('credit_card')) for (const card of cards) fundingOptions.push({ kind: 'credit_card', cardId: card.id });
+        if (capability.fundingKinds.includes('account')) for (const account of state.paymentAccounts.filter((candidate) => candidate.ownerUser === this.metadataUser && candidate.status === 'active')) fundingOptions.push({ kind: 'account', subtype: account.kind, accountId: account.id });
+        for (const funding of fundingOptions) {
+          if (input.routeIds !== undefined) continue;
+          const seed = funding.kind === 'credit_card' ? funding.cardId! : funding.kind === 'account' ? funding.accountId! : funding.kind;
+          const providerNode = { id: 'service', kind: 'payment_service' as const, displayName: capability.consumerAppId ?? capability.providerId };
+          const acceptanceNode = { id: 'acceptance', kind: 'acceptance_network' as const, displayName: capability.acceptanceProviderId ?? 'acceptance network' };
+          const walletNode = { id: 'wallet', kind: 'wallet_balance' as const, displayName: capability.providerId };
+          const nodes = [
+            { id: 'funding', kind: 'funding_source' as const, displayName: seed },
+            ...(funding.kind === 'credit_card' ? [walletNode] : []),
+            providerNode, acceptanceNode, { id: 'merchant', kind: 'merchant' as const, displayName: rawMerchant },
+          ];
+          const evidenceIds = capability.evidenceIds;
+          const edges = funding.kind === 'credit_card'
+            ? [{ edgeId: 'fund', fromNodeId: 'funding', toNodeId: 'wallet', transition: 'wallet_top_up' as const, evidenceIds }, { edgeId: 'pay', fromNodeId: 'wallet', toNodeId: 'acceptance', transition: 'wallet_debit' as const, evidenceIds }, { edgeId: 'settle', fromNodeId: 'acceptance', toNodeId: 'merchant', transition: 'merchant_settlement' as const, evidenceIds }]
+            : [{ edgeId: 'debit', fromNodeId: 'funding', toNodeId: 'service', transition: 'account_debit' as const, evidenceIds }, { edgeId: 'pay', fromNodeId: 'service', toNodeId: 'acceptance', transition: 'service_to_acceptance' as const, evidenceIds }, { edgeId: 'settle', fromNodeId: 'acceptance', toNodeId: 'merchant', transition: 'merchant_settlement' as const, evidenceIds }];
+          generatedRoutes.push({ id: `generated_${capability.id}_${seed}`, status: 'active', layers: [{ kind: 'merchant_acceptance', providerId: capability.acceptanceProviderId ?? capability.providerId }, ...(capability.consumerAppId ? [{ kind: 'consumer_app' as const, appId: capability.consumerAppId }] : []), { kind: 'payment_provider', providerId: capability.providerId }], funding, sourceUrl: capability.sourceUrl, observedAt: capability.observedAt, validFrom: capability.validFrom, validTo: capability.validTo, authority: 'wallet', confidence: 'high', evidenceIds, idempotencyKey: `generated:${capability.id}:${seed}`, nodes, edges });
+        }
+      }
+    }
+    const routes = [...registeredRoutes, ...generatedRoutes];
     const applicable = (cardId?: string, routeId?: string) => state.rules.filter(rule =>
       rule.status !== 'superseded' &&
       (rule.cardId === undefined || rule.cardId === cardId) &&
@@ -932,7 +981,7 @@ export class RewardService {
         ...(country ? { country } : {}), ...(input.channel ? { channel: input.channel } : {}),
         ...(input.paymentMethod ? { paymentMethod: input.paymentMethod } : {}),
         routeFacts: [...routeFactMap.values()],
-        routeIds: routes.map(route => route.id), limit: 128, continuation: true,
+        routeIds: routes.map(route => route.id), routes, limit: 128, continuation: true,
       });
       for (const path of result.candidates) {
         const cardId = path.fundingSource.kind === 'credit_card' ? path.fundingSource.cardId : undefined;
@@ -1082,7 +1131,7 @@ export class RewardService {
     if (routeFacts.length > 128) throw new RewardServiceError('INVALID_INPUT', 'routeFacts must contain at most 128 entries');
     const routeFactScopes = routeFacts.map((fact) => `${fact.routeId}|${fact.edgeId ?? '*'}`);
     if (new Set(routeFactScopes).size !== routeFactScopes.length) throw new RewardServiceError('INVALID_INPUT', 'routeFacts contains duplicate route/edge scope');
-    const visibleRoutes = this.listPaymentRoutes().filter((route) => requested === undefined || requested.has(route.id)).map((route) => {
+    const visibleRoutes = (input.routes ?? this.listPaymentRoutes()).filter((route) => requested === undefined || requested.has(route.id)).map((route) => {
       const fundingCardId = route.funding.kind === 'credit_card' ? route.funding.cardId : undefined;
       const card = fundingCardId ? state.cards.find((candidate) => candidate.id === fundingCardId) : undefined;
       if (!route.edges) return route;
