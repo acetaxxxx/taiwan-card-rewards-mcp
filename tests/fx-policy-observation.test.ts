@@ -79,4 +79,13 @@ describe('FX policy and observation persistence', () => {
     expect(candidate?.status).toBe('unknown');
     expect(candidate?.fxEstimate?.assumption).toContain('issuer');
   });
+
+  it('does not upgrade a stored public reference to a policy-current quote', () => {
+    const service = new RewardService(new MemoryStore(), 'user-1');
+    service.registerCard({ id: 'card-jpy', issuer: 'Bank', productName: 'Japan Card' });
+    service.upsertOffer({ id: 'offer-source', url: 'https://bank.example/offer', fetchedAt: '2026-09-01T00:00:00Z', contentHash: 'offer', parserVersion: '1', verified: true }, { id: 'jpy-rule', cardId: 'card-jpy', version: '1', sourceSnapshotId: 'offer-source', status: 'active', validFrom: '2026-01-01T00:00:00Z', settlementCurrency: 'TWD', match: {}, reward: { kind: 'percentage', rateBps: 100 } });
+    service.upsertFxObservation({ sourceKind: 'public_reference', baseCurrency: 'JPY', quoteCurrency: 'TWD', ratePpm: 215000, capturedAt: '2026-09-10T00:00:00Z', provider: 'Bank of Taiwan', rateType: 'spot_selling', sourceUrl: 'https://rate.bot.com.tw/xrt?Lang=zh-TW', contentHash: 'bot-page', idempotencyKey: 'obs-reference' });
+    const candidate = service.recommendIntent({ merchant: 'Shop', amount: { amountMinor: 1000, currency: 'JPY' }, occurredAt: '2026-09-10T00:00:00Z' }).candidates.find((item) => item.cardId === 'card-jpy');
+    expect(candidate?.fxEstimate?.status).toBe('reference_estimate');
+  });
 });

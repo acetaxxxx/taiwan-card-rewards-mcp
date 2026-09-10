@@ -110,11 +110,13 @@ export { validateFxSnapshot as validateFxRateObservation };
 
 export function validateFxObservation(value: unknown): FxObservationRecord {
   const item = object(value, 'fx observation');
-  keys(item, ['id', 'baseCurrency', 'quoteCurrency', 'ratePpm', 'capturedAt', 'maxAgeSeconds', 'provider', 'rateType', 'sourceUrl', 'contentHash', 'cardIdScope', 'issuerScope', 'routeIdScope', 'edgeIdScope', 'conversionOwner', 'effectiveAt', 'confidence', 'idempotencyKey', 'ownerUser'], 'fx observation');
-  const { idempotencyKey: _idempotencyKey, ownerUser: _ownerUser, routeIdScope, edgeIdScope, ...snapshotInput } = item;
+  keys(item, ['id', 'baseCurrency', 'quoteCurrency', 'ratePpm', 'capturedAt', 'maxAgeSeconds', 'provider', 'rateType', 'sourceUrl', 'contentHash', 'cardIdScope', 'issuerScope', 'routeIdScope', 'edgeIdScope', 'sourceKind', 'conversionOwner', 'effectiveAt', 'confidence', 'idempotencyKey', 'ownerUser'], 'fx observation');
+  const { idempotencyKey: _idempotencyKey, ownerUser: _ownerUser, routeIdScope, edgeIdScope, sourceKind, ...snapshotInput } = item;
   const snapshot = validateFxSnapshot(snapshotInput, 'fx observation');
+  const kind = sourceKind === undefined ? 'policy_observation' : requiredString(sourceKind, 'fx observation.sourceKind');
+  if (kind !== 'policy_observation' && kind !== 'public_reference') throw new RewardServiceError('INVALID_INPUT', 'fx observation sourceKind is invalid');
   if (edgeIdScope !== undefined && routeIdScope === undefined) throw new RewardServiceError('INVALID_INPUT', 'fx observation.edgeIdScope requires routeIdScope');
-  return { ...snapshot, ...(routeIdScope === undefined ? {} : { routeIdScope: requiredString(routeIdScope, 'fx observation.routeIdScope', true) }), ...(edgeIdScope === undefined ? {} : { edgeIdScope: requiredString(edgeIdScope, 'fx observation.edgeIdScope', true) }), idempotencyKey: requiredString(item.idempotencyKey, 'fx observation.idempotencyKey', true), ...(item.ownerUser === undefined ? {} : { ownerUser: requiredString(item.ownerUser, 'fx observation.ownerUser', true) }) };
+  return { ...snapshot, sourceKind: kind, ...(routeIdScope === undefined ? {} : { routeIdScope: requiredString(routeIdScope, 'fx observation.routeIdScope', true) }), ...(edgeIdScope === undefined ? {} : { edgeIdScope: requiredString(edgeIdScope, 'fx observation.edgeIdScope', true) }), idempotencyKey: requiredString(item.idempotencyKey, 'fx observation.idempotencyKey', true), ...(item.ownerUser === undefined ? {} : { ownerUser: requiredString(item.ownerUser, 'fx observation.ownerUser', true) }) };
 }
 
 export function validateFxPolicy(value: unknown): FxPolicyRecord {

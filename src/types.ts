@@ -325,6 +325,7 @@ export interface FxRateObservation extends FxSnapshot {
 }
 
 export interface FxObservationRecord extends FxRateObservation {
+  sourceKind: 'policy_observation' | 'public_reference';
   routeIdScope?: string;
   edgeIdScope?: string;
   idempotencyKey: string;
