@@ -1,6 +1,6 @@
 # MCP tool-call playbook
 
-這是給 Agent 的呼叫順序與 JSON 骨架；canonical 19-tool 清單與欄位定義在
+這是給 Agent 的呼叫順序與 JSON 骨架；canonical 25-tool 清單與欄位定義在
 [`mcp-tools.md`](mcp-tools.md)。每個 object 都是 closed schema。以下 ID、URL、rule、amount 是 illustrative，不能當成銀行產品或 production evidence。
 
 ## A. 商家消費意圖推薦（正常入口）

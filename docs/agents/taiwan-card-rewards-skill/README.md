@@ -1,6 +1,6 @@
 # Taiwan Card Rewards Skill Bundle
 
-這個 bundle 提供 Agent 可直接載入的 canonical Skill、19-tool MCP reference、workflows 與端到端呼叫範例。MCP 是零網路的 deterministic 計算核心與 user-scoped durable ledger；官方頁面、PDF、圖片、OCR 與匯率研究由 Agent/UI 在 MCP 外完成。
+這個 bundle 提供 Agent 可直接載入的 canonical Skill、25-tool MCP reference、workflows 與端到端呼叫範例。MCP 是零網路的 deterministic 計算核心與 user-scoped durable ledger；官方頁面、PDF、圖片、OCR 與匯率研究由 Agent/UI 在 MCP 外完成。
 
 ## 快速啟動
 
@@ -41,7 +41,7 @@ docs/agents/taiwan-card-rewards-skill/
 ├── SKILL.md                                  # 精簡 router 與 invariants
 ├── README.md                                 # 安裝與目錄導覽
 ├── references/
-│   ├── mcp-tools.md                           # canonical 19-tool contract
+│   ├── mcp-tools.md                           # canonical 25-tool contract
 │   ├── mcp-tool-call-playbook.md              # 合法呼叫骨架與順序
 │   ├── architecture-and-boundaries.md        # Agent/MCP 權責與零網路邊界
 │   └── lifecycle-and-privacy.md               # storage、evidence、敏感資料
@@ -65,4 +65,4 @@ docs/agents/taiwan-card-rewards-skill/
 
 ## 驗證
 
-文件變更後，從 repo 根目錄執行 `npm run typecheck`、`npm run build`、`npm test`、`git diff --check`；再檢查 Markdown links 與 canonical 19-tool/name grep。此 bundle 不代表真實銀行產品、sidecar 或 staging 已驗證。
+文件變更後，從 repo 根目錄執行 `npm run typecheck`、`npm run build`、`npm test`、`git diff --check`；再檢查 Markdown links 與 canonical 25-tool/name grep。此 bundle 不代表真實銀行產品、sidecar 或 staging 已驗證。

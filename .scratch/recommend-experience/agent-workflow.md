@@ -1,8 +1,8 @@
 # Agent workflow：登記、推薦、匯率更新與完整優惠探索
 
-Status: needs-triage
+Status: ready-for-agent
 
-這是[推薦體驗改善提案](spec.md)的目標操作流程，尚未實作。供實作者與 Agent skill 作者使用；現行部署仍以實際 MCP handshake、tools/list schema 與回應為準。`refresh_fx`、`research_fx_policy` 是提案中的 action codes，不是可直接呼叫的工具名稱。新的 FX／政策保存入口尚待定義。
+這是[推薦體驗改善提案](spec.md)的實作流程草稿；現行部署仍以實際 MCP handshake、tools/list schema 與回應為準。`research_fx_policy` 與 FX refresh 是 `requiredActions`，不是工具名稱；政策與 observation 分別使用 `upsert_fx_policy`、`upsert_fx_observation`。
 
 ## 1. 啟動與能力確認
 
@@ -31,7 +31,7 @@ Status: needs-triage
 
 1. 從對話取商家及已知金額、幣別、國家、通路、消費時間與限制。先用已知資訊呼叫 recommend；只提供商家時進入探索。
 2. 讓 MCP 讀取持卡、帳戶、權益與路徑；只有管理、查重或使用者明確要求限制候選時才查清單。正常推薦不先選 cardId、routeId、ruleId。
-3. 讀取 candidates、status、requiredActions、coverage、resultVersion 與 nextCursor。確認各候選是政策匹配試算、舊匯率估算、公共參考估算，還是缺資料。
+3. 讀取 candidates、status、requiredActions、coverage、page、pageSize、resultVersion 與 hasMore。確認各候選是政策匹配試算、舊匯率估算、公共參考估算，還是缺資料。
 4. 先展示可用的第一頁（預設 10 筆）：付款步驟、可套用優惠、預估支出／回饋、主要前提，以及匯率來源與時間。金額未知時只展示路徑與規則條件。
 5. 有可執行的 Agent actions 時，先告知「目前是參考估算，正在更新相關匯率」，接著執行第 4 節；不能展示初估後就把可處理的 refresh action 當成完成。
 
@@ -42,7 +42,7 @@ Status: needs-triage
 MCP 的 `fxResolutionRequest` 是查詢要求，`fxObservation` 是 Agent 查完回填的報價；先讀要求中的 source URLs、用途、requiredFields 與提交入口。公共參考預設可查 [臺灣銀行牌告匯率](https://rate.bot.com.tw/xrt?Lang=zh-TW)，重新取得頁面並讀掛牌時間、即期欄位及買賣方向；即期欄位缺值就回報不可用。銀行／錢包政策研究仍使用對應官方條款，不能以臺銀報價替代。
 
 1. 按 action 的 provider／policy、pair、rateType、scope 與目標時間去重。掌握整個結果集合的缺項（actions 分頁時可續取），優先更新影響目前決策的報價。一般查詢不必等全部候選更新完；要求全面比較時再擴大處理，未更新候選保留估算與 action。
-2. 對 `refresh_fx`：依指定來源取得 observation，保存來源發布時間與取得時間，核對買賣方向、報價單位、幣別對、適用範圍及 freshness。一般官方資料研究在已授權瀏覽能力內直接執行。
+2. 對 FX refresh action：依指定來源取得 observation，保存來源發布時間與取得時間，核對買賣方向、報價單位、幣別對、適用範圍及 freshness。一般官方資料研究在已授權瀏覽能力內直接執行。
 3. 對 `research_fx_policy`／來源更新：取得官方條款並走 ingestion；資料矛盾保留 conflict，讓 MCP 判定。登入後個人報價等無法自行取得的資料，才向使用者提出具體問題。
 4. 透過已公布的 observation 寫入入口保存可重用報價並檢查成功回應；新版 recommend 也可接受本次 typed evidence。若僅用於本次試算，明示尚未持久化，不宣稱下次會自動使用。
 5. 將原消費意圖與新增 facts/evidence 再送 recommend。由 MCP 重算換匯基礎、費用、門檻、cap 與排序。
@@ -54,7 +54,7 @@ MCP 的 `fxResolutionRequest` 是查詢要求，`fxObservation` 是 Agent 查完
 ## 5. 顯示更多或全部優惠
 
 - 預設展示第一頁 10 筆，附 hasMore／已知總量及資料覆蓋範圍。所有可能優惠仍可繼續取得。
-- 使用者要更多：沿同 resultVersion 的 nextCursor 取下一頁。
+- 使用者要更多：沿同 resultVersion 以 `limit` + 下一個 `page` 取下一頁；legacy integration 才使用 nextCursor。
 - 使用者要全部：持續翻頁至 hasMore=false，並取得路徑內尚未展開的優惠頁；依候選／規則識別去重呈現，保留 mutually exclusive 與 action-required 條件。
 - 若探索未完成或因模型範圍限制截斷，說明未涵蓋範圍；結果總數未知就回已發現數量，不稱為全部市場優惠。
 - 若資料版本改變，重啟該查詢，避免把不同排序的頁面混合。

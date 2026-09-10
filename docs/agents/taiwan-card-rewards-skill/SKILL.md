@@ -15,7 +15,7 @@ description: 協助試算、比較與記錄台灣信用卡回饋；路由至 can
 3. 絕不傳送或儲存 PAN、CVV/CVC、OTP、密碼、cookie、token、帳號號碼，或把 `user_id` 當作 tool-level tenant selector。
 4. 啟動 MCP 時，`--data-dir` 才是持久化邊界；`--user` 只供 display/metadata，不能當授權或 storage selector。
 5. `unknown`、`stale`、`needs_review`、衝突或缺 evidence 一律 fail closed；不可把未知轉成零回饋或擅自選活動。
-6. 外幣必須提供通過驗證、未過期的 `fx`（含 provider/rateType）；不使用 1:1 fallback。費用或 reward valuation 無法換算時，net value 仍是 blocked/unknown。
+6. 外幣若缺少 provider/policy FX，planned recommendation 可先使用 Agent 依 `fxResolutionRequest` 取得的臺銀即期公共參考估算；必須標示 estimate，不能當成實際政策或 actual settlement。費用或 reward valuation 無法換算時，net value 仍是 blocked/unknown。
 7. payment path 是有界圖，不是把卡片、wallet、支付服務壓平為一個交易。每個 top-up/purchase 是 planned event；不可對 fungible wallet 自動推 FIFO/LIFO 或把早先卡 top-up 推成後續 wallet purchase 的卡刷。
 
 ## 意圖 router
@@ -36,7 +36,7 @@ description: 協助試算、比較與記錄台灣信用卡回饋；路由至 can
 
 ## 三個必讀入口
 
-- [`references/mcp-tools.md`](references/mcp-tools.md)：canonical 19 tools、closed input union、event/route schema。
+- [`references/mcp-tools.md`](references/mcp-tools.md)：canonical 25-tool contract、closed input union、event/route/capability schema。
 - [`references/mcp-tool-call-playbook.md`](references/mcp-tool-call-playbook.md)：實際 MCP 呼叫順序與合法 JSON 骨架。
 - [`workflows/payment-route-and-fx.md`](workflows/payment-route-and-fx.md) 與 [`workflows/event-reward-and-wallet-eligibility.md`](workflows/event-reward-and-wallet-eligibility.md)：多層路徑、planned events、跨事件資格與 fail-closed。
 
@@ -47,6 +47,6 @@ description: 協助試算、比較與記錄台灣信用卡回饋；路由至 can
 
 ## 何時停止並詢問使用者
 
-若 merchant、funding source、event relation、membership、cap policy、valuation、FX、fee 或官方適用期間缺失/矛盾，回傳 MCP 的 diagnostic/status，說明要補的 fact/evidence，停止寫入。只有使用者完成明確確認、且 server 能以官方 evidence 重算 matched 時，才可使用 mutating tool。
+若 merchant、funding source、event relation、membership、cap policy、valuation、FX、fee 或官方適用期間缺失/矛盾，回傳 MCP 的 diagnostic/status，說明要補的 fact/evidence，停止寫入。對一致且有官方 evidence 的 payment route 預設可直接作 planned recommendation；只有 evidence 衝突、歧義或使用者表示路徑不可用時才詢問，並可將 route mark failed。
 
 完成任一流程的標準是：payload 通過 closed schema、回應狀態未被誤解、planned/actual 邊界清楚、所有未知與外部未驗證範圍已明示。

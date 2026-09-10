@@ -38,7 +38,7 @@
 4. `register_card`：只送 issuer/product/network/last4 等 descriptor，不送 PAN/CVV。
 5. `refresh_external_data`/FX：提交包含 provider、rateType、capturedAt、ratePpm 的 validated `fx`。缺 snapshot 或超過 max age 就維持 stale/unknown。
 6. `review_conflict`/benefit：檢查 user benefit status、combination/stacking policy，必要時詢問使用者，不自行選 priority。
-7. 完成 recovery 後重跑 preflight；只有診斷允許時才呼叫 `recommend`。
+7. `recommendation_preflight` 只在 legacy transaction 或明確診斷需求使用；正常 merchant-first 流程直接重跑 `recommend`，不要求先取得 preflight 的 ready 結果。
 
 ## 3. 呼叫 recommendation
 

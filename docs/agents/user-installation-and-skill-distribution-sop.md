@@ -1,7 +1,7 @@
 # 使用者安裝與 Skill 分發標準作業程序 (SOP)
 
 **文件狀態**：正式營運與分發規範 (Normative Distribution & Installation SOP)
-**適用範圍**：canonical 19-tool MCP contract（release tag 僅供部署管理）
+**適用範圍**：canonical 25-tool MCP contract（release tag 僅供部署管理）
 **語言**：繁體中文
 **遵循規範**：[`CONTEXT.md`](../../CONTEXT.md), [ADR 0001](../adr/0001-independent-card-rewards-domain-and-agent-supplied-rules.md), [ADR 0003](../adr/0003-complete-initial-mcp-surface-with-layered-trust-gates.md), [ADR 0004](../adr/0004-generic-benefit-status-and-schema-v2.md), [ADR 0005](../adr/0005-payment-route-opportunity-stacking.md), [ADR 0006](../adr/0006-multi-component-reward-ledger-and-cap-attribution.md), [Agent Research Skill SOP](agent-research-skill-and-preflight-sop.md), [Usage Guide](usage-guide.md).
 
@@ -16,7 +16,7 @@
 │              Canonical Source of Truth (本專案唯一權威版本)                │
 │  - docs/agents/taiwan-card-rewards-skill/SKILL.md (Agent 入口)           │
 │  - docs/agents/taiwan-card-rewards-skill/references/ (詳細 contract)     │
-│  - canonical contract：19 tools | 語系：繁體中文 (zh-Hant-TW)             │
+│  - canonical contract：25 tools | 語系：繁體中文 (zh-Hant-TW)             │
 └────────────────────────────────────┬────────────────────────────────────┘
                                      │
            ┌─────────────────────────┴─────────────────────────┐
