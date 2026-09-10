@@ -119,6 +119,8 @@ describe("MCP Contract and Agent Boundary", () => {
     expect(upsertOffer.properties.merchant.additionalProperties).toBe(false);
     expect(upsertOffer.properties.merchant.properties.canonicalNameLocale.const).toBe("zh-Hant-TW");
     expect(upsertOffer.properties.merchant.properties.channels.items.enum).toEqual(["in_store", "online"]);
+    expect(upsertOffer.properties.fxPolicyRequirement.required).toEqual(["baseCurrency", "quoteCurrency", "scope"]);
+    expect(upsertOffer.properties.fxPolicyRequirement.properties.scope.properties.kind.enum).toEqual(["card", "issuer", "route", "route_edge"]);
 
     const upsertRoute = mcpTools.find((tool) => tool.name === "upsert_payment_route")!.inputSchema as any;
     const edge = upsertRoute.properties.route.properties.edges.items;

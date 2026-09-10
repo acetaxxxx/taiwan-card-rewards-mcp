@@ -11,6 +11,22 @@ class MemoryStore implements LedgerStore {
 }
 
 describe('FX policy and observation persistence', () => {
+  it('returns a candidate-scoped research action when offer ingestion declares a missing FX policy', () => {
+    const service = new RewardService(new MemoryStore(), 'user-1');
+    const result = service.upsertOffer(
+      { id: 'offer-fx-gap', url: 'https://bank.example/offer', fetchedAt: '2026-09-10T00:00:00Z', contentHash: 'offer-fx-gap', parserVersion: '1', verified: true },
+      { id: 'offer-fx-rule', cardId: 'card-jpy', version: '1', sourceSnapshotId: 'offer-fx-gap', status: 'active', validFrom: '2026-01-01T00:00:00Z', settlementCurrency: 'TWD', match: {}, reward: { kind: 'percentage', rateBps: 100 } },
+      undefined,
+      undefined,
+      undefined,
+      { baseCurrency: 'JPY', quoteCurrency: 'TWD', scope: { kind: 'issuer', issuer: 'Example Bank' } },
+    );
+
+    expect(result.requiredActions).toEqual(expect.arrayContaining([
+      expect.objectContaining({ action: 'research_fx_policy', owner: 'agent', path: 'fxPolicy', submission: { tool: 'upsert_fx_policy', field: 'policy' } }),
+    ]));
+  });
+
   it('stores policy and observation separately with tenant ownership and idempotency', () => {
     const service = new RewardService(new MemoryStore(), 'user-1');
     const evidence = service.submitEvidence({ id: 'evidence-fx-policy', requirementId: 'fx-policy:issuer', sourceIdentity: 'issuer.example', sourceType: 'official', authority: 'issuer', claim: { policyKey: 'issuer-jpy', rateType: 'cash_selling' }, observedAt: '2026-09-10T00:00:00Z', confidence: 'high', contentHash: 'policy-hash', reviewState: 'accepted', sourceUrl: 'https://issuer.example/fx' });

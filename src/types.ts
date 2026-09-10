@@ -376,6 +376,11 @@ export interface FxPolicyRecord {
   idempotencyKey: string;
   ownerUser?: string;
 }
+export interface FxPolicyRequirement {
+  baseCurrency: Currency;
+  quoteCurrency: Currency;
+  scope: FxPolicyScope;
+}
 export interface FxPolicyResearchRequest {
   purpose: 'policy_research';
   scope: FxPolicyScope;

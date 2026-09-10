@@ -1,10 +1,10 @@
 import * as crypto from 'node:crypto';
 import { type LedgerStore, type RecordedTransaction, type StoredState } from './store.js';
 import { EventRewardLedger, convertMinor, createPaymentEventRewardCandidate, decidePaymentEventRewards, evaluateOffer, evaluatePredicate, matchPaymentEvent, matchPaymentEventChain, rankCards, resolveCyclePeriodKey } from './evaluator.js';
-import type { CardDescriptor, CardSwitchInput, CardSwitchProjection, CardSwitchStatus, CapPeriod, CapPoolDefinition, EvaluationContext, MerchantIdentity, MerchantResolution, Money, OfferConfirmation, OfferRuleVersion, OfferSourceSnapshot, RankingEntry, RewardBreakdown, RewardComponentRecord, TransactionTuple, UserBenefitInput, UserBenefitStatus, RecommendationPreflight, RecommendationRequiredAction, RecommendationRequirement, Diagnostic, EvidenceRecord, PaymentRouteRecord, PaymentCapabilityRecord, PaymentAccountRecord, EventRewardLedgerRecord, EventRewardReversalRecord, PaymentPathRequest, PaymentPathRecommendation, PaymentPathCandidate, PaymentPathEvent, EligibilityFact, RewardValuationSnapshot, FxResolutionRequest, FxRateObservation, AppliedFxRate, RecommendationIntent, RecommendationIntentResult, IntentCandidate, FxPolicyRecord, FxPolicyResearchRequest, FxObservationRecord, FxSnapshot } from './types.js';
+import type { CardDescriptor, CardSwitchInput, CardSwitchProjection, CardSwitchStatus, CapPeriod, CapPoolDefinition, EvaluationContext, MerchantIdentity, MerchantResolution, Money, OfferConfirmation, OfferRuleVersion, OfferSourceSnapshot, RankingEntry, RewardBreakdown, RewardComponentRecord, TransactionTuple, UserBenefitInput, UserBenefitStatus, RecommendationPreflight, RecommendationRequiredAction, RecommendationRequirement, Diagnostic, EvidenceRecord, PaymentRouteRecord, PaymentCapabilityRecord, PaymentAccountRecord, EventRewardLedgerRecord, EventRewardReversalRecord, PaymentPathRequest, PaymentPathRecommendation, PaymentPathCandidate, PaymentPathEvent, EligibilityFact, RewardValuationSnapshot, FxResolutionRequest, FxRateObservation, AppliedFxRate, RecommendationIntent, RecommendationIntentResult, IntentCandidate, FxPolicyRecord, FxPolicyResearchRequest, FxObservationRecord, FxSnapshot, FxPolicyRequirement } from './types.js';
 import type { StartupConfig } from './startup.js';
 import { RewardServiceError } from './errors.js';
-import { validateCard, validateCapPool, validateConfirmation, validateEligibilityFact, validateMerchant, validateRecommendationTransaction, validateRule, validateSnapshot, validateTransaction, validateEvidence, validateFactCandidate, validatePaymentRouteRecord, validatePaymentCapability, validatePaymentAccountRecord, validateEventRewardInput, validatePaymentEvent, validatePaymentEventChainRule, validatePaymentEventRule, validateRewardValuationSnapshot, validateFxPolicy, validateFxObservation } from './validation.js';
+import { validateCard, validateCapPool, validateConfirmation, validateEligibilityFact, validateMerchant, validateRecommendationTransaction, validateRule, validateSnapshot, validateTransaction, validateEvidence, validateFactCandidate, validatePaymentRouteRecord, validatePaymentCapability, validatePaymentAccountRecord, validateEventRewardInput, validatePaymentEvent, validatePaymentEventChainRule, validatePaymentEventRule, validateRewardValuationSnapshot, validateFxPolicy, validateFxObservation, validateFxPolicyRequirement } from './validation.js';
 import { cardSwitchStatus, projectionFromInput } from './card-switch.js';
 import { buildFxResolutionRequest, freezeAppliedFxRate, deriveConversionOwner } from './fx.js';
 import { validateRecommendationIntent } from './validation.js';
@@ -550,13 +550,15 @@ export class RewardService {
     confirmation?: OfferConfirmation,
     capPools?: readonly CapPoolDefinition[],
     merchant?: MerchantOnboardingInput,
-  ): { snapshot: OfferSourceSnapshot; rule: OfferRuleVersion; merchant?: MerchantIdentity } {
+    fxPolicyRequirement?: FxPolicyRequirement,
+  ): { snapshot: OfferSourceSnapshot; rule: OfferRuleVersion; merchant?: MerchantIdentity; requiredActions?: readonly RecommendationIntentResult['requiredActions'][number][] } {
     snapshot = validateSnapshot(snapshot);
     if (merchant !== undefined && merchant.status !== undefined && merchant.status !== 'candidate') throw new RewardServiceError('INVALID_INPUT', 'new merchants must start as candidate');
     const merchantDraft = merchant === undefined ? undefined : validateMerchant({ ...merchant, canonicalId: 'mch_pending', status: 'candidate' });
     rule = validateRule(rule);
     if (merchantDraft?.provenance.sourceSnapshotId !== undefined && merchantDraft.provenance.sourceSnapshotId !== snapshot.id) throw new RewardServiceError('INVALID_OFFER', 'merchant provenance must reference the offer source snapshot');
     const incomingPools = (capPools ?? []).map((pool) => validateCapPool(pool));
+    const requiredFxPolicy = fxPolicyRequirement === undefined ? undefined : validateFxPolicyRequirement(fxPolicyRequirement);
     const conf = confirmation
       ? validateConfirmation(confirmation)
       : (rule.confirmation ? validateConfirmation(rule.confirmation) : undefined);
@@ -632,6 +634,18 @@ export class RewardService {
       else state.rules.push(storedRule);
       if (onboardedMerchant && !state.merchants.some((item) => item.canonicalId === onboardedMerchant!.canonicalId)) state.merchants.push(onboardedMerchant);
     });
+    if (requiredFxPolicy) {
+      const current = this.store.read().fxPolicies ?? [];
+      const policyExists = current.some((policy) => policy.ownerUser === this.metadataUser && policy.baseCurrency === requiredFxPolicy.baseCurrency && policy.quoteCurrency === requiredFxPolicy.quoteCurrency && JSON.stringify(policy.scope) === JSON.stringify(requiredFxPolicy.scope));
+      if (!policyExists) {
+        const request: FxPolicyResearchRequest = {
+          purpose: 'policy_research', scope: requiredFxPolicy.scope, sourceStatus: 'known', sourceUrls: [snapshot.url],
+          requiredFields: ['scope', 'baseCurrency', 'quoteCurrency', 'conversionOwner', 'rateType', 'rateDirection', 'conversionTiming', 'feeBasis', 'markupBasis', 'freshForSeconds', 'maxEstimateAgeSeconds', 'sourceUrl', 'evidenceId', 'validity period'],
+          submission: { tool: 'upsert_fx_policy', field: 'policy' },
+        };
+        return { snapshot, rule: storedRule, ...(onboardedMerchant ? { merchant: onboardedMerchant } : {}), requiredActions: [{ id: `fx-policy:${crypto.createHash('sha256').update(JSON.stringify(requiredFxPolicy)).digest('hex').slice(0, 16)}`, action: 'research_fx_policy', owner: 'agent' as const, path: 'fxPolicy', requiredFacts: request.requiredFields, submission: request.submission, completionCondition: 'repeat the ingestion or recommend flow after storing a validated policy backed by accepted official evidence', fxPolicyResearchRequest: request }] };
+      }
+    }
     return { snapshot, rule: storedRule, ...(onboardedMerchant ? { merchant: onboardedMerchant } : {}) };
   }
 

@@ -137,7 +137,7 @@ async function callTool(service: RewardService, params: Record<string, unknown>)
   switch (name) {
     case 'register_card': return service.registerCard(validateCard(args.card));
     case 'list_cards': { const rows = service.listCards(); return (args.limit !== undefined || args.page !== undefined || args.projection !== undefined) ? paged(rows, typeof args.projection === 'string' ? args.projection : undefined, typeof args.page === 'number' ? args.page : undefined, typeof args.limit === 'number' ? args.limit : undefined, (item) => String((item as CardDescriptor).id), 50) : rows; }
-    case 'upsert_offer': return service.upsertOffer(validateSnapshot(args.snapshot), validateRule(args.rule), args.confirmation !== undefined ? validateConfirmation(args.confirmation) : undefined, args.capPools === undefined ? undefined : (Array.isArray(args.capPools) ? args.capPools.map(validateCapPool) : []), args.merchant as any);
+    case 'upsert_offer': return service.upsertOffer(validateSnapshot(args.snapshot), validateRule(args.rule), args.confirmation !== undefined ? validateConfirmation(args.confirmation) : undefined, args.capPools === undefined ? undefined : (Array.isArray(args.capPools) ? args.capPools.map(validateCapPool) : []), args.merchant as any, args.fxPolicyRequirement as any);
     case 'upsert_fx_policy': return service.upsertFxPolicy(args.policy);
     case 'list_fx_policies': return service.listFxPolicies();
     case 'upsert_fx_observation': return service.upsertFxObservation(args.observation);
