@@ -1,8 +1,8 @@
 # Canonical MCP tools
 
-這份 reference 對應目前 source contract 的公開 surface：19 個工具。工具名稱、closed input、enum 與 fail-closed errors 以 `src/mcp-contract.ts`、`src/validation.ts` 和 `src/cli.ts` 為準；版本 tag 是發佈管理資訊，不是 public tool name。
+這份 reference 對應目前 source contract 的公開 surface：23 個工具。工具名稱、closed input、enum 與 fail-closed errors 以 `src/mcp-contract.ts`、`src/validation.ts` 和 `src/cli.ts` 為準；版本 tag 是發佈管理資訊，不是 public tool name。
 
-## 19-tool matrix
+## 23-tool matrix
 
 | Tool | Read/write | 用途 |
 |---|---|---|
@@ -11,6 +11,10 @@
 | `register_card` | write | 登記 card descriptor（不可有 PAN/CVV） |
 | `list_cards` | read | 列出 user-scoped card 清冊 |
 | `upsert_offer` | write | 寫入 source snapshot/rule；需符合 official evidence 與 confirmation gate |
+| `upsert_fx_policy` | write | 保存有 official evidence 支持的 FX policy |
+| `list_fx_policies` | read | 列出 user-scoped FX policies |
+| `upsert_fx_observation` | write | 保存 source-attributed FX observation，可標記 public reference |
+| `list_fx_observations` | read | 列出 user-scoped FX observations |
 | `recommend` | read | closed card/payment_path union 的 bounded recommendation |
 | `recommendation_preflight` | read | intent-shaped 呼叫沿用 `recommend` 的候選診斷；legacy transaction 仍提供相容 preflight，不修改狀態 |
 | `upsert_payment_route` | write | 登記有界 route graph 與 funding identity |
@@ -35,7 +39,11 @@
 candidate envelope，並帶狀態、required actions 與 bounded coverage。這個入口不
 要求先呼叫任何 list tool 或 `recommendation_preflight`。
 
-跨路徑報價可暫時以 `routeFacts: [{"routeId":"route_illustrative","edgeId":"edge_illustrative","fx":{...}}]` 提供；同一 route/edge scope 不可重複，資料只供本次 matching pair/scope 使用，不會保存。
+跨路徑報價可暫時以 `routeFacts: [{"routeId":"route_illustrative","edgeId":"edge_illustrative","fx":{...}}]` 提供；同一 route/edge scope 不可重複。需要重用時使用 `upsert_fx_observation`，並保留 `sourceKind` 與 route/edge scope。
+
+Intent recommendation 預設每頁 10 筆；使用 `nextCursor` 與相同
+`resultVersion` 續查。只有 `coverage.explorationComplete` 為 true 時，
+`coverage.total` 才是完整總數。
 
 ```json
 {
@@ -207,6 +215,6 @@ Historical versioned tool aliases are compatibility-only and must not appear in 
 | `record_event_reward_v1` / `record_event_reward_v2` | `record_event_reward` | Supply exactly one `rule` or `chainRule` and bounded event inputs |
 | `reverse_event_reward_v1` | `reverse_event_reward` | Keep `{event,idempotencyKey}` and verify explicit refund relation |
 
-These names are not part of the 19-tool public matrix and are shown only so a
+These names are not part of the 23-tool public matrix and are shown only so a
 host can migrate old configuration. New Skill examples and tools/list checks
 must use canonical names.
