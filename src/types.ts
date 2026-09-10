@@ -648,6 +648,7 @@ export interface IntentCandidate {
   matchedRules: readonly IntentRule[];
   reward?: Money;
   exclusionReasons: readonly string[];
+  fxEstimate?: { status: 'policy_current' | 'stale_estimate' | 'reference_estimate' | 'unavailable'; provider?: string; capturedAt?: string; assumption: string };
 }
 export interface IntentRule {
   ruleId: string;

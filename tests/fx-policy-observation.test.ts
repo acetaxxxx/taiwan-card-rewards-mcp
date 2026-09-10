@@ -39,4 +39,15 @@ describe('FX policy and observation persistence', () => {
     expect(result.requiredActions.some((action) => action.fxResolutionRequest?.quoteCurrency === 'TWD')).toBe(false);
     expect(result.candidates.find((candidate) => candidate.cardId === 'card-jpy')?.matchedRules[0]?.status).toBe('matched');
   });
+
+  it('returns a stale estimate with a refresh action instead of dropping the candidate', () => {
+    const service = new RewardService(new MemoryStore(), 'user-1');
+    service.registerCard({ id: 'card-jpy', issuer: 'Bank', productName: 'Japan Card' });
+    service.upsertOffer({ id: 'offer-source', url: 'https://bank.example/offer', fetchedAt: '2026-09-01T00:00:00Z', contentHash: 'offer', parserVersion: '1', verified: true }, { id: 'jpy-rule', cardId: 'card-jpy', version: '1', sourceSnapshotId: 'offer-source', status: 'active', validFrom: '2026-01-01T00:00:00Z', settlementCurrency: 'TWD', match: {}, reward: { kind: 'percentage', rateBps: 100 } });
+    service.upsertFxObservation({ baseCurrency: 'JPY', quoteCurrency: 'TWD', ratePpm: 215000, capturedAt: '2026-09-01T00:00:00Z', maxAgeSeconds: 3600, provider: 'Bank', rateType: 'card_scheme', sourceUrl: 'https://bank.example/rate', contentHash: 'rate', idempotencyKey: 'obs-stale' });
+    const result = service.recommendIntent({ merchant: 'Shop', amount: { amountMinor: 1000, currency: 'JPY' }, occurredAt: '2026-09-10T00:00:00Z' });
+    const candidate = result.candidates.find((item) => item.cardId === 'card-jpy');
+    expect(candidate?.fxEstimate?.status).toBe('stale_estimate');
+    expect(result.requiredActions.some((action) => action.fxResolutionRequest?.quoteCurrency === 'TWD')).toBe(true);
+  });
 });
