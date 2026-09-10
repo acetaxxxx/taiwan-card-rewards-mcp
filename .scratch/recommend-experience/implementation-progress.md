@@ -8,10 +8,10 @@ Implementation changes are not committed or pushed yet. Planning commit: 0924840
 | --- | --- | --- |
 | 01 | Implemented and integrated | Public merchant-only entry, unified candidates/rule terms, three-route fixture, read-only and legacy checks; covered by the current full suite |
 | 02 | Implemented and verified | Candidate-scoped recovery actions, multi-target/stale FX diagnostics, route-edge facts, source/scope metadata, intent preflight parity, and read-only retry; `npm run build`, `npm run typecheck`, and full suite passed (49 files / 208 tests) |
-| 03 | Pending 02 | Policy ingestion and persistence |
-| 04 | Pending 03 | FX observation persistence and reuse |
-| 05 | Pending 04 | Reference/stale estimates and refresh |
-| 06 | Pending 02 | Complete continuation, 10 per page |
+| 03 | Core persistence implemented | FX policy typed ingestion and evidence gate; policy completeness/research actions remain |
+| 04 | Core persistence/reuse implemented | Scoped FX observation persistence and recommendation reuse; full selector policy matching remains |
+| 05 | Core estimate semantics implemented | Public reference/stale/unavailable output and fallback source; route fee/net comparison remains |
+| 06 | Core continuation implemented | Stable intent cursor, 10-item pages, resultVersion and coverage semantics; deeper rule-set continuation remains |
 | 07 | Pending 03, 06 | Evidenced generated route candidates |
 | 08 | Pending 05, 06, 07 | Final Agent workflow and public contract validation |
 
