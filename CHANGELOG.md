@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.11.1
+
+- Fix bounded list projections used by Aion agents: `list_cards`, `list_payment_accounts`, and `list_payment_routes` now accept the documented `limit` range up to 50.
+- Report invalid projection bounds as `INVALID_INPUT` instead of masking them as `INTERNAL_ERROR`.
+
+## 0.11.0
+
+- Added shared MCP owner/stdio bridge auto-attach for agents using the same
+  `data-dir`, with bounded queues, stale-owner recovery, session isolation, and
+  different-directory tenant isolation.
+- Added automatic FX resolution requests, typed `FxRateObservation` provenance,
+  atomic cross-currency ingestion, fail-closed `fx_missing`, and frozen applied
+  rates for refunds.
+- Added the shared MCP and FX automation integration plan and completed the
+  Track A/B/C acceptance matrix.
+
+## 0.10.1
+
+- Renamed the MCP protocol identity to `taiwan_card_rewards_mcp` for Codex and
+  host compatibility while preserving the npm package and CLI binary names.
+
 ## 0.10.0
 
 - Consolidated the public MCP surface to 19 unversioned tools, including the

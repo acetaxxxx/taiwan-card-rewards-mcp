@@ -17,7 +17,7 @@ Host 設定：
 ```json
 {
   "mcpServers": {
-    "taiwan-card-rewards": {
+    "taiwan_card_rewards_mcp": {
       "command": "npx",
       "args": [
         "--yes",

@@ -123,6 +123,31 @@ describe("MCP Contract and Agent Boundary", () => {
     expect(edge.properties.fromMarket.type).toBe("string");
     expect(edge.properties.toMarket.type).toBe("string");
   });
+  it("allows the documented bounded list projection limit of 50", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "mcp-list-projection-"));
+    const client = new McpProcessClient(dir);
+    try {
+      for (const name of ["list_cards", "list_payment_accounts", "list_payment_routes"]) {
+        expect((mcpTools.find((tool) => tool.name === name)!.inputSchema as any).properties.limit.maximum).toBe(50);
+        const response = await client.send({
+          id: name,
+          method: "tools/call",
+          params: { name, arguments: { limit: 50, projection: "calculation" } },
+        });
+        expect(response.error).toBeUndefined();
+        expect(response.result.structuredContent.items).toEqual([]);
+      }
+      const invalid = await client.send({
+        id: "invalid-limit",
+        method: "tools/call",
+        params: { name: "list_cards", arguments: { limit: 51, projection: "calculation" } },
+      });
+      expect(invalid.error?.message).toBe("INVALID_INPUT");
+    } finally {
+      await client.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
   it("exposes all approved MCP tools with valid schemas in tools/list", async () => {
     const dir = mkdtempSync(join(tmpdir(), "mcp-contract-list-"));
     const client = new McpProcessClient(dir);
@@ -131,8 +156,8 @@ describe("MCP Contract and Agent Boundary", () => {
       const initRes = await client.send({ id: 1, method: "initialize" });
       expect(initRes.result).toBeDefined();
       expect(initRes.result.protocolVersion).toBe("2024-11-05");
-      expect(initRes.result.serverInfo.name).toBe("taiwan-card-rewards-mcp");
-      expect(initRes.result.serverInfo.version).toBe("0.10.0");
+      expect(initRes.result.serverInfo.name).toBe("taiwan_card_rewards_mcp");
+      expect(initRes.result.serverInfo.version).toBe("0.11.1");
       expect(initRes.result.instructions).toContain("single-user durable ledger");
       expect(initRes.result.instructions).toContain("fail-closed");
 

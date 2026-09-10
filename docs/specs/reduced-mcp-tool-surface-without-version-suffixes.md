@@ -1,6 +1,6 @@
 # Reduced MCP Tool Surface Without Public Version Suffixes
 
-Status: implemented in release 0.10.0. This document records the public
+Status: implemented in release 0.11.0. This document records the public
 contract consolidation and migration boundary; the canonical tool schemas are
 maintained in `docs/agents/taiwan-card-rewards-skill/references/mcp-tools.md`.
 
@@ -33,7 +33,7 @@ gates.
 
 ## Target public surface
 
-The 0.10.0 public surface has 19 tools. Public names do not contain `v1`,
+The 0.11.0 public surface has 19 tools. Public names do not contain `v1`,
 `v2`, or another transport/schema version suffix. Internal stored-state
 versions and wire compatibility aliases remain allowed.
 
@@ -138,7 +138,7 @@ requires it.
 
 ## Eight acceptance criteria for implementation
 
-1. Release 0.10.0 `tools/list` returns exactly 19 names and contains
+1. Release 0.11.0 `tools/list` returns exactly 19 names and contains
    unversioned event and payment-path names. It exposes no public version
    suffixes for the merged tools.
 2. Every target name has one CLI dispatch branch and one closed schema; each

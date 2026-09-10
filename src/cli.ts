@@ -1,14 +1,18 @@
 #!/usr/bin/env node
 import * as readline from 'node:readline';
+import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { parseStartupArgs, StartupContractError } from './startup.js';
+import type { StartupConfig } from './startup.js';
 import { FileStore, contentHash, type LedgerStore } from './store.js';
 import { RewardService } from './service.js';
 import { RewardServiceError } from './errors.js';
 import { mcpInstructions, mcpTools } from './mcp-contract.js';
 import { evaluateOffer, rankCards } from './evaluator.js';
 import { validateUserBenefitInput, validateContext, validateToolArgs, validateRecommendationTransaction, validateTransaction, validateCard, validateCapPool, validateConfirmation, validateRule, validateSnapshot } from './validation.js';
-import { projectPage, ProjectionTooLargeError } from './projections.js';
+import { projectPage, ProjectionInputError, ProjectionTooLargeError } from './projections.js';
+import { SharedMcpClient, SharedMcpOwner, connectSharedBridge } from './shared-mcp.js';
+import { runStdioBridge } from './shared-cli.js';
 import type { CardDescriptor, RankingEntry, PaymentPathRequest } from './types.js';
 
 const packageJson = createRequire(import.meta.url)('../package.json') as { version: string };
@@ -49,8 +53,46 @@ function parseRecommendationInput(args: Record<string, unknown>): { transaction:
   return { transaction, options: { ...(cardIds === undefined ? {} : { cardIds }), ...(context === undefined ? {} : { context }) } };
 }
 
+async function processJsonRpc(service: RewardService, request: JsonRpc): Promise<Reply> {
+  try {
+    if (request.method === 'initialize') return { jsonrpc: '2.0', id: request.id ?? null, result: { protocolVersion: '2024-11-05', capabilities: { tools: {} }, serverInfo: { name: 'taiwan_card_rewards_mcp', version: packageJson.version }, instructions: mcpInstructions } };
+    if (request.method === 'tools/list') return { jsonrpc: '2.0', id: request.id ?? null, result: { tools: mcpTools.map((tool) => ({ name: tool.name, description: tool.description, inputSchema: tool.inputSchema })) } };
+    if (request.method === 'tools/call') return { jsonrpc: '2.0', id: request.id ?? null, result: toolResult(await callTool(service, request.params ?? {})) };
+    return { jsonrpc: '2.0', id: request.id ?? null, error: { code: -32601, message: `Method not found: ${request.method ?? ''}` } };
+  } catch (error) {
+    const code = error instanceof RewardServiceError || error instanceof StartupContractError ? error.code : error instanceof ProjectionInputError ? error.code : error instanceof ProjectionTooLargeError ? 'PAYLOAD_TOO_LARGE' : 'INTERNAL_ERROR';
+    const data = error instanceof RewardServiceError && error.details !== undefined ? { code, details: error.details } : { code };
+    return { jsonrpc: '2.0', id: request.id ?? null, error: { code: -32000, message: code, data } };
+  }
+}
+
+async function runOwner(config: StartupConfig): Promise<void> {
+  const store: LedgerStore = new FileStore(config);
+  const service = new RewardService(store, config.user);
+  const owner = new SharedMcpOwner({ dataDir: config.dataDir, handler: async (request) => {
+    const response = await processJsonRpc(service, request as JsonRpc);
+    return { id: response.id, ...(response.result === undefined ? {} : { result: response.result }), ...(response.error === undefined ? {} : { error: response.error }) };
+  } });
+  const close = async () => { await owner.close(); store.close(); process.exit(0); };
+  process.once('SIGINT', () => { void close(); });
+  process.once('SIGTERM', () => { void close(); });
+  await owner.listen();
+  await new Promise<void>(() => { /* owner lifetime is controlled by SIGINT/SIGTERM */ });
+}
+
+async function runBridge(config: StartupConfig): Promise<void> {
+  const client = await connectSharedBridge({ dataDir: config.dataDir, spawnOwner: async () => {
+    const args = [process.argv[1]!, '--data-dir', config.dataDir, ...(config.user ? ['--user', config.user] : []), '--shared-owner'];
+    const child = spawn(process.execPath, args, { detached: true, stdio: 'ignore' });
+    child.unref();
+  } });
+  await runStdioBridge({ input: process.stdin, output: process.stdout, client });
+}
+
 async function main(): Promise<void> {
   const config = parseStartupArgs(process.argv.slice(2));
+  if (config.mode === 'shared-owner') { await runOwner(config); return; }
+  if (config.mode === 'shared-bridge') { await runBridge(config); return; }
   const store: LedgerStore = new FileStore(config);
   const service = new RewardService(store, config.user);
   const close = () => { store.close(); process.exit(0); };
@@ -63,15 +105,8 @@ async function main(): Promise<void> {
     let request: JsonRpc;
     try { request = JSON.parse(line) as JsonRpc; } catch { failure(null, -32700, 'Parse error'); continue; }
     if (request.method === 'notifications/initialized' || request.method?.startsWith('notifications/')) continue;
-    try {
-      if (request.method === 'initialize') reply(request.id, { protocolVersion: '2024-11-05', capabilities: { tools: {} }, serverInfo: { name: 'taiwan-card-rewards-mcp', version: packageJson.version }, instructions: mcpInstructions });
-      else if (request.method === 'tools/list') reply(request.id, { tools: mcpTools.map((tool) => ({ name: tool.name, description: tool.description, inputSchema: tool.inputSchema })) });
-      else if (request.method === 'tools/call') reply(request.id, toolResult(await callTool(service, request.params ?? {})));
-      else failure(request.id, -32601, `Method not found: ${request.method ?? ''}`);
-    } catch (error) {
-      const code = error instanceof RewardServiceError || error instanceof StartupContractError ? error.code : error instanceof ProjectionTooLargeError ? 'PAYLOAD_TOO_LARGE' : 'INTERNAL_ERROR';
-      failure(request.id, -32000, code, { code });
-    }
+    const response = await processJsonRpc(service, request);
+    process.stdout.write(`${JSON.stringify(response)}\n`);
   }
   store.close();
 }
@@ -87,7 +122,7 @@ async function callTool(service: RewardService, params: Record<string, unknown>)
     const allowedPath = ['amount', 'merchant', 'mcc', 'country', 'channel', 'paymentMethod', 'asOf', 'routeIds', 'limit', 'maxHops', 'maxEvents', 'maxBranchesPerNode'];
     for (const key of Object.keys(args.payment_path as object)) if (!allowedPath.includes(key)) throw new RewardServiceError('UNKNOWN_FIELD', `recommend.payment_path contains unsupported field: ${key}`);
   }
-  const paged = (value: unknown[], projection: string | undefined, page: number | undefined, limit: number | undefined, sortKey: (item: unknown) => string): unknown => {
+  const paged = (value: unknown[], projection: string | undefined, page: number | undefined, limit: number | undefined, sortKey: (item: unknown) => string, maxItems = 20): unknown => {
     if (projection !== undefined && !['summary', 'detail', 'calculation', 'audit'].includes(projection)) throw new RewardServiceError('INVALID_INPUT', 'projection is invalid');
     const projected = projection === 'summary' ? value.map((item) => {
       if (!item || typeof item !== 'object') return item;
@@ -96,11 +131,11 @@ async function callTool(service: RewardService, params: Record<string, unknown>)
     }) : value;
     const effectivePage = page ?? 1;
     const effectiveLimit = limit ?? 10;
-    return projectPage(projected, { page: effectivePage, limit: effectiveLimit, maxItems: 20, maxBytes: 256 * 1024, evaluatedAt: new Date().toISOString(), dataVersion: contentHash(JSON.stringify(projected)).slice(0, 16), sortKey });
+    return projectPage(projected, { page: effectivePage, limit: effectiveLimit, maxItems, maxBytes: 256 * 1024, evaluatedAt: new Date().toISOString(), dataVersion: contentHash(JSON.stringify(projected)).slice(0, 16), sortKey });
   };
   switch (name) {
     case 'register_card': return service.registerCard(validateCard(args.card));
-    case 'list_cards': { const rows = service.listCards(); return (args.limit !== undefined || args.page !== undefined || args.projection !== undefined) ? paged(rows, typeof args.projection === 'string' ? args.projection : undefined, typeof args.page === 'number' ? args.page : undefined, typeof args.limit === 'number' ? args.limit : undefined, (item) => String((item as CardDescriptor).id)) : rows; }
+    case 'list_cards': { const rows = service.listCards(); return (args.limit !== undefined || args.page !== undefined || args.projection !== undefined) ? paged(rows, typeof args.projection === 'string' ? args.projection : undefined, typeof args.page === 'number' ? args.page : undefined, typeof args.limit === 'number' ? args.limit : undefined, (item) => String((item as CardDescriptor).id), 50) : rows; }
     case 'upsert_offer': return service.upsertOffer(validateSnapshot(args.snapshot), validateRule(args.rule), args.confirmation !== undefined ? validateConfirmation(args.confirmation) : undefined, args.capPools === undefined ? undefined : (Array.isArray(args.capPools) ? args.capPools.map(validateCapPool) : []), args.merchant as any);
     case 'recommend': {
       if (args.kind === 'payment_path' && args.payment_path && typeof args.payment_path === 'object') {
@@ -111,9 +146,9 @@ async function callTool(service: RewardService, params: Record<string, unknown>)
     }
     case 'recommendation_preflight': return service.preflightRecommendation(validateRecommendationTransaction(args.transaction), { ...(args.context === undefined ? {} : { context: validateContext(args.context) }) });
     case 'upsert_payment_route': return service.upsertPaymentRoute(args.route);
-    case 'list_payment_routes': { const rows = [...service.listPaymentRoutes()]; return (args.limit !== undefined || args.page !== undefined || args.projection !== undefined) ? paged(rows, typeof args.projection === 'string' ? args.projection : undefined, typeof args.page === 'number' ? args.page : undefined, typeof args.limit === 'number' ? args.limit : undefined, (item) => String((item as { id: string }).id)) : rows; }
+    case 'list_payment_routes': { const rows = [...service.listPaymentRoutes()]; return (args.limit !== undefined || args.page !== undefined || args.projection !== undefined) ? paged(rows, typeof args.projection === 'string' ? args.projection : undefined, typeof args.page === 'number' ? args.page : undefined, typeof args.limit === 'number' ? args.limit : undefined, (item) => String((item as { id: string }).id), 50) : rows; }
     case 'register_payment_account': return service.upsertPaymentAccount(args.account);
-    case 'list_payment_accounts': { const rows = [...service.listPaymentAccounts()]; return (args.limit !== undefined || args.page !== undefined || args.projection !== undefined) ? paged(rows, typeof args.projection === 'string' ? args.projection : undefined, typeof args.page === 'number' ? args.page : undefined, typeof args.limit === 'number' ? args.limit : undefined, (item) => String((item as { id: string }).id)) : rows; }
+    case 'list_payment_accounts': { const rows = [...service.listPaymentAccounts()]; return (args.limit !== undefined || args.page !== undefined || args.projection !== undefined) ? paged(rows, typeof args.projection === 'string' ? args.projection : undefined, typeof args.page === 'number' ? args.page : undefined, typeof args.limit === 'number' ? args.limit : undefined, (item) => String((item as { id: string }).id), 50) : rows; }
     case 'recommend_payment_paths_v1': return service.recommendPaymentPaths({ amount: args.amount as PaymentPathRequest['amount'], ...(typeof args.merchant === 'string' ? { merchant: args.merchant } : {}), ...(typeof args.mcc === 'string' ? { mcc: args.mcc } : {}), ...(typeof args.country === 'string' ? { country: args.country } : {}), ...(typeof args.channel === 'string' ? { channel: args.channel } : {}), ...(typeof args.paymentMethod === 'string' ? { paymentMethod: args.paymentMethod } : {}), ...(typeof args.asOf === 'string' ? { asOf: args.asOf } : {}), ...(Array.isArray(args.routeIds) ? { routeIds: args.routeIds as string[] } : {}), ...(typeof args.limit === 'number' ? { limit: args.limit } : {}), ...(Array.isArray(args.eligibilityFacts) ? { eligibilityFacts: args.eligibilityFacts as PaymentPathRequest['eligibilityFacts'] } : {}) });
     case 'record_transaction': return service.recordTransaction(validateTransaction(args.transaction));
     case 'record_event_reward':

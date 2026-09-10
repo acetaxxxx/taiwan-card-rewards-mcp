@@ -18,7 +18,7 @@ review. It is not a reason to modify `aionCore/`.
 ## Release and reproducibility contract
 
 - Every Aion descriptor pins an immutable package version, for example
-  `taiwan-card-rewards-mcp@0.10.0`; never use `latest`, a moving tag, or an
+  `taiwan-card-rewards-mcp@0.11.0`; never use `latest`, a moving tag, or an
   unbounded version range in production.
 - The independent repository commits `package-lock.json`. CI uses a fixed
   Node version, `npm ci --ignore-scripts`, `npm run typecheck`, `npm run build`,
@@ -34,11 +34,11 @@ Example Aion stdio descriptor (illustrative; package version is mandatory):
 
 ```json
 {
-  "name": "taiwan-card-rewards-mcp",
+  "name": "taiwan_card_rewards_mcp",
   "transport": {
     "type": "stdio",
     "command": "npx",
-    "args": ["--yes", "taiwan-card-rewards-mcp@0.10.0", "--data-dir", "/srv/aion/users/<user>/taiwan-card-rewards-mcp"]
+    "args": ["--yes", "taiwan-card-rewards-mcp@0.11.0", "--data-dir", "/srv/aion/users/<user>/taiwan-card-rewards-mcp"]
   },
   "enabled": true
 }

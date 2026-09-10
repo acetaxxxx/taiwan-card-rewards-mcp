@@ -17,10 +17,19 @@ export class ProjectionTooLargeError extends Error {
   }
 }
 
+export class ProjectionInputError extends Error {
+  readonly code = 'INVALID_INPUT';
+
+  constructor(message: string) {
+    super(message);
+    this.name = 'ProjectionInputError';
+  }
+}
+
 export function projectPage<T>(rows: readonly T[], options: { page: number; limit: number; maxItems?: number; maxBytes?: number; evaluatedAt: string; dataVersion: string; sortKey: (row: T) => string }): { items: T[]; pageInfo: PageInfo } {
   const maxItems = options.maxItems ?? 20;
-  if (!Number.isSafeInteger(options.page) || options.page < 1) throw new Error('invalid_input: page must be a positive integer');
-  if (!Number.isSafeInteger(options.limit) || options.limit < 1 || options.limit > maxItems) throw new Error(`invalid_input: limit must be an integer from 1 to ${maxItems}`);
+  if (!Number.isSafeInteger(options.page) || options.page < 1) throw new ProjectionInputError('page must be a positive integer');
+  if (!Number.isSafeInteger(options.limit) || options.limit < 1 || options.limit > maxItems) throw new ProjectionInputError(`limit must be an integer from 1 to ${maxItems}`);
   const sorted = [...rows].sort((a, b) => options.sortKey(a).localeCompare(options.sortKey(b)));
   const totalPages = Math.ceil(sorted.length / options.limit);
   const items = sorted.slice((options.page - 1) * options.limit, options.page * options.limit);

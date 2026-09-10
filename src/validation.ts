@@ -74,19 +74,42 @@ export function validateRewardValuationSnapshot(value: unknown): RewardValuation
   };
 }
 
-function validateFxSnapshot(value: unknown, name: string): FxSnapshot {
+export function validateFxSnapshot(value: unknown, name: string): FxSnapshot {
   const item = object(value, name);
-  keys(item, ['id', 'baseCurrency', 'quoteCurrency', 'ratePpm', 'capturedAt', 'maxAgeSeconds', 'provider', 'rateType', 'sourceUrl', 'contentHash', 'cardIdScope', 'issuerScope'], name);
+  keys(item, ['id', 'baseCurrency', 'quoteCurrency', 'ratePpm', 'capturedAt', 'maxAgeSeconds', 'provider', 'rateType', 'sourceUrl', 'contentHash', 'cardIdScope', 'issuerScope', 'conversionOwner', 'effectiveAt', 'confidence'], name);
   const rateType = requiredString(item.rateType, `${name}.rateType`);
   if (!['cash_selling', 'spot_selling', 'mid_market', 'card_scheme'].includes(rateType)) throw new RewardServiceError('INVALID_INPUT', `${name}.rateType is invalid`);
+  const conversionOwner = item.conversionOwner === undefined ? undefined : requiredString(item.conversionOwner, `${name}.conversionOwner`);
+  if (conversionOwner !== undefined && !['card_scheme', 'issuer', 'wallet', 'merchant_dcc', 'unknown'].includes(conversionOwner)) {
+    throw new RewardServiceError('INVALID_INPUT', `${name}.conversionOwner is invalid`);
+  }
+  const confidence = item.confidence === undefined ? undefined : requiredString(item.confidence, `${name}.confidence`);
+  if (confidence !== undefined && !['high', 'medium', 'low'].includes(confidence)) {
+    throw new RewardServiceError('INVALID_INPUT', `${name}.confidence is invalid`);
+  }
   return {
-    id: requiredString(item.id, `${name}.id`, true), baseCurrency: requiredString(item.baseCurrency, `${name}.baseCurrency`, true).toUpperCase(), quoteCurrency: requiredString(item.quoteCurrency, `${name}.quoteCurrency`, true).toUpperCase(), ratePpm: finiteRate(item.ratePpm, `${name}.ratePpm`, 1), capturedAt: iso(item.capturedAt, `${name}.capturedAt`), ...(item.maxAgeSeconds === undefined ? {} : { maxAgeSeconds: safeInt(item.maxAgeSeconds, `${name}.maxAgeSeconds`, 1) }), provider: requiredString(item.provider, `${name}.provider`), rateType: rateType as FxSnapshot['rateType'], ...(item.sourceUrl === undefined ? {} : { sourceUrl: requiredString(item.sourceUrl, `${name}.sourceUrl`) }), ...(item.contentHash === undefined ? {} : { contentHash: requiredString(item.contentHash, `${name}.contentHash`) }), ...(item.cardIdScope === undefined ? {} : { cardIdScope: requiredString(item.cardIdScope, `${name}.cardIdScope`, true) }), ...(item.issuerScope === undefined ? {} : { issuerScope: requiredString(item.issuerScope, `${name}.issuerScope`) }),
+    id: requiredString(item.id, `${name}.id`, true),
+    baseCurrency: requiredString(item.baseCurrency, `${name}.baseCurrency`, true).toUpperCase(),
+    quoteCurrency: requiredString(item.quoteCurrency, `${name}.quoteCurrency`, true).toUpperCase(),
+    ratePpm: finiteRate(item.ratePpm, `${name}.ratePpm`, 1),
+    capturedAt: iso(item.capturedAt, `${name}.capturedAt`),
+    ...(item.maxAgeSeconds === undefined ? {} : { maxAgeSeconds: safeInt(item.maxAgeSeconds, `${name}.maxAgeSeconds`, 1) }),
+    provider: requiredString(item.provider, `${name}.provider`),
+    rateType: rateType as FxSnapshot['rateType'],
+    ...(item.sourceUrl === undefined ? {} : { sourceUrl: requiredString(item.sourceUrl, `${name}.sourceUrl`) }),
+    ...(item.contentHash === undefined ? {} : { contentHash: requiredString(item.contentHash, `${name}.contentHash`) }),
+    ...(item.cardIdScope === undefined ? {} : { cardIdScope: requiredString(item.cardIdScope, `${name}.cardIdScope`, true) }),
+    ...(item.issuerScope === undefined ? {} : { issuerScope: requiredString(item.issuerScope, `${name}.issuerScope`) }),
+    ...(conversionOwner === undefined ? {} : { conversionOwner: conversionOwner as any }),
+    ...(item.effectiveAt === undefined ? {} : { effectiveAt: iso(item.effectiveAt, `${name}.effectiveAt`) }),
+    ...(confidence === undefined ? {} : { confidence: confidence as any }),
   };
 }
+export { validateFxSnapshot as validateFxRateObservation };
 
 export function validatePaymentEvent(value: unknown): PaymentEvent {
   const item = object(value, 'payment event');
-  keys(item, ['id', 'kind', 'amount', 'occurredAt', 'funding', 'cardId', 'routeId', 'channel', 'paymentMethod', 'relations'], 'payment event');
+  keys(item, ['id', 'kind', 'amount', 'occurredAt', 'funding', 'cardId', 'routeId', 'channel', 'paymentMethod', 'relations', 'fx'], 'payment event');
   const kind = requiredString(item.kind, 'payment event.kind');
   if (!['top_up', 'purchase', 'refund', 'reversal', 'reward_issuance', 'reward_redemption'].includes(kind)) throw new RewardServiceError('INVALID_INPUT', 'payment event kind is invalid');
   const funding = object(item.funding, 'payment event funding');
@@ -106,7 +129,19 @@ export function validatePaymentEvent(value: unknown): PaymentEvent {
     if (causedBy !== undefined) relations.caused_by = causedBy;
     if (refunds !== undefined) relations.refunds = refunds;
   }
-  return { id: requiredString(item.id, 'payment event.id', true), kind: kind as PaymentEventKind, amount: validateMoney(item.amount, 'payment event.amount'), occurredAt: iso(item.occurredAt, 'payment event.occurredAt'), funding: fundingValue, ...(item.cardId === undefined ? {} : { cardId: requiredString(item.cardId, 'payment event.cardId', true) }), ...(item.routeId === undefined ? {} : { routeId: requiredString(item.routeId, 'payment event.routeId', true) }), ...(item.channel === undefined ? {} : { channel: requiredString(item.channel, 'payment event.channel') }), ...(item.paymentMethod === undefined ? {} : { paymentMethod: requiredString(item.paymentMethod, 'payment event.paymentMethod') }), ...(relations && Object.keys(relations).length ? { relations } : {}) };
+  return {
+    id: requiredString(item.id, 'payment event.id', true),
+    kind: kind as PaymentEventKind,
+    amount: validateMoney(item.amount, 'payment event.amount'),
+    occurredAt: iso(item.occurredAt, 'payment event.occurredAt'),
+    funding: fundingValue,
+    ...(item.cardId === undefined ? {} : { cardId: requiredString(item.cardId, 'payment event.cardId', true) }),
+    ...(item.routeId === undefined ? {} : { routeId: requiredString(item.routeId, 'payment event.routeId', true) }),
+    ...(item.channel === undefined ? {} : { channel: requiredString(item.channel, 'payment event.channel') }),
+    ...(item.paymentMethod === undefined ? {} : { paymentMethod: requiredString(item.paymentMethod, 'payment event.paymentMethod') }),
+    ...(relations && Object.keys(relations).length ? { relations } : {}),
+    ...(item.fx === undefined ? {} : { fx: validateFxSnapshot(item.fx, 'payment event.fx') }),
+  };
 }
 
 export function validateEventRewardCandidate(value: unknown): PaymentEventRewardCandidateInput {
@@ -430,24 +465,7 @@ export function validateTransaction(value: unknown): TransactionTuple {
   if (!['purchase', 'refund'].includes(kind) || !['planned', 'actual'].includes(mode)) throw new RewardServiceError('INVALID_INPUT', 'transaction kind or mode is invalid');
   let fx: FxSnapshot | undefined;
   if (item.fx !== undefined) {
-    const fxItem = object(item.fx, 'transaction.fx');
-    keys(fxItem, ['id', 'baseCurrency', 'quoteCurrency', 'ratePpm', 'capturedAt', 'maxAgeSeconds', 'provider', 'rateType', 'sourceUrl', 'contentHash', 'cardIdScope', 'issuerScope'], 'transaction.fx');
-    const rateType = requiredString(fxItem.rateType, 'transaction.fx.rateType');
-    if (!['cash_selling', 'spot_selling', 'mid_market', 'card_scheme'].includes(rateType)) throw new RewardServiceError('INVALID_INPUT', 'transaction.fx.rateType is invalid');
-    fx = {
-      id: requiredString(fxItem.id, 'transaction.fx.id', true),
-      baseCurrency: requiredString(fxItem.baseCurrency, 'transaction.fx.baseCurrency', true).toUpperCase(),
-      quoteCurrency: requiredString(fxItem.quoteCurrency, 'transaction.fx.quoteCurrency', true).toUpperCase(),
-      ratePpm: finiteRate(fxItem.ratePpm, 'transaction.fx.ratePpm', 1),
-      capturedAt: requiredString(fxItem.capturedAt, 'transaction.fx.capturedAt'),
-      ...(fxItem.maxAgeSeconds === undefined ? {} : { maxAgeSeconds: safeInt(fxItem.maxAgeSeconds, 'transaction.fx.maxAgeSeconds', 1) }),
-      provider: requiredString(fxItem.provider, 'transaction.fx.provider'),
-      rateType: rateType as FxSnapshot['rateType'],
-      ...(optionalString(fxItem.sourceUrl, 'transaction.fx.sourceUrl') ? { sourceUrl: optionalString(fxItem.sourceUrl, 'transaction.fx.sourceUrl') } : {}),
-      ...(optionalString(fxItem.contentHash, 'transaction.fx.contentHash') ? { contentHash: optionalString(fxItem.contentHash, 'transaction.fx.contentHash') } : {}),
-      ...(optionalString(fxItem.cardIdScope, 'transaction.fx.cardIdScope', true) ? { cardIdScope: optionalString(fxItem.cardIdScope, 'transaction.fx.cardIdScope', true) } : {}),
-      ...(optionalString(fxItem.issuerScope, 'transaction.fx.issuerScope') ? { issuerScope: optionalString(fxItem.issuerScope, 'transaction.fx.issuerScope') } : {}),
-    };
+    fx = validateFxSnapshot(item.fx, 'transaction.fx');
   }
   const optional = (key: string, id = false) => optionalString(item[key], `transaction.${key}`, id);
   const occurredAt = requiredString(item.occurredAt, 'transaction.occurredAt');

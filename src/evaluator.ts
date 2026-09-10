@@ -21,6 +21,7 @@ import type {
   PaymentEventRewardDecision,
   EventRewardLedgerRecord,
   EventRewardReversalRecord,
+  AppliedFxRate,
 } from './types.js';
 import { RewardServiceError } from './errors.js';
 import type { LedgerStore } from './store.js';
@@ -152,7 +153,7 @@ export class EventRewardLedger {
     });
   }
 
-  record(candidate: PaymentEventRewardCandidate | undefined, event: PaymentEvent, idempotencyKey: string): EventRewardLedgerRecord {
+  record(candidate: PaymentEventRewardCandidate | undefined, event: PaymentEvent, idempotencyKey: string, appliedFx?: AppliedFxRate | undefined): EventRewardLedgerRecord {
     if (!idempotencyKey.trim()) throw new RewardServiceError('IDEMPOTENCY_REQUIRED', 'event reward idempotencyKey is required');
     if (!candidate) throw new RewardServiceError('INELIGIBLE_EVENT_REWARD', 'event reward candidate is not eligible');
     if (candidate.eventId !== event.id) throw new RewardServiceError('INVALID_INPUT', 'candidate eventId does not match event');
@@ -199,7 +200,7 @@ export class EventRewardLedger {
       amountMinor = Math.min(amountMinor, remaining);
       capUsage = { poolId: cap.id, periodKey, consumedAmount: amountMinor };
     }
-    const desired: EventRewardLedgerRecord = { idempotencyKey, ownerUser: this.ownerUser, eventId: candidate.eventId, eventAmount: event.amount, ruleId: candidate.ruleId, ruleVersion: candidate.ruleVersion, evidenceId: candidate.evidenceId, sponsor: candidate.sponsor, benefitGroup: candidate.benefitGroup, reward: { amountMinor, currency }, rewardSpecFingerprint, ...(capUsage ? { capUsage } : {}) };
+    const desired: EventRewardLedgerRecord = { idempotencyKey, ownerUser: this.ownerUser, eventId: candidate.eventId, eventAmount: event.amount, ruleId: candidate.ruleId, ruleVersion: candidate.ruleVersion, evidenceId: candidate.evidenceId, sponsor: candidate.sponsor, benefitGroup: candidate.benefitGroup, reward: { amountMinor, currency }, rewardSpecFingerprint, ...(capUsage ? { capUsage } : {}), ...(appliedFx ? { appliedFx } : {}) };
     this.records.set(idempotencyKey, desired);
     if (capUsage) this.capUsage.set(`${capUsage.poolId}|${capUsage.periodKey}`, (this.capUsage.get(`${capUsage.poolId}|${capUsage.periodKey}`) ?? 0) + capUsage.consumedAmount);
     this.persist();
