@@ -857,7 +857,7 @@ export function validateToolArgs(name: string, value: unknown): Record<string, u
 
 export function validateRecommendationIntent(value: unknown): RecommendationIntent {
   const input = object(value, 'recommend intent');
-  keys(input, ['merchant', 'amount', 'country', 'market', 'channel', 'paymentMethod', 'occurredAt', 'cardIds', 'routeIds', 'limit', 'cursor', 'fx', 'fxObservation', 'routeFacts'], 'recommend intent');
+  keys(input, ['merchant', 'amount', 'country', 'market', 'channel', 'paymentMethod', 'occurredAt', 'cardIds', 'routeIds', 'limit', 'page', 'cursor', 'fx', 'fxObservation', 'routeFacts'], 'recommend intent');
   let merchant: RecommendationIntent['merchant'];
   if (typeof input.merchant === 'string') merchant = requiredString(input.merchant, 'merchant');
   else {
@@ -870,8 +870,9 @@ export function validateRecommendationIntent(value: unknown): RecommendationInte
   }
   const limit = input.limit === undefined ? 10 : safeInt(input.limit, 'limit', 1);
   if (limit > 128) throw new RewardServiceError('INVALID_INPUT', 'limit must be 1..128');
+  const page = input.page === undefined ? 1 : safeInt(input.page, 'page', 1);
   return {
-    merchant, limit,
+    merchant, limit, page,
     ...(input.amount === undefined ? {} : { amount: validateMoney(input.amount, 'amount') }),
     ...(input.country === undefined ? {} : { country: requiredString(input.country, 'country') }),
     ...(input.market === undefined ? {} : { market: requiredString(input.market, 'market') }),

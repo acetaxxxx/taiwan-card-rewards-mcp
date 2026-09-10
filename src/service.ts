@@ -766,6 +766,8 @@ export class RewardService {
     const market = input.market ?? details.market;
     const state = this.store.read();
     let cursorOffset = 0;
+    const pageSize = input.limit!;
+    const requestedPage = input.page ?? 1;
     let cursorEvaluatedAt: string | undefined;
     let cursorVersion: string | undefined;
     if (input.cursor !== undefined) {
@@ -779,11 +781,13 @@ export class RewardService {
       } catch {
         throw new RewardServiceError('INVALID_INPUT', 'cursor is invalid; restart the recommendation');
       }
+    } else {
+      cursorOffset = (requestedPage - 1) * pageSize;
     }
     const evaluatedAt = input.occurredAt ?? cursorEvaluatedAt ?? nowIso();
     const resultVersion = crypto.createHash('sha256').update(JSON.stringify({
       state,
-      intent: { ...input, cursor: undefined },
+      intent: { ...input, cursor: undefined, page: undefined },
       evaluatedAt,
     })).digest('hex').slice(0, 16);
     if (cursorVersion !== undefined && cursorVersion !== resultVersion) throw new RewardServiceError('INVALID_INPUT', 'recommendation resultVersion changed; restart the recommendation');
@@ -1071,15 +1075,15 @@ export class RewardService {
     candidates.sort((a, b) => Number(b.status === 'ready') - Number(a.status === 'ready') ||
       (a.reward?.currency === b.reward?.currency ? (b.reward?.amountMinor ?? 0) - (a.reward?.amountMinor ?? 0) : 0) ||
       a.id.localeCompare(b.id));
-    const pageSize = input.limit!;
     const page = candidates.slice(cursorOffset, cursorOffset + pageSize);
     const hasMore = cursorOffset + page.length < candidates.length;
     const nextCursor = hasMore ? Buffer.from(JSON.stringify({ v: 1, offset: cursorOffset + page.length, evaluatedAt, resultVersion })).toString('base64url') : undefined;
+    const responsePage = Math.floor(cursorOffset / pageSize) + 1;
     return {
       status, candidates: page, requiredActions: actions, evaluatedAt,
       ...(fxResolutionRequest ? { fxResolutionRequest } : {}),
       ...(fxResolutionRequests.length ? { fxResolutionRequests } : {}),
-      pageSize, hasMore, ...(nextCursor ? { nextCursor } : {}), resultVersion,
+      pageSize, page: responsePage, hasMore, ...(nextCursor ? { nextCursor } : {}), resultVersion,
       coverage: { scope: 'registered cards and payment routes; route acceptance requires evidence',
         discoveredCount: candidates.length, bounded: pathTruncated, explorationComplete: !pathTruncated, ...(!pathTruncated ? { total: candidates.length } : {}),
         notes: ['not a market-wide catalog', 'planned calls do not consume caps', ...(pathTruncated ? ['path exploration reached a declared resource bound'] : ['all currently discovered candidates are available through continuation'])] },

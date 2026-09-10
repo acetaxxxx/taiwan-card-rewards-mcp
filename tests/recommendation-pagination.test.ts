@@ -88,4 +88,24 @@ describe('bounded recommendation pagination', () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  it('supports stable limit plus page pagination as the primary continuation contract', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'card-rewards-intent-page-'));
+    const store = new FileStore({ dataDir: dir });
+    try {
+      const service = new RewardService(store, 'u1');
+      for (let index = 0; index < 21; index += 1) service.registerCard({ id: `page-card-${index}`, issuer: 'Bank', productName: `Card ${index}` });
+      const first = service.recommendIntent({ merchant: 'Shop', amount: { amountMinor: 100, currency: 'TWD' }, occurredAt: '2026-09-10T00:00:00Z', limit: 10, page: 1 });
+      const second = service.recommendIntent({ merchant: 'Shop', amount: { amountMinor: 100, currency: 'TWD' }, occurredAt: '2026-09-10T00:00:00Z', limit: 10, page: 2 });
+      expect(first.page).toBe(1);
+      expect(second.page).toBe(2);
+      expect(first.candidates).toHaveLength(10);
+      expect(second.candidates).toHaveLength(10);
+      expect(second.candidates.every((candidate) => !first.candidates.some((firstCandidate) => firstCandidate.id === candidate.id))).toBe(true);
+      expect(second.hasMore).toBe(true);
+    } finally {
+      store.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });

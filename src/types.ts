@@ -665,6 +665,7 @@ export interface RecommendationIntent {
   cardIds?: readonly string[];
   routeIds?: readonly string[];
   limit?: number;
+  page?: number;
   cursor?: string;
   fx?: FxSnapshot;
   /** Agent-supplied public reference observation, separate from policy/path FX. */
@@ -711,6 +712,7 @@ export interface RecommendationIntentResult {
   fxResolutionRequest?: FxResolutionRequest;
   fxResolutionRequests?: readonly FxResolutionRequest[];
   pageSize: number;
+  page: number;
   hasMore: boolean;
   nextCursor?: string;
   resultVersion: string;
