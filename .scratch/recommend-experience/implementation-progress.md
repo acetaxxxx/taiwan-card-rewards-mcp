@@ -11,7 +11,7 @@ Implementation changes are committed incrementally on `enhance-user-exp`; the br
 | 03 | In progress | FX policy typed ingestion/evidence gate plus candidate-scoped `research_fx_policy` actions; policy completeness/conflict validation and ingestion hooks remain |
 | 04 | In progress | Scoped FX observation persistence/reuse, direct-card isolation, exact edge-over-route selection, and policy rate compatibility are covered; full provider/source selector matching remains |
 | 05 | Implemented and verified | Public reference/stale/unavailable output, policy freshness windows, fallback source, route FX status, merchant-first net-spend projection, research fields for estimate windows, and multi-route fee/FX ranking are covered by targeted and full tests |
-| 06 | In progress | Stable intent cursor and canonical `limit + page` pagination, 10-item pages, resultVersion and coverage semantics are covered; deeper rule-set continuation remains |
+| 06 | Implemented and verified | Stable intent cursor and canonical `limit + page` pagination, resultVersion-bound restart, 10-item pages, route rule-set coverage, actions and coverage semantics are covered by targeted and full tests |
 | 07 | In progress | Separate typed capability persistence, explicit transition requirements, ephemeral wallet/account route generation, capability-scoped binding actions, and ADR 0009 ownership/version strategy are covered; full candidate coverage remains |
 | 08 | Pending 05, 06, 07 | Final Agent workflow and public contract validation |
 
