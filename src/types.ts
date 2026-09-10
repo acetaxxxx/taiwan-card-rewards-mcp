@@ -670,6 +670,7 @@ export interface RecommendationIntent {
   limit?: number;
   page?: number;
   cursor?: string;
+  resultVersion?: string;
   fx?: FxSnapshot;
   /** Agent-supplied public reference observation, separate from policy/path FX. */
   fxObservation?: FxRateObservation;

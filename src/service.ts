@@ -787,10 +787,11 @@ export class RewardService {
     const evaluatedAt = input.occurredAt ?? cursorEvaluatedAt ?? nowIso();
     const resultVersion = crypto.createHash('sha256').update(JSON.stringify({
       state,
-      intent: { ...input, cursor: undefined, page: undefined },
+      intent: { ...input, cursor: undefined, page: undefined, resultVersion: undefined },
       evaluatedAt,
     })).digest('hex').slice(0, 16);
     if (cursorVersion !== undefined && cursorVersion !== resultVersion) throw new RewardServiceError('INVALID_INPUT', 'recommendation resultVersion changed; restart the recommendation');
+    if (input.resultVersion !== undefined && input.resultVersion !== resultVersion) throw new RewardServiceError('INVALID_INPUT', 'recommendation resultVersion changed; restart the recommendation');
     const resolution = this.resolveMerchant(rawMerchant, {
       ...(country ? { country } : {}), ...(market ? { market } : {}),
       ...(input.channel ? { channel: input.channel } : {}),

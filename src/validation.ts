@@ -862,7 +862,7 @@ export function validateToolArgs(name: string, value: unknown): Record<string, u
 
 export function validateRecommendationIntent(value: unknown): RecommendationIntent {
   const input = object(value, 'recommend intent');
-  keys(input, ['merchant', 'amount', 'country', 'market', 'channel', 'paymentMethod', 'occurredAt', 'cardIds', 'routeIds', 'limit', 'page', 'cursor', 'fx', 'fxObservation', 'routeFacts'], 'recommend intent');
+  keys(input, ['merchant', 'amount', 'country', 'market', 'channel', 'paymentMethod', 'occurredAt', 'cardIds', 'routeIds', 'limit', 'page', 'cursor', 'resultVersion', 'fx', 'fxObservation', 'routeFacts'], 'recommend intent');
   let merchant: RecommendationIntent['merchant'];
   if (typeof input.merchant === 'string') merchant = requiredString(input.merchant, 'merchant');
   else {
@@ -887,6 +887,7 @@ export function validateRecommendationIntent(value: unknown): RecommendationInte
     ...(input.cardIds === undefined ? {} : { cardIds: list(input.cardIds, 'cardIds')! }),
     ...(input.routeIds === undefined ? {} : { routeIds: list(input.routeIds, 'routeIds')! }),
     ...(input.cursor === undefined ? {} : { cursor: requiredString(input.cursor, 'cursor') }),
+    ...(input.resultVersion === undefined ? {} : { resultVersion: requiredString(input.resultVersion, 'resultVersion') }),
     ...(input.fx === undefined ? {} : { fx: validateFxSnapshot(input.fx, 'recommend fx') }),
     ...(input.fxObservation === undefined ? {} : { fxObservation: validateFxSnapshot(input.fxObservation, 'recommend fxObservation') }),
     ...(input.routeFacts === undefined ? {} : { routeFacts: (() => {

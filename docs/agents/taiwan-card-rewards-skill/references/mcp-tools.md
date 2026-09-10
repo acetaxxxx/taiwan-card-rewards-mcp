@@ -43,7 +43,8 @@ candidate envelope，並帶狀態、required actions 與 bounded coverage。這�
 
 跨路徑報價可暫時以 `routeFacts: [{"routeId":"route_illustrative","edgeId":"edge_illustrative","fx":{...}}]` 提供；同一 route/edge scope 不可重複。需要重用時使用 `upsert_fx_observation`，並保留 `sourceKind` 與 route/edge scope。
 
-Intent recommendation 預設每頁 10 筆；一般流程使用 `limit` + 1-based `page` 與相同
+Intent recommendation 預設每頁 10 筆；一般流程使用 `limit` + 1-based `page`、送回的
+`resultVersion` 與相同
 `resultVersion` 續查，`cursor/nextCursor` 僅保留給 legacy。只有 `coverage.explorationComplete` 為 true 時，
 `coverage.total` 才是完整總數。
 

@@ -68,7 +68,8 @@ source failure. Never invent a source, rate, field, or completion.
 ## Pagination recovery
 
 When `hasMore` is true, request the next 1-based `page` with the same intent,
-`limit`, and `occurredAt`. Keep `resultVersion` stable across pages. If the
+`limit`, `occurredAt`, and the returned `resultVersion`. Keep `resultVersion`
+stable across pages. If the
 result version changes, restart at page 1 and report that the underlying user
 data changed. `nextCursor` may be used only by legacy integrations.
 

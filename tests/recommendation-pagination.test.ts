@@ -103,6 +103,8 @@ describe('bounded recommendation pagination', () => {
       expect(second.candidates).toHaveLength(10);
       expect(second.candidates.every((candidate) => !first.candidates.some((firstCandidate) => firstCandidate.id === candidate.id))).toBe(true);
       expect(second.hasMore).toBe(true);
+      service.registerCard({ id: 'page-card-new', issuer: 'Bank', productName: 'New Card' });
+      expect(() => service.recommendIntent({ merchant: 'Shop', amount: { amountMinor: 100, currency: 'TWD' }, occurredAt: '2026-09-10T00:00:00Z', limit: 10, page: 2, resultVersion: first.resultVersion })).toThrow(/resultVersion changed/);
     } finally {
       store.close();
       rmSync(dir, { recursive: true, force: true });
