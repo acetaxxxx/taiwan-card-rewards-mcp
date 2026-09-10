@@ -62,6 +62,7 @@ export interface PaymentCapabilityRecord {
   market?: string;
   channel?: string;
   fundingKinds: readonly ('credit_card' | 'account' | 'cash')[];
+  transitions: readonly PaymentPathTransition[];
   sourceUrl?: string;
   evidenceIds: readonly string[];
   observedAt: string;

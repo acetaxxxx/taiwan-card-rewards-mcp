@@ -856,6 +856,8 @@ export class RewardService {
         if (capability.fundingKinds.includes('account')) for (const account of state.paymentAccounts.filter((candidate) => candidate.ownerUser === this.metadataUser && candidate.status === 'active')) fundingOptions.push({ kind: 'account', subtype: account.kind, accountId: account.id });
         for (const funding of fundingOptions) {
           if (input.routeIds !== undefined) continue;
+          const requiredTransitions = funding.kind === 'credit_card' ? ['wallet_top_up', 'wallet_debit', 'merchant_settlement'] as const : funding.kind === 'account' ? ['account_debit', 'wallet_debit', 'merchant_settlement'] as const : [];
+          if (!requiredTransitions.every((transition) => capability.transitions.includes(transition))) continue;
           const seed = funding.kind === 'credit_card' ? funding.cardId! : funding.kind === 'account' ? funding.accountId! : funding.kind;
           const providerNode = { id: 'service', kind: 'payment_service' as const, displayName: capability.consumerAppId ?? capability.providerId };
           const acceptanceNode = { id: 'acceptance', kind: 'acceptance_network' as const, displayName: capability.acceptanceProviderId ?? 'acceptance network' };
