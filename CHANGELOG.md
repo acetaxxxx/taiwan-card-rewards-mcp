@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.13.1
+
+- Preserve the `enrolledAt` timestamp written for campaign registrations when
+  schema v2 state is validated and reloaded, preventing valid ledgers from
+  being rejected as corrupt after an MCP restart.
+
 ## 0.13.0
 
 - Added a schema-directed MCP input adapter that accepts snake_case and

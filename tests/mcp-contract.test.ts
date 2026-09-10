@@ -224,7 +224,7 @@ describe("MCP Contract and Agent Boundary", () => {
       expect(initRes.result).toBeDefined();
       expect(initRes.result.protocolVersion).toBe("2024-11-05");
       expect(initRes.result.serverInfo.name).toBe("taiwan_card_rewards_mcp");
-      expect(initRes.result.serverInfo.version).toBe("0.13.0");
+      expect(initRes.result.serverInfo.version).toBe("0.13.1");
       expect(initRes.result.instructions).toContain("single-user durable ledger");
       expect(initRes.result.instructions).toContain("fail-closed");
 
