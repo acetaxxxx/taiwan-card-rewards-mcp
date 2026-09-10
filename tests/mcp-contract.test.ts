@@ -4,7 +4,7 @@ import { join, resolve } from "node:path";
 import { spawn, type ChildProcess } from "node:child_process";
 import * as readline from "node:readline";
 import { describe, expect, it } from "vitest";
-import { mcpTools, failClosedErrors } from "../src/index.js";
+import { mcpTools, failClosedErrors, normalizeMcpToolArguments } from "../src/index.js";
 
 interface JsonRpcResponse {
   jsonrpc: string;
@@ -121,6 +121,23 @@ describe("MCP Contract and Agent Boundary", () => {
     expect(edge.properties.direction.enum).toEqual(["inbound", "outbound"]);
     expect(edge.properties.fromMarket.type).toBe("string");
     expect(edge.properties.toMarket.type).toBe("string");
+    expect(upsertRoute.properties.route.properties.authority.enum).toEqual(["issuer", "network", "wallet", "merchant", "secondary", "community", "user"]);
+  });
+  it("normalizes every declared snake_case property recursively without accepting unknown fields", () => {
+    const normalized = normalizeMcpToolArguments("upsert_payment_route", {
+      route: {
+        idempotency_key: "route-key",
+        observed_at: "2026-09-10T16:05:00Z",
+        funding: { kind: "credit_card", card_id: "card-1" },
+        layers: [{ kind: "payment_provider", provider_id: "payplus", display_name: "Pay+" }],
+        nodes: [{ id: "n-card", kind: "funding_source", display_name: "Card" }],
+        edges: [{ edge_id: "edge", from_node_id: "n-card", to_node_id: "n-card", transition: "card_authorization", evidence_ids: ["ev-1"] }],
+      },
+    }) as any;
+    expect(normalized.route).toEqual(expect.objectContaining({ idempotencyKey: "route-key", observedAt: "2026-09-10T16:05:00Z", funding: { kind: "credit_card", cardId: "card-1" } }));
+    expect(normalized.route.edges[0]).toEqual(expect.objectContaining({ edgeId: "edge", fromNodeId: "n-card", toNodeId: "n-card", evidenceIds: ["ev-1"] }));
+    expect(() => normalizeMcpToolArguments("register_card", { card: { product_name: "Card", productName: "Duplicate" } })).toThrow("must not contain both product_name and productName");
+    expect(normalizeMcpToolArguments("register_card", { card: { owner_user: "untrusted" } })).toEqual({ card: { ownerUser: "untrusted" } });
   });
   it("allows the documented bounded list projection limit of 50", async () => {
     const dir = mkdtempSync(join(tmpdir(), "mcp-list-projection-"));
@@ -161,6 +178,43 @@ describe("MCP Contract and Agent Boundary", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+  it("normalizes documented snake_case route aliases at the MCP boundary", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "mcp-route-aliases-"));
+    const client = new McpProcessClient(dir);
+    try {
+      const response = await client.send({
+        id: "snake-route",
+        method: "tools/call",
+        params: {
+          name: "upsert_payment_route",
+          arguments: {
+            route: {
+              idempotency_key: "snake-route-key",
+              status: "active",
+              observed_at: "2026-09-10T16:05:00Z",
+              source_url: "https://bank.example/faq",
+              authority: "issuer",
+              confidence: "high",
+              evidence_ids: ["ev-official"],
+              confirmation: { confirmed_at: "2026-09-10T16:05:00Z", confirmed_by: "user" },
+              funding: { kind: "credit_card", card_id: "card-1" },
+              layers: [{ kind: "payment_provider", provider_id: "payplus", display_name: "Pay+" }],
+              nodes: [
+                { id: "n-card", kind: "funding_source", display_name: "Card" },
+                { id: "n-service", kind: "payment_service", display_name: "Pay+" },
+              ],
+              edges: [{ edge_id: "e-card-service", from_node_id: "n-card", to_node_id: "n-service", transition: "card_authorization", evidence_ids: ["ev-official"], direction: "outbound" }],
+            },
+          },
+        },
+      });
+      expect(response.error).toBeUndefined();
+      expect(response.result.structuredContent).toEqual(expect.objectContaining({ idempotencyKey: "snake-route-key", sourceUrl: "https://bank.example/faq", funding: { kind: "credit_card", cardId: "card-1" }, confirmation: { confirmedAt: "2026-09-10T16:05:00Z", confirmedBy: "user" } }));
+    } finally {
+      await client.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
   it("exposes all approved MCP tools with valid schemas in tools/list", async () => {
     const dir = mkdtempSync(join(tmpdir(), "mcp-contract-list-"));
     const client = new McpProcessClient(dir);
@@ -170,7 +224,7 @@ describe("MCP Contract and Agent Boundary", () => {
       expect(initRes.result).toBeDefined();
       expect(initRes.result.protocolVersion).toBe("2024-11-05");
       expect(initRes.result.serverInfo.name).toBe("taiwan_card_rewards_mcp");
-      expect(initRes.result.serverInfo.version).toBe("0.12.0");
+      expect(initRes.result.serverInfo.version).toBe("0.13.0");
       expect(initRes.result.instructions).toContain("single-user durable ledger");
       expect(initRes.result.instructions).toContain("fail-closed");
 

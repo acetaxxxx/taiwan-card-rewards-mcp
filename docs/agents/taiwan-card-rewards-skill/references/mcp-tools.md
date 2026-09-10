@@ -94,6 +94,8 @@ Response 中每個 candidate 的 `fxEstimate.status` 可能是 `estimated`（有
 
 `upsert_payment_route` 接受 `route`，含 `layers`、`funding`、`observedAt`、`idempotencyKey`；要參與路徑搜尋還需要 `nodes` 和 `edges`。node 的 kind 是 `funding_source`、`wallet_balance`、`payment_service`、`acceptance_network`、`merchant` 之一。edge 的 transition 是 `card_authorization`、`account_debit`、`wallet_top_up`、`wallet_debit`、`service_to_acceptance`、`merchant_settlement`、`direct_settlement`、`split_tender` 之一，且必須指向已存在的 node。edge 的 `direction` 可為 `inbound` 或 `outbound`，須依有證據的資金流向填寫；不可自行反轉或推測。`evidenceIds` 必須非空但直接信任 Agent 自帶的內容，不需要另外呼叫任何 evidence tool 先行提交。`provenance: 'model_fixture'` 只給測試使用，production 會拒絕。
 
+新 payload 的正規 property name 以 `tools/list` schema 明列的 **camelCase** 為準（例如 `idempotencyKey`、`observedAt`、`edgeId`）。MCP adapter 在每個工具的入口、所有巢狀 object/array 一律接受等價的 snake_case（例如 `idempotency_key`、`observed_at`、`edge_id`）並轉為 internal camelCase；camelCase 也持續支援。不可在同一個 object 同時傳兩種拼法，未知欄位（包含未公開的 `ownerUser`）仍會 fail closed，絕不因此放寬 tenancy 或敏感欄位限制。`id` 是 MCP 產生的 durable route identity，呼叫端只提供穩定的 `idempotencyKey`。route 的 `authority` 必須是 `issuer`、`network`、`wallet`、`merchant`、`secondary`、`community` 或 `user`。
+
 `upsert_payment_capability` 同樣直接信任 Agent 提供的 `evidenceIds`（至少一筆），一旦 `status: 'active'` 就可能被 `recommend` 用來自動產生 planned route（例如「持有信用卡 + 錢包支援」→ 自動組出信用卡儲值進錢包再付款的路徑）。
 
 路徑與能力一旦被 `recommend` 使用，若使用者明確表示該路徑/能力不可用，用相同的 `upsert_payment_route`／未來的等效呼叫把 `status` 改成 `failed`（route）即可，不需要撤銷任何 evidence 紀錄。

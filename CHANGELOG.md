@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.13.0
+
+- Added a schema-directed MCP input adapter that accepts snake_case and
+  camelCase recursively at every tool boundary, then validates the canonical
+  camelCase model. Unknown, sensitive, and tenant-scoped fields still fail
+  closed; duplicate snake/camel spellings are rejected deterministically.
+- Kept `tools/list` as the unambiguous camelCase contract and made payment
+  route `authority` enumerate its validator-approved values.
+
 ## 0.12.0
 
 - Reduced the public MCP surface from 25 to 19 tools. Removed `upsert_fx_policy`,

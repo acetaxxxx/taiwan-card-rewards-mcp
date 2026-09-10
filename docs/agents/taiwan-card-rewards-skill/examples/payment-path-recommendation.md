@@ -64,7 +64,7 @@ confirmation、source URL 與 accepted official evidence。不能把兩種 fundi
     "funding": { "kind": "account", "subtype": "linked_bank_account", "accountId": "bank_illustrative" },
     "observedAt": "2026-09-06T07:00:00Z",
     "sourceUrl": "https://official.example.invalid/route-terms",
-    "authority": "official-provider",
+    "authority": "issuer",
     "confidence": "high",
     "evidenceIds": ["ev_official_illustrative"],
     "confirmation": { "confirmedAt": "2026-09-06T07:05:00Z", "confirmedBy": "user" },

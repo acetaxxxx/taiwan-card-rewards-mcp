@@ -1,3 +1,4 @@
+import { RewardServiceError } from './errors.js';
 import type { McpToolContract } from './types.js';
 
 /** Instructions surfaced to MCP hosts so the user-facing agent knows the safe workflow. */
@@ -10,7 +11,7 @@ export const mcpInstructions = [
   'Use recommend for planned evaluation against registered cards and routes; use calculate_reward to verify a single rule before persisting it or to show hypothetical math for an unconfirmed candidate offer. Planned calls do not consume caps.',
   'Call recommend directly even when facts may be missing, stale, or conflicting; use consistently evidenced payment routes by default, ask the user only for conflicts or ambiguity, and mark a route failed when the user says it is unavailable. Its candidates cover both direct card charges and multi-hop payment paths in one ranked list. Follow candidate-scoped requiredActions and retry only after obtaining new facts or evidence.',
   'Intent recommendations default to page size 10. Use limit plus 1-based page for normal continuation; legacy cursor/nextCursor remains supported. Keep the same intent and resultVersion; discoveredCount is not a final total until explorationComplete is true.',
-  'Use record_transaction with a stable idempotencyKey for actual purchases and linked refunds. Never send PAN, CVV, OTP, passwords, tokens, or user_id.',
+  'Use record_transaction with a stable idempotencyKey for actual purchases and linked refunds. Input property names are camelCase as shown in each tool schema; the MCP adapter also accepts equivalent snake_case names. Never send PAN, CVV, OTP, passwords, tokens, or user_id.',
   'Use register_payment_account to onboard a confirmed wallet or linked bank account; store only provider identity and evidence, never account numbers or credentials. Use list_payment_accounts before building payment routes.',
   'For event-scoped rewards, use record_event_reward with exactly one event-local rule or explicit funded_by chain; the server recomputes eligibility for the authenticated user. Use reverse_event_reward with exactly one refund relation. Unknown or needs_review events fail closed.',
   'Treat unknown, stale, and needs_review as fail-closed: ask for missing facts or confirmation; never guess or convert them to zero reward.',
@@ -36,7 +37,7 @@ const route = closed({ kind: { type: 'string', enum: ['direct_card', 'wallet', '
 const routeContext = closed({ merchantId: string, acceptanceProviderId: string, consumerAppId: string, walletProviderId: string, interoperabilitySchemeId: string, paymentMethod: string, intermediateProviderId: string, cardNetwork: string, issuer: string, fundingSource: string, fundingSubtype: { type: 'string', enum: ['linked_bank_account', 'wallet_balance', 'foreign_currency_account'] }, transactionCurrency: string, settlementCurrency: string, billingCurrency: string, conversionOwner: { type: 'string', enum: ['merchant', 'wallet', 'payment_provider', 'card_network', 'issuer', 'bank', 'acquirer', 'unknown'] }, rateType: { type: 'string', enum: ['cash_selling', 'spot_selling', 'mid_market', 'card_scheme'] }, conversionTiming: { type: 'string', enum: ['transaction', 'clearing', 'settlement', 'posting'] }, foreignTransactionFee: money, markup: money, serviceFee: money, dcc: { type: 'boolean' } }, ['transactionCurrency']);
 const paymentRouteNode = closed({ id: string, kind: { type: 'string', enum: ['funding_source', 'wallet_balance', 'payment_service', 'acceptance_network', 'merchant'] }, displayName: string }, ['id', 'kind', 'displayName']);
 const paymentRouteEdge = closed({ edgeId: string, fromNodeId: string, toNodeId: string, transition: { type: 'string', enum: ['card_authorization', 'account_debit', 'wallet_top_up', 'wallet_debit', 'service_to_acceptance', 'merchant_settlement', 'direct_settlement', 'split_tender'] }, evidenceIds: { type: 'array', items: string, maxItems: 64 }, provenance: { type: 'string', enum: ['official', 'model_fixture'] }, direction: { type: 'string', enum: ['inbound', 'outbound'] }, fromMarket: string, toMarket: string, market: string, currency: string, validFrom: date, validTo: date, fee: money, markup: money, foreignTransactionFee: money, fx, dcc: closed({ selected: { type: 'boolean' }, fee: money }, ['selected']) }, ['edgeId', 'fromNodeId', 'toNodeId', 'transition', 'evidenceIds']);
-const paymentRoute = closed({ id: string, status: { type: 'string', enum: ['candidate', 'active', 'stale', 'conflict', 'needs_review', 'failed'] }, layers: { type: 'array', items: closed({ kind: { type: 'string', enum: ['merchant_loyalty', 'merchant_acceptance', 'consumer_app', 'payment_provider', 'wallet', 'interoperability_scheme', 'intermediate_provider', 'card_network', 'card_issuer'] }, providerId: string, appId: string, paymentMethod: string, displayName: string, evidenceIds: { type: 'array', items: string, maxItems: 32 } }) }, funding: closed({ kind: { type: 'string', enum: ['credit_card', 'account', 'cash'] }, cardId: string, accountId: string, subtype: { type: 'string', enum: ['linked_bank_account', 'wallet_balance', 'foreign_currency_account'] } }, ['kind']), sourceUrl: string, sourceSnapshotId: string, contentHash: string, observedAt: date, validFrom: date, validTo: date, authority: string, confidence: { type: 'string', enum: ['high', 'medium', 'low'] }, confirmation: closed({ confirmedAt: date, confirmedBy: string }, ['confirmedAt', 'confirmedBy']), failure: closed({ failedAt: date, failedBy: string, reason: string }, ['failedAt', 'failedBy', 'reason']), evidenceIds: { type: 'array', items: string, maxItems: 64 }, nodes: { type: 'array', items: paymentRouteNode, maxItems: 128 }, edges: { type: 'array', items: paymentRouteEdge, maxItems: 256 }, idempotencyKey: string }, ['layers', 'funding', 'observedAt', 'idempotencyKey']);
+const paymentRoute = closed({ id: string, status: { type: 'string', enum: ['candidate', 'active', 'stale', 'conflict', 'needs_review', 'failed'] }, layers: { type: 'array', items: closed({ kind: { type: 'string', enum: ['merchant_loyalty', 'merchant_acceptance', 'consumer_app', 'payment_provider', 'wallet', 'interoperability_scheme', 'intermediate_provider', 'card_network', 'card_issuer'] }, providerId: string, appId: string, paymentMethod: string, displayName: string, evidenceIds: { type: 'array', items: string, maxItems: 32 } }) }, funding: closed({ kind: { type: 'string', enum: ['credit_card', 'account', 'cash'] }, cardId: string, accountId: string, subtype: { type: 'string', enum: ['linked_bank_account', 'wallet_balance', 'foreign_currency_account'] } }, ['kind']), sourceUrl: string, sourceSnapshotId: string, contentHash: string, observedAt: date, validFrom: date, validTo: date, authority: { type: 'string', enum: ['issuer', 'network', 'wallet', 'merchant', 'secondary', 'community', 'user'] }, confidence: { type: 'string', enum: ['high', 'medium', 'low'] }, confirmation: closed({ confirmedAt: date, confirmedBy: string }, ['confirmedAt', 'confirmedBy']), failure: closed({ failedAt: date, failedBy: string, reason: string }, ['failedAt', 'failedBy', 'reason']), evidenceIds: { type: 'array', items: string, maxItems: 64 }, nodes: { type: 'array', items: paymentRouteNode, maxItems: 128 }, edges: { type: 'array', items: paymentRouteEdge, maxItems: 256 }, idempotencyKey: string }, ['layers', 'funding', 'observedAt', 'idempotencyKey']);
 const paymentCapability = closed({ id: string, status: { type: 'string', enum: ['candidate', 'active', 'stale', 'conflict', 'needs_review'] }, providerId: string, acceptanceProviderId: string, consumerAppId: string, merchant: string, market: string, channel: string, fundingKinds: { type: 'array', items: { type: 'string', enum: ['credit_card', 'account', 'cash'] }, minItems: 1, maxItems: 3 }, transitions: { type: 'array', items: { type: 'string', enum: ['card_authorization', 'account_debit', 'wallet_top_up', 'wallet_debit', 'service_to_acceptance', 'merchant_settlement', 'direct_settlement', 'split_tender'] }, minItems: 1 }, sourceUrl: string, evidenceIds: { type: 'array', items: string, minItems: 1, maxItems: 64 }, observedAt: date, validFrom: date, validTo: date, idempotencyKey: string }, ['providerId', 'fundingKinds', 'transitions', 'evidenceIds', 'observedAt', 'idempotencyKey']);
 const paymentAccount = closed({ id: string, providerId: string, kind: { type: 'string', enum: ['linked_bank_account', 'wallet_balance', 'foreign_currency_account'] }, displayName: string, status: { type: 'string', enum: ['candidate', 'active', 'stale', 'needs_review'] }, observedAt: date, sourceUrl: string, sourceSnapshotId: string, evidenceIds: { type: 'array', items: string, maxItems: 64 }, confirmation: closed({ confirmedAt: date, confirmedBy: string }, ['confirmedAt', 'confirmedBy']), idempotencyKey: string }, ['providerId', 'kind', 'displayName', 'observedAt', 'idempotencyKey']);
 const merchantIdentity = closed({ canonicalId: string, canonicalNameZhHant: string, canonicalNameLocale: { const: 'zh-Hant-TW' }, officialAliases: { type: 'array', items: { type: 'string', maxLength: 512 }, maxItems: 128 }, operatingMarkets: { type: 'array', items: string, maxItems: 64 }, mccs: { type: 'array', items: string, maxItems: 64 }, channels: { type: 'array', items: { type: 'string', enum: ['in_store', 'online'] }, maxItems: 2 }, status: { type: 'string', enum: ['candidate'] }, supersededBy: string, provenance: closed({ sourceSnapshotId: string, sourceUrl: string, version: string, updatedAt: date, notes: string }, ['version', 'updatedAt']) }, ['canonicalNameZhHant', 'canonicalNameLocale', 'provenance']);
@@ -80,6 +81,81 @@ export const mcpTools: readonly McpToolContract[] = [
   { name: 'resolve_merchant', description: 'Resolve an exact canonical merchant identity using bounded deterministic matching; never applies aliases or fuzzy matches.', readOnly: true, inputSchema: closed({ rawQuery: { type: 'string', minLength: 1, maxLength: 128 }, country: string, market: string, mcc: string, channel: string }, ['rawQuery']), failClosedErrors: ['INVALID_INPUT', 'INSUFFICIENT_FACTS'] },
   { name: 'search_active_offers', description: 'Search active, verified, in-window offers with bounded 1-based pagination; read-only and never activates rules.', readOnly: true, inputSchema: closed({ rawQuery: { type: 'string', maxLength: 128 }, cardId: string, canonicalMerchantId: string, country: string, market: string, mcc: string, channel: string, asOf: date, ...page, projection: { type: 'string', enum: ['summary', 'detail'] } }), failClosedErrors: ['INVALID_INPUT', 'PAYLOAD_TOO_LARGE', 'INSUFFICIENT_FACTS'] },
 ];
+
+type JsonSchema = Record<string, unknown>;
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function snakeCase(name: string): string {
+  return name.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`);
+}
+
+function camelCase(name: string): string {
+  return name.replace(/_([a-zA-Z0-9])/g, (_, letter: string) => letter.toUpperCase());
+}
+
+function schemaBranches(schema: unknown): JsonSchema[] {
+  if (!isObject(schema)) return [];
+  const branches = [schema];
+  for (const keyword of ['allOf', 'oneOf', 'anyOf'] as const) {
+    const values = schema[keyword];
+    if (Array.isArray(values)) branches.push(...values.flatMap(schemaBranches));
+  }
+  return branches;
+}
+
+/**
+ * Converts snake_case property spellings in closed schema objects. Dynamic map
+ * keys stay untouched; their values still recurse into their declared schemas.
+ * This preserves user-provided identifiers while accepting snake_case and
+ * camelCase, without making unknown fields valid.
+ */
+function normalizeSchemaValue(value: unknown, schemas: readonly JsonSchema[], path: string): unknown {
+  if (Array.isArray(value)) {
+    const itemSchemas = schemas.flatMap((schema) => isObject(schema.items) ? schemaBranches(schema.items) : []);
+    return value.map((item, index) => normalizeSchemaValue(item, itemSchemas, `${path}[${index}]`));
+  }
+  if (!isObject(value)) return value;
+
+  const properties = new Map<string, JsonSchema[]>();
+  const aliases = new Map<string, string>();
+  const patternProperties: Array<[RegExp, JsonSchema[]]> = [];
+  for (const schema of schemas.flatMap(schemaBranches)) {
+    if (isObject(schema.properties)) for (const [name, child] of Object.entries(schema.properties)) {
+      const children = isObject(child) ? schemaBranches(child) : [];
+      properties.set(name, [...(properties.get(name) ?? []), ...children]);
+      aliases.set(snakeCase(name), name);
+    }
+    if (isObject(schema.patternProperties)) for (const [pattern, child] of Object.entries(schema.patternProperties)) {
+      if (isObject(child)) patternProperties.push([new RegExp(pattern), schemaBranches(child)]);
+    }
+  }
+
+  const normalized: Record<string, unknown> = {};
+  for (const [rawName, rawValue] of Object.entries(value)) {
+    const matchedPatterns = patternProperties.filter(([pattern]) => pattern.test(rawName));
+    // Public schemas are closed objects. Normalize any snake_case spelling in
+    // those envelopes before validation, including fields that validation will
+    // subsequently reject (for example an unexposed owner_user field). Keys in
+    // declared dynamic maps are identifiers rather than property names.
+    const name = aliases.get(rawName) ?? (properties.size > 0 && matchedPatterns.length === 0 ? camelCase(rawName) : rawName);
+    if (name !== rawName && Object.prototype.hasOwnProperty.call(value, name)) {
+      throw new RewardServiceError('INVALID_INPUT', `${path} must not contain both ${rawName} and ${name}`);
+    }
+    if (Object.prototype.hasOwnProperty.call(normalized, name)) throw new RewardServiceError('INVALID_INPUT', `${path} contains duplicate property ${name}`);
+    const childSchemas = properties.get(name) ?? matchedPatterns.flatMap(([, children]) => children);
+    normalized[name] = normalizeSchemaValue(rawValue, childSchemas, `${path}.${name}`);
+  }
+  return normalized;
+}
+
+/** Normalizes MCP arguments to the validators' camelCase model. */
+export function normalizeMcpToolArguments(name: string, value: unknown): unknown {
+  const tool = mcpTools.find((candidate) => candidate.name === name);
+  return tool ? normalizeSchemaValue(value, schemaBranches(tool.inputSchema), `tool ${name}`) : value;
+}
 
 export const failClosedErrors = {
   UNAUTHENTICATED: 'A trusted Aion user context is missing or invalid.',

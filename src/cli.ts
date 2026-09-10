@@ -7,7 +7,7 @@ import type { StartupConfig } from './startup.js';
 import { FileStore, contentHash, type LedgerStore } from './store.js';
 import { RewardService } from './service.js';
 import { RewardServiceError } from './errors.js';
-import { mcpInstructions, mcpTools } from './mcp-contract.js';
+import { mcpInstructions, mcpTools, normalizeMcpToolArguments } from './mcp-contract.js';
 import { evaluateOffer } from './evaluator.js';
 import { validateUserBenefitInput, validateContext, validateToolArgs, validateTransaction, validateCard, validateCapPool, validateConfirmation, validateRule, validateSnapshot } from './validation.js';
 import { projectPage, ProjectionInputError, ProjectionTooLargeError } from './projections.js';
@@ -95,7 +95,7 @@ async function callTool(service: RewardService, params: Record<string, unknown>)
   if (typeof name !== 'string') throw new RewardServiceError('INVALID_INPUT', 'tool name is required');
   const rawArgs = params.arguments ?? {};
   rejectSensitiveFields(rawArgs);
-  const args = validateToolArgs(name, rawArgs);
+  const args = validateToolArgs(name, normalizeMcpToolArguments(name, rawArgs));
   const maybePaged = (value: unknown[], sortKey: (item: unknown) => string, maxItems = 20): unknown => {
     if (args.limit === undefined && args.page === undefined && args.projection === undefined) return value;
     const projection = typeof args.projection === 'string' ? args.projection : undefined;

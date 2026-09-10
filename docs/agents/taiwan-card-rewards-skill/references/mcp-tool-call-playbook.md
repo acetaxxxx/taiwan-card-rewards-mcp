@@ -120,7 +120,7 @@ tool；只要 route/edge 的其餘欄位（`sourceUrl`、`authority`、`confiden
     "funding": { "kind": "account", "subtype": "linked_bank_account", "accountId": "bank_illustrative" },
     "observedAt": "2026-09-06T07:00:00Z",
     "sourceUrl": "https://official.example.invalid/terms",
-    "authority": "official-provider",
+    "authority": "issuer",
     "confidence": "high",
     "evidenceIds": ["ev_official_illustrative"],
     "confirmation": { "confirmedAt": "2026-09-06T07:05:00Z", "confirmedBy": "user" },
