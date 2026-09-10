@@ -677,7 +677,7 @@ export interface RecommendationIntentResult {
   status: 'ready' | 'partial' | 'needs_input' | 'no_match';
   candidates: readonly IntentCandidate[];
   requiredActions: readonly { id: string; action: string; owner: 'agent' | 'user'; path?: string; requiredFacts: readonly string[]; candidateIds?: readonly string[]; submission?: { tool: string; field: string }; completionCondition?: string; fxResolutionRequest?: FxResolutionRequest }[];
-  coverage: { scope: string; discoveredCount: number; bounded: boolean; notes: readonly string[] };
+  coverage: { scope: string; discoveredCount: number; bounded: boolean; explorationComplete: boolean; total?: number; notes: readonly string[] };
   evaluatedAt: string;
   fxResolutionRequest?: FxResolutionRequest;
   fxResolutionRequests?: readonly FxResolutionRequest[];

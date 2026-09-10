@@ -980,7 +980,7 @@ export class RewardService {
       ...(fxResolutionRequests.length ? { fxResolutionRequests } : {}),
       pageSize, hasMore, ...(nextCursor ? { nextCursor } : {}), resultVersion,
       coverage: { scope: 'registered cards and payment routes; route acceptance requires evidence',
-        discoveredCount: candidates.length, bounded: pathTruncated,
+        discoveredCount: candidates.length, bounded: pathTruncated, explorationComplete: !pathTruncated, ...(!pathTruncated ? { total: candidates.length } : {}),
         notes: ['not a market-wide catalog', 'planned calls do not consume caps', ...(pathTruncated ? ['path exploration reached a declared resource bound'] : ['all currently discovered candidates are available through continuation'])] },
     };
   }

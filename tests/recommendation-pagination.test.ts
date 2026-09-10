@@ -64,6 +64,8 @@ describe('bounded recommendation pagination', () => {
       expect(first.hasMore).toBe(true);
       expect(first.nextCursor).toBeTypeOf('string');
       expect(first.coverage.bounded).toBe(false);
+      expect(first.coverage.explorationComplete).toBe(true);
+      expect(first.coverage.total).toBe(31);
 
       const second = service.recommendIntent({ merchant: 'Shop', amount: transaction.amount, occurredAt: transaction.occurredAt, cursor: first.nextCursor });
       expect(second.resultVersion).toBe(first.resultVersion);
