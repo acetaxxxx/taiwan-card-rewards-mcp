@@ -10,7 +10,7 @@
 | `rank_cards` | read | 以提供的 cards/rules 做 deterministic 卡片排序 |
 | `register_card` | write | 登記 card descriptor（不可有 PAN/CVV） |
 | `list_cards` | read | 列出 user-scoped card 清冊 |
-| `upsert_offer` | write | 寫入 source snapshot/rule；需符合 official evidence 與 confirmation gate |
+| `upsert_offer` | write | 寫入 source snapshot/rule；有一致證據時預設可用，衝突或歧義才需要使用者處理 |
 | `upsert_fx_policy` | write | 保存有 official evidence 支持的 FX policy |
 | `list_fx_policies` | read | 列出 user-scoped FX policies |
 | `upsert_fx_observation` | write | 保存 source-attributed FX observation，可標記 public reference |

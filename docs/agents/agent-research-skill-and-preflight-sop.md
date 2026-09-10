@@ -84,11 +84,11 @@ flowchart TD
     ActionRouter -- research_offer --> Step4["Step 4 & 5: 官方優先檢索與關鍵字擴展\n(檢索銀行條款/公告/PDF)"]
     ActionRouter -- onboard_card --> Step7A["Step 7A: 登記持卡事實\n(呼叫 register_card)"]
 
-    Step3 --> Step10["Step 10: 重新執行 recommendation_preflight"]
+    Step3 --> Step10["Step 10: 重新執行 recommend"]
     Step6 --> Step10
     Step7A --> Step10
 
-    Step4 --> Step7B["Step 7B: 提取 Typed Evidence / Rule\n(取得使用者 OfferConfirmation)"]
+    Step4 --> Step7B["Step 7B: 提取 Typed Evidence / Rule\n(衝突或歧義才詢問使用者)"]
     Step7B --> Step7C["Step 7C: 呼叫 upsert_offer 啟用 active 規則"]
     Step7C --> Step8{"來源無效或過期？"}
     Step8 -- 是 --> Step8A["Step 8A: 執行 Source Recovery SOP\n(重新搜尋官方權威替代連結)"]
@@ -141,12 +141,10 @@ Agent 進行 Web Search 時，應結構化拓展關鍵字組合：
    - 組裝 `FxSnapshot`，附帶 `capturedAt`、`provider` 與 `sourceUrl`。
 3. **手續費與 Net Basis**：確認海外交易手續費（通常 1.5%）與點數折抵後之淨結算金額（`settlementAmount`）。
 
-### Step 7: 結構化 Evidence 提交與確認 (Typed Submission & Confirmation)
+### Step 7: 結構化 Evidence 提交與啟用 (Typed Submission & Activation)
 1. **生成候選規則**：組裝 `OfferRuleVersion`，宣告 `match`（或 `predicate`）、`reward`（費率、回饋幣別、進位方式）、`capPoolRefs`（關聯上限池）。
-2. **取得使用者確認（Offer Confirmation）**：
-   - 向使用者展示優惠摘要：官方來源網址、適用期間、回饋條件、排除通路、上限額度。
-   - 取得使用者明確確認後，組裝 `confirmation` 物件。
-3. **呼叫 `upsert_offer`**：同時提交 `snapshot`、`rule`、`confirmation` 與 `capPools`，正式啟用為 `status: "active"`。
+2. **預設啟用有證據候選**：有一致的官方證據時直接以 `status: "active"` 提交；只有來源衝突、商家歧義或使用者表示不可用時，才標記 `needs_review`／`failed` 或詢問使用者。
+3. **呼叫 `upsert_offer`**：提交 `snapshot`、`rule` 與 `capPools`。若確實需要確認才附 `confirmation`；缺少外幣政策時附 `fxPolicyRequirement`，讓回應產生 `research_fx_policy` action。
 
 ### Step 8: 來源失效修復 (Source Recovery SOP)
 若已儲存之官方來源 URL 發生 404、網頁改版或過期（`stale`）：
@@ -161,8 +159,8 @@ Agent 進行 Web Search 時，應結構化拓展關鍵字組合：
   - 提示使用者存在來源衝突，展示矛盾點並請求使用者確認依據何者計算。
   - **嚴禁 Agent 自行取平均值或擅自採信最新時間**。
 
-### Step 10: 重新執行 Pre-flight (`rerun preflight`)
-在完成事實登記、匯率注入或優惠啟用後，Agent **必須再次呼叫 `recommendation_preflight`**，確保系統以最新狀態確認 `ready: true`。
+### Step 10: 重新執行推薦 (`rerun recommendation`)
+在完成事實登記、匯率注入或優惠啟用後，Agent 重新呼叫同一個 `recommend` intent；只有 legacy transaction 或明確診斷需求才重跑 `recommendation_preflight`。
 
 ### Step 11: 確定性推薦與呈現 (`recommend`)
 1. 呼叫 `recommend`（可指定 `limit` 1..20；card branch 預設 10）。
