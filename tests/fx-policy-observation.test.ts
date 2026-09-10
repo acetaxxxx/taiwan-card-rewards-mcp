@@ -1,0 +1,32 @@
+import { describe, expect, it } from 'vitest';
+import { RewardService } from '../src/service.js';
+import { emptyState, type LedgerStore, type StoredState } from '../src/store.js';
+
+class MemoryStore implements LedgerStore {
+  private state = emptyState();
+  read() { return structuredClone(this.state); }
+  write(state: StoredState) { this.state = structuredClone(state); }
+  update(change: (state: StoredState) => void) { const state = this.read(); change(state); this.write(state); return this.read(); }
+  close() {}
+}
+
+describe('FX policy and observation persistence', () => {
+  it('stores policy and observation separately with tenant ownership and idempotency', () => {
+    const service = new RewardService(new MemoryStore(), 'user-1');
+    const evidence = service.submitEvidence({ id: 'evidence-fx-policy', requirementId: 'fx-policy:issuer', sourceIdentity: 'issuer.example', sourceType: 'official', authority: 'issuer', claim: { policyKey: 'issuer-jpy', rateType: 'cash_selling' }, observedAt: '2026-09-10T00:00:00Z', confidence: 'high', contentHash: 'policy-hash', reviewState: 'accepted', sourceUrl: 'https://issuer.example/fx' });
+    const policy = service.upsertFxPolicy({ policyKey: 'issuer-jpy', version: '1', scope: { kind: 'issuer', issuer: 'Example Bank' }, conversionOwner: 'issuer', rateType: 'cash_selling', rateDirection: 'base_to_quote', conversionTiming: 'settlement', evidenceId: evidence.id, observedAt: '2026-09-10T00:00:00Z', idempotencyKey: 'policy-1' });
+    const observation = service.upsertFxObservation({ baseCurrency: 'JPY', quoteCurrency: 'TWD', ratePpm: 215000, capturedAt: '2026-09-10T00:00:00Z', provider: 'Example Bank', rateType: 'cash_selling', conversionOwner: 'issuer', sourceUrl: 'https://issuer.example/rates', contentHash: 'rate-hash', idempotencyKey: 'observation-1' });
+
+    expect(service.listFxPolicies()).toEqual([policy]);
+    expect(service.listFxObservations()).toEqual([observation]);
+    expect(service.upsertFxPolicy({ policyKey: 'issuer-jpy', version: '1', scope: { kind: 'issuer', issuer: 'Example Bank' }, conversionOwner: 'issuer', rateType: 'cash_selling', rateDirection: 'base_to_quote', conversionTiming: 'settlement', evidenceId: evidence.id, observedAt: '2026-09-10T00:00:00Z', idempotencyKey: 'policy-1' })).toEqual(policy);
+    expect(service.store.read().fxPolicies).toHaveLength(1);
+    expect(service.store.read().fxObservations).toHaveLength(1);
+  });
+
+  it('rejects observations without provenance and policies without accepted official evidence', () => {
+    const service = new RewardService(new MemoryStore(), 'user-1');
+    expect(() => service.upsertFxObservation({ baseCurrency: 'JPY', quoteCurrency: 'TWD', ratePpm: 215000, capturedAt: '2026-09-10T00:00:00Z', provider: 'Bank', rateType: 'cash_selling', idempotencyKey: 'observation-1' })).toThrow(/sourceUrl and contentHash/);
+    expect(() => service.upsertFxPolicy({ policyKey: 'issuer-jpy', version: '1', scope: { kind: 'issuer', issuer: 'Bank' }, conversionOwner: 'issuer', rateType: 'cash_selling', rateDirection: 'base_to_quote', conversionTiming: 'settlement', evidenceId: 'missing', observedAt: '2026-09-10T00:00:00Z', idempotencyKey: 'policy-1' })).toThrow(/accepted official evidence/);
+  });
+});

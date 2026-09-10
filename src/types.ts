@@ -324,6 +324,11 @@ export interface FxRateObservation extends FxSnapshot {
   confidence?: 'high' | 'medium' | 'low' | undefined;
 }
 
+export interface FxObservationRecord extends FxRateObservation {
+  idempotencyKey: string;
+  ownerUser?: string;
+}
+
 export type FxPolicyScope = { kind: 'card' | 'issuer' | 'route' | 'route_edge'; cardId?: string; issuer?: string; routeId?: string; edgeId?: string };
 export interface FxPolicyRecord {
   id: string;

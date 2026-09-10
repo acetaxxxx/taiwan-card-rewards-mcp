@@ -140,6 +140,8 @@ async function callTool(service: RewardService, params: Record<string, unknown>)
     case 'upsert_offer': return service.upsertOffer(validateSnapshot(args.snapshot), validateRule(args.rule), args.confirmation !== undefined ? validateConfirmation(args.confirmation) : undefined, args.capPools === undefined ? undefined : (Array.isArray(args.capPools) ? args.capPools.map(validateCapPool) : []), args.merchant as any);
     case 'upsert_fx_policy': return service.upsertFxPolicy(args.policy);
     case 'list_fx_policies': return service.listFxPolicies();
+    case 'upsert_fx_observation': return service.upsertFxObservation(args.observation);
+    case 'list_fx_observations': return service.listFxObservations();
     case 'recommend': {
       if (args.kind === 'payment_path' && args.payment_path && typeof args.payment_path === 'object') {
         const body = args.payment_path as Record<string, unknown>;
