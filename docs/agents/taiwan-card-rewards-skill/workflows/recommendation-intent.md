@@ -2,9 +2,9 @@
 
 Use this workflow for a user asking what to use at a merchant. `recommend` is
 planned and read-only: it does not write transactions or consume caps. Do not
-list cards/routes first. `recommendation_preflight` accepts the same intent as
-an optional diagnostic; its legacy `{ transaction, context }` shape remains
-supported.
+list cards/routes first. `recommend` is the single entry point — there is no
+separate preflight call; its `candidates` array already mixes direct-card and
+payment-path results in one ranked list.
 
 ## Steps
 
@@ -15,10 +15,9 @@ supported.
    only when the user explicitly limits comparison. `limit` is 1..128 (default
    page size 10), and `page` is 1-based (default 1). Use `limit` + `page` for
    normal continuation; `cursor` is retained only for legacy callers. Never
-   choose a `ruleId`.
-2. Call `recommend` with that intent. If using the optional diagnostic instead,
-   call `recommendation_preflight` with the same intent. Do not convert a
-   preflight result into a separate transaction or choose a card from it.
+   choose a `ruleId`. For foreign currency, fetch the current rate yourself and
+   add it as `fx` (see the FX section below).
+2. Call `recommend` with that intent.
 3. Read `status`, typed `candidates`, `requiredActions`, `coverage`,
    `page`, `pageSize`, `hasMore`, `resultVersion`, and `evaluatedAt`. Each candidate has `kind` (`direct_card` or `payment_path`),
    `status`, `matchedRules`, and `exclusionReasons`; show those facts without
@@ -42,28 +41,33 @@ supported.
    user fact is available, stop: report the partial/unknown result and ask only
    the needed user fact. Do not retry endlessly.
 
-## FX recovery
+See [`preflight-and-required-actions.md`](preflight-and-required-actions.md) for
+the full action-type-by-action-type playbook (what each `requiredActions[].action`
+means and how to resolve it).
 
-`fxResolutionRequest` (or `fxResolutionRequests`) is a lookup request, not an
-observation. Use its `baseCurrency`, `quoteCurrency`, `asOf`, `conversionOwner`,
-`suggestedRateTypes`, `rateDirection`, `scope`, `sourceStatus`, `purpose`,
-`freshness`, `requiredFields`, `sourceUrls`, `referenceSourceUrls`, and
-`submission` exactly as given.
+## FX
 
-For planned requests, `referenceSourceUrls` may provide the BOT URL as a public
-fallback. A submitted `fxObservation` from that source is a
-`reference_estimate`, not a card, wallet, issuer, or merchant settlement policy.
-For `discovery_required` or actual use, discover the real approved source; do
-not fall back to BOT as confirmed policy. Return the validated typed FX snapshot
-through the requested `submission` (usually `recommend.fxObservation` for a
-public reference, `recommend.fx` for a policy quote, or `recommend.routeFacts`)
-and repeat the original intent. `routeFacts` entries
-identify `routeId`, optional `edgeId`, and one matching FX scope; duplicate
-route/edge scopes are invalid. Use `upsert_fx_observation` when the observation
-should be reused, preserving `sourceKind: public_reference` for public rates.
+For any foreign-currency amount, fetch the current rate yourself and attach it
+inline as a single `fx` snapshot (`id`, `baseCurrency`, `quoteCurrency`,
+`ratePpm`, `capturedAt`, `provider`, `rateType`, optional `sourceUrl`/
+`contentHash`/`maxAgeSeconds`). It is trusted directly once it passes the
+currency-pair and freshness checks — there is no separate policy or observation
+storage step. If a candidate needs FX but none was supplied (or the supplied
+snapshot is stale or mismatched), `recommend` returns a
+`requiredActions[]` entry with `action: "query_approved_fx_source"` (or
+`"ask_user"` when the conversion owner cannot be determined for an actual
+settlement) and a machine-readable `fxResolutionRequest` describing
+`baseCurrency`, `quoteCurrency`, `conversionOwner`, `suggestedRateTypes`, and
+`sourceUrls`/`referenceSourceUrls` to check. Fetch a fresh rate from an
+appropriate source, add it as `fx` (or, for a specific route/edge, as an entry
+in `routeFacts`), and repeat the same intent.
 
-If research fails, retain the candidate's `unknown`/estimate label and report the
-source failure. Never invent a source, rate, field, or completion.
+`routeFacts` entries identify `routeId`, optional `edgeId`, and one matching FX
+snapshot; duplicate route/edge scopes are invalid, and an exact `routeFacts`
+match takes priority over the general `fx` field for that edge. If research
+fails, retain the candidate's `unknown`/estimate label (see `fxEstimate.status`
+on the candidate) and report the source failure. Never invent a rate or fall
+back to 1:1.
 
 ## Pagination recovery
 
@@ -77,5 +81,5 @@ data changed. `nextCursor` may be used only by legacy integrations.
 
 Results are bounded to the current user state and declared coverage. Continue
 with `page` while `hasMore` is true; `coverage.total` is authoritative
-only when `explorationComplete` is true. Public reference estimates remain
-estimates until the applicable provider policy is confirmed.
+only when `explorationComplete` is true. An `fxEstimate` remains an estimate
+(see its `status`) until the applicable provider rate is confirmed.

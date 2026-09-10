@@ -2,13 +2,16 @@
 
 > 正常商家消費意圖請直接呼叫 `recommend`，依
 > [`recommendation-intent.md`](taiwan-card-rewards-skill/workflows/recommendation-intent.md)
-> 執行；本 SOP 僅供舊 transaction branch 或明確診斷需求。正常流程不要求先列卡片
-> 或先跑 `recommendation_preflight`。
+> 執行。獨立的 `recommendation_preflight` 工具已完全移除——`recommend` 本身就是
+> 唯一、完整的推薦入口；required actions 的逐項處理見
+> [`preflight-and-required-actions.md`](taiwan-card-rewards-skill/workflows/preflight-and-required-actions.md)。
+> 本文件其餘部分是研究/收斂 SOP 的敘事版本，工具細節一律以
+> [`taiwan-card-rewards-skill/references/mcp-tools.md`](taiwan-card-rewards-skill/references/mcp-tools.md) 為準。
 
 **文件狀態**：正式營運指引 (Normative Agent SOP)
-**適用範圍**：canonical 25-tool MCP contract（release tag 僅供部署管理）
+**適用範圍**：canonical 19-tool MCP contract（release tag 僅供部署管理）
 **語言**：繁體中文
-**遵循規範**：[`CONTEXT.md`](../../CONTEXT.md), [ADR 0001](../adr/0001-independent-card-rewards-domain-and-agent-supplied-rules.md), [ADR 0003](../adr/0003-complete-initial-mcp-surface-with-layered-trust-gates.md), [ADR 0004](../adr/0004-generic-benefit-status-and-schema-v2.md), [ADR 0005](../adr/0005-payment-route-opportunity-stacking.md), [ADR 0006](../adr/0006-multi-component-reward-ledger-and-cap-attribution.md), [ADR 0007 Payment-route facts](../adr/0007-provider-neutral-payment-route-facts-and-evidence.md), [Payment-route research](../research/payment-route-chain-reality-and-mcp-design.md), [使用者安裝與 Skill 分發 SOP](user-installation-and-skill-distribution-sop.md), [Schema v2 Spec](../specs/card-rewards-schema-v2-specification.md), [Agent-Supplied FX Spec](../specs/agent-supplied-fx-and-fail-closed-specification.md), [MerchantIdentity Spec](../specs/market-aware-merchant-identity-and-valid-offer-search-specification.md), [Pre-flight & Freshness Spec](../../.scratch/recommendation-preflight-evidence-freshness/spec.md).
+**遵循規範**：[`CONTEXT.md`](../../CONTEXT.md), [ADR 0001](../adr/0001-independent-card-rewards-domain-and-agent-supplied-rules.md), [ADR 0003](../adr/0003-complete-initial-mcp-surface-with-layered-trust-gates.md), [ADR 0004](../adr/0004-generic-benefit-status-and-schema-v2.md), [ADR 0005](../adr/0005-payment-route-opportunity-stacking.md), [ADR 0006](../adr/0006-multi-component-reward-ledger-and-cap-attribution.md), [ADR 0007 Payment-route facts](../adr/0007-provider-neutral-payment-route-facts-and-evidence.md), [Payment-route research](../research/archive/payment-route-chain-reality-and-mcp-design.md), [使用者安裝與 Skill 分發 SOP](user-installation-and-skill-distribution-sop.md), [Schema v2 Spec](../specs/card-rewards-schema-v2-specification.md).
 
 ---
 
@@ -32,38 +35,18 @@
 
 ---
 
-## 2. Canonical 25-tool MCP 合約體系
+## 2. Canonical 19-tool MCP 合約體系
 
-MCP 伺服器公開 19 項標準工具，Agent 必須依照其唯讀與寫入屬性合規調用；完整清單與 closed schema 見 [`taiwan-card-rewards-skill/references/mcp-tools.md`](taiwan-card-rewards-skill/references/mcp-tools.md)：
+MCP 伺服器公開 20 項標準工具，Agent 必須依照其唯讀與寫入屬性合規調用；完整清單、closed schema 與逐項用途說明一律以 [`taiwan-card-rewards-skill/references/mcp-tools.md`](taiwan-card-rewards-skill/references/mcp-tools.md) 為準，本文件不重複維護第二份清單以避免走漏更新。
 
-| 工具名稱 | 屬性 | 核心職責 | 主要 Fail-Closed 狀態碼 |
-|---|:---:|---|---|
-| `recommendation_preflight` | 唯讀 | 推薦前置就緒檢查、缺漏事實盤點、Required Actions 指派 | `INVALID_INPUT`, `NEEDS_REVIEW` |
-| `recommend` | 唯讀 | 基於有效規則與帳本實際額度，執行純確定性信用卡推薦排序 | `INSUFFICIENT_FACTS`, `NEEDS_REVIEW`, `STALE` |
-| `calculate_reward` | 唯讀 | 單筆指定規則之純數學回饋試算（不碰持久化狀態） | `INSUFFICIENT_FACTS`, `NEEDS_REVIEW`, `STALE` |
-| `rank_cards` | 唯讀 | 多卡多規則之純排序評估（不碰持久化狀態） | `INSUFFICIENT_FACTS`, `NEEDS_REVIEW`, `STALE` |
-| `resolve_merchant` | 唯讀 | 商家實體前置解析、別名查詢與市場消歧義 | `INVALID_INPUT`, `STORE_UNAVAILABLE` |
-| `search_active_offers` | 唯讀 | 探索已啟用、來源可信且效期內之優惠規則 | `INVALID_INPUT`, `STORE_UNAVAILABLE` |
-| `list_cards` | 唯讀 | 列出使用者已登記之信用卡清冊與卡片屬性 | `STORE_UNAVAILABLE` |
-| `remaining_caps` | 唯讀 | 查詢指定卡片之各上限池實際剩餘額度 | `CARD_NOT_FOUND`, `INSUFFICIENT_FACTS` |
-| `get_user_benefit_status` | 唯讀 | 查詢權益切換 (card_switch) 或登錄活動 (campaign) 狀態 | `CARD_NOT_FOUND`, `STORE_UNAVAILABLE` |
-| `list_payment_routes` | 唯讀 | 查詢使用者登記之支付路徑清冊（支援有界分頁） | `INVALID_INPUT`, `STORE_UNAVAILABLE` |
-| `register_payment_account` | 寫入 | 登記 wallet/linked bank account opaque identity 與 evidence | `INVALID_INPUT`, `SENSITIVE_FIELD_FORBIDDEN` |
-| `list_payment_accounts` | 唯讀 | 列出可供 payment route 引用的 account identities | `INVALID_INPUT`, `STORE_UNAVAILABLE` |
-| `register_card` | 寫入 | 登記或更新使用者持卡屬性（發卡行、產品名、結帳日、時區） | `INVALID_INPUT`, `STORE_UNAVAILABLE` |
-| `upsert_offer` | 寫入 | 儲存來源快照 (Snapshot)、規則版本 (Rule)，並可一併附帶確認書 (Confirmation) | `INVALID_OFFER`, `INVALID_CONFIRMATION` |
-| `upsert_payment_route` | 寫入 | 登記或更新確認/候選支付路徑拓撲與扣款來源（絕不儲存敏感憑據） | `INVALID_INPUT`, `IDEMPOTENCY_CONFLICT`, `SENSITIVE_FIELD_FORBIDDEN` |
-| `upsert_user_benefit_status` | 寫入 | 記錄使用者確認已完成之權益切換或活動登錄事實 | `CARD_NOT_FOUND`, `INVALID_CONFIRMATION` |
-| `record_transaction` | 寫入 | 記錄實際消費或關聯退款至持久化帳本，更新上限池消耗 | `IDEMPOTENCY_CONFLICT`, `INVALID_REFUND` |
-| `record_event_reward` | 寫入 | 重算 event-local rule 或 explicit `funded_by` chain 後記錄回饋 | `NO_MATCH`, `INSUFFICIENT_FACTS`, `NEEDS_REVIEW` |
-| `reverse_event_reward` | 寫入 | 依 explicit refund relation 反轉一筆 event reward | `INVALID_REFUND_RELATION`, `OVER_REFUND` |
-
-`recommend` 是 closed union：卡片 branch 使用 nested `transaction`；多層路徑
-使用 `{ "kind": "payment_path", "payment_path": { "amount": ... } }`。後者
-只從 current user 的 active/confirmed、accepted official-evidence routes 產生
-bounded candidates 與 planned events，不寫 ledger，也不替混合 wallet 推 FIFO/LIFO。
-目前 CLI 尚未轉送 payment-path 的 `eligibilityFacts`，因此 Gold/member-dependent
-path recommendation 在該 parity gap 修復前必須回報 blocked/needs_review。
+`recommend` 是唯一的推薦入口：merchant-first intent 的 `candidates[]` 已經
+同時包含直接刷卡（`kind: "direct_card"`）與多層路徑（`kind: "payment_path"`）
+候選，一次呼叫即可比較兩者，不再有獨立的 payment-path 工具或 envelope。
+payment-path 候選只從 current user 的 active/confirmed、有 evidenceIds 的
+routes 產生 bounded candidates 與 planned events，不寫 ledger，也不替混合
+wallet 推 FIFO/LIFO。`recommend` 的公開 intent schema 目前尚未暴露
+`eligibilityFacts`，因此 Gold/member-dependent 的 stacking prerequisite 在
+這個欄位公開前必須回報 blocked/needs_review，而不是宣稱已判定。
 
 ---
 
@@ -72,7 +55,7 @@ path recommendation 在該 parity gap 修復前必須回報 blocked/needs_review
 ```mermaid
 flowchart TD
     Start(["使用者提出推薦需求\n(例如：'在日本唐吉軻德刷哪張？')"]) --> Step1["Step 1: 執行 recommend intent"]
-    Step1 --> CheckReady{"Preflight 狀態\nready == true ?"}
+    Step1 --> CheckReady{"recommend 回應\n有 ready candidate ?"}
 
     CheckReady -- Yes --> Step11["Step 11: 呼叫 recommend 產出確定性排序"]
 
@@ -99,8 +82,8 @@ flowchart TD
     Step9 -- 否 --> Step10
 ```
 
-### Step 1: 發起前置檢查 (`recommendation_preflight`, legacy)
-在使用舊 transaction branch 或需要獨立診斷時，Agent 組裝目前已知的交易條件（金額、幣別、商家口語、支付方式、國家等），呼叫 `recommendation_preflight`。商家意圖的正常入口直接呼叫 `recommend`，不經此步驟。
+### Step 1: 執行 recommend intent
+Agent 組裝目前已知的交易條件（金額、幣別、商家口語、支付方式、國家等），直接呼叫 `recommend`。沒有獨立的前置檢查步驟。
 
 ### Step 2: 解析 `requiredActions` 與診斷分流
 檢查回傳的 `ready` 旗標：
@@ -144,7 +127,7 @@ Agent 進行 Web Search 時，應結構化拓展關鍵字組合：
 ### Step 7: 結構化 Evidence 提交與啟用 (Typed Submission & Activation)
 1. **生成候選規則**：組裝 `OfferRuleVersion`，宣告 `match`（或 `predicate`）、`reward`（費率、回饋幣別、進位方式）、`capPoolRefs`（關聯上限池）。
 2. **預設啟用有證據候選**：有一致的官方證據時直接以 `status: "active"` 提交；只有來源衝突、商家歧義或使用者表示不可用時，才標記 `needs_review`／`failed` 或詢問使用者。
-3. **呼叫 `upsert_offer`**：提交 `snapshot`、`rule` 與 `capPools`。若確實需要確認才附 `confirmation`；缺少外幣政策時附 `fxPolicyRequirement`，讓回應產生 `research_fx_policy` action。
+3. **呼叫 `upsert_offer`**：提交 `snapshot`、`rule` 與 `capPools`。若確實需要確認才附 `confirmation`；規則涉及外幣結算時，Agent 在後續 `recommend`/`record_transaction` 呼叫直接附上單一 `fx` snapshot 即可，不需要另外宣告任何 FX 政策需求。
 
 ### Step 8: 來源失效修復 (Source Recovery SOP)
 若已儲存之官方來源 URL 發生 404、網頁改版或過期（`stale`）：
@@ -160,7 +143,7 @@ Agent 進行 Web Search 時，應結構化拓展關鍵字組合：
   - **嚴禁 Agent 自行取平均值或擅自採信最新時間**。
 
 ### Step 10: 重新執行推薦 (`rerun recommendation`)
-在完成事實登記、匯率注入或優惠啟用後，Agent 重新呼叫同一個 `recommend` intent；只有 legacy transaction 或明確診斷需求才重跑 `recommendation_preflight`。
+在完成事實登記、匯率注入或優惠啟用後，Agent 重新呼叫同一個 `recommend` intent；`recommend` 本身就是唯一入口，不需要另外重跑任何診斷工具。
 
 ### Step 11: 確定性推薦與呈現 (`recommend`)
 1. 呼叫 `recommend`（可指定 `limit` 1..20；card branch 預設 10）。
@@ -190,7 +173,7 @@ Agent 進行 Web Search 時，應結構化拓展關鍵字組合：
 
 ### 範例 A：缺少外幣匯率快照 (Missing FX Snapshot)
 - **場景**：使用者詢問「在日本實體店刷 10,000 日圓，推薦哪張卡？」，但 transaction 缺少 `fx` 欄位。
-- **Preflight 回傳**：
+- **recommend 回應（節錄，欄位為示意）**：
   ```json
   {
     "ready": false,
@@ -211,11 +194,11 @@ Agent 進行 Web Search 時，應結構化拓展關鍵字組合：
   1. 檢索台幣對日圓官方即時牌告匯率（例如 1 JPY = 0.2150 TWD）。
   2. 計算 PPM：$0.2150 \times 1,000,000 = 215,000$。
   3. 組裝 `fx: { baseCurrency: "JPY", quoteCurrency: "TWD", ratePpm: 215000, capturedAt: "2026-09-06T10:00:00Z", provider: "BankOfTaiwan" }`。
-  4. 重新發起 preflight 並完成推薦。
+  4. 重新呼叫同一個 `recommend` intent 並完成推薦。
 
 ### 範例 B：商家跨市場歧義 (Merchant Ambiguous)
 - **場景**：使用者詢問「在唐吉軻德消費刷哪張？」，未指定國家。
-- **Preflight 回傳**：
+- **recommend 回應（節錄，欄位為示意）**：
   ```json
   {
     "ready": false,
@@ -230,11 +213,11 @@ Agent 進行 Web Search 時，應結構化拓展關鍵字組合：
 - **Agent SOP 處置**：
   1. 呼叫 `resolve_merchant(query: "唐吉軻德")` 取得候選：台灣門市 (`TW`) vs 日本門市 (`JP`)。
   2. 向使用者發問：「請問您是在台灣門市還是日本當地的唐吉軻德消費？」。
-  3. 依據使用者回覆（如「日本門市」）設定 `country: "JP"`，重跑 preflight。
+  3. 依據使用者回覆（如「日本門市」）設定 `country: "JP"`，重跑 `recommend`。
 
 ### 範例 C：商家無專屬優惠但具備基礎回饋 (No Active Offer with Base Rule)
 - **場景**：使用者在某地方獨立小吃店刷卡，該店無任何銀行加碼活動。
-- **Preflight / Recommend 行為**：
+- **recommend 行為**：
   - 商家解析結果標記 `status: "no_active_offer"`。
   - MCP **不中斷計算**，自動評估各卡片之「國內一般消費基礎規則」（例如 1%~2% 現金回饋）。
   - 產出推薦排序，並在 trace 中清楚註明「該商家適用一般消費回饋，無專屬加碼活動」。
@@ -244,7 +227,7 @@ Agent 進行 Web Search 時，應結構化拓展關鍵字組合：
 ## 6. 審計、版本追溯與自我檢核清單
 
 每次完成推薦前，Agent 必須確認以下檢核清單：
-- [ ] 是否已透過 `recommendation_preflight` 確認 `ready == true`？
+- [ ] 是否已透過 `recommend` 確認至少一個 candidate 的狀態為 `ready`？
 - [ ] 商家實體是否已解析為標準 `mch_<ULID>` 或確認無專屬優惠？
 - [ ] 外幣交易是否已包含非 1:1 之有效 `FxSnapshot`？
 - [ ] 引用之優惠規則是否具備官方 URL 溯源與 `OfferConfirmation`？

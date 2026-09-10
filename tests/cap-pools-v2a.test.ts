@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { describe, expect, it } from 'vitest';
-import { evaluateOffer } from '../src/evaluator.js';
+import { evaluateOffer, rankCards } from '../src/evaluator.js';
 import { FileStore } from '../src/store.js';
 import { RewardService } from '../src/service.js';
 import { validateRule, validateStoredState } from '../src/validation.js';
@@ -225,7 +225,8 @@ describe('Schema v2A: canonical cap pool registry and shared aggregation', () =>
         amount: { amountMinor: 30000, currency: 'TWD' },
         channel: 'online',
       };
-      const recResult = service.recommend(plannedB, 1);
+      const stateForB = service.store.read();
+      const recResult = rankCards([stateForB.cards.find((card) => card.id === 'c1')!], stateForB.rules, plannedB, service.context(stateForB, plannedB.occurredAt, plannedB), 1);
       expect(recResult).toHaveLength(1);
       expect(recResult[0]?.ruleId).toBe('rule-b');
       expect(recResult[0]?.grossReward?.amountMinor).toBe(600);

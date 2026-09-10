@@ -24,11 +24,11 @@ describe('event reward schema parity', () => {
     expect(() => validateToolArgs('record_event_reward', { event: {}, candidate: {}, idempotencyKey: 'x', token: 'secret' })).toThrow(/UNKNOWN_FIELD/);
   });
 
-  it('hides versioned names while retaining compatibility validation aliases', () => {
+  it('fully retires versioned names, not just from tools/list', () => {
     expect(mcpTools.some((entry) => entry.name === 'record_event_reward_v1')).toBe(false);
     expect(mcpTools.some((entry) => entry.name === 'record_event_reward_v2')).toBe(false);
     expect(mcpTools.some((entry) => entry.name === 'reverse_event_reward_v1')).toBe(false);
-    expect(validateToolArgs('record_event_reward_v2', { event: {}, candidate: {}, idempotencyKey: 'x' })).toEqual(expect.any(Object));
-    expect(validateToolArgs('reverse_event_reward_v1', { event: {}, idempotencyKey: 'x' })).toEqual(expect.any(Object));
+    expect(() => validateToolArgs('record_event_reward_v2', { event: {}, candidate: {}, idempotencyKey: 'x' })).toThrow(/TOOL_NOT_FOUND/);
+    expect(() => validateToolArgs('reverse_event_reward_v1', { event: {}, idempotencyKey: 'x' })).toThrow(/TOOL_NOT_FOUND/);
   });
 });

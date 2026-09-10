@@ -1,5 +1,39 @@
 # Changelog
 
+## Unreleased
+
+- Reduced the public MCP surface from 25 to 19 tools. Removed `upsert_fx_policy`,
+  `list_fx_policies`, `upsert_fx_observation`, `list_fx_observations`,
+  `recommendation_preflight`, and `rank_cards`, and fully retired the hidden
+  version-suffixed aliases (`recommend_payment_paths_v1`, `record_event_reward_v1`,
+  `record_event_reward_v2`, `reverse_event_reward_v1`) rather than leaving them
+  dispatchable outside `tools/list`.
+- Collapsed FX from five overlapping concepts (snapshot, policy, policy
+  requirement, observation, and a duplicate intent-level observation field) to a
+  single inline `fx` snapshot on `recommend`, `record_transaction`, and
+  `record_event_reward`; it is trusted directly once it passes currency-pair and
+  freshness checks, with no separate policy/observation storage layer.
+- `recommend`'s input is now the single merchant-first intent shape (no more
+  `oneOf` of intent / legacy transaction / payment-path envelope); its
+  `candidates[]` already unifies direct-card and multi-layer payment-path
+  results in one ranked list, matching how `recommendIntent` has called the
+  path engine internally since the multi-layer payment path work landed.
+- Fixed payment routes, payment route edges, payment capabilities, and
+  payment-path eligibility facts so they are usable through the public MCP
+  protocol: they previously required resolving against a `state.evidence`
+  store that no MCP tool could ever populate, making them dead in practice.
+  They are now trusted directly from the caller's self-asserted `evidenceIds`,
+  consistent with how `upsert_payment_route` already worked. `recommend`'s
+  intent schema also gained an `eligibilityFacts` field so prerequisite/stacking
+  rules can be exercised through the single public `recommend` entry point,
+  matching what the removed lower-level `payment_path` branch used to accept.
+- Reorganized documentation to match: deleted eight superseded/dead
+  `docs/specs/*` documents and a byte-identical duplicate research file,
+  archived the remaining `docs/research/*` snapshots under
+  `docs/research/archive/`, removed two fully-superseded `.scratch/` project
+  trees, and corrected tool-count claims across `README.md`, `AGENTS.md`, and
+  the Agent Skill bundle.
+
 ## 0.11.3
 
 - Align package and server release metadata with the `v0.11.3` tag.

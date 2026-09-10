@@ -1,7 +1,7 @@
 # 使用者安裝與 Skill 分發標準作業程序 (SOP)
 
 **文件狀態**：正式營運與分發規範 (Normative Distribution & Installation SOP)
-**適用範圍**：canonical 25-tool MCP contract（release tag 僅供部署管理）
+**適用範圍**：canonical 19-tool MCP contract（release tag 僅供部署管理）
 **語言**：繁體中文
 **遵循規範**：[`CONTEXT.md`](../../CONTEXT.md), [ADR 0001](../adr/0001-independent-card-rewards-domain-and-agent-supplied-rules.md), [ADR 0003](../adr/0003-complete-initial-mcp-surface-with-layered-trust-gates.md), [ADR 0004](../adr/0004-generic-benefit-status-and-schema-v2.md), [ADR 0005](../adr/0005-payment-route-opportunity-stacking.md), [ADR 0006](../adr/0006-multi-component-reward-ledger-and-cap-attribution.md), [Agent Research Skill SOP](agent-research-skill-and-preflight-sop.md), [Usage Guide](usage-guide.md).
 
@@ -16,7 +16,7 @@
 │              Canonical Source of Truth (本專案唯一權威版本)                │
 │  - docs/agents/taiwan-card-rewards-skill/SKILL.md (Agent 入口)           │
 │  - docs/agents/taiwan-card-rewards-skill/references/ (詳細 contract)     │
-│  - canonical contract：25 tools | 語系：繁體中文 (zh-Hant-TW)             │
+│  - canonical contract：19 tools | 語系：繁體中文 (zh-Hant-TW)             │
 └────────────────────────────────────┬────────────────────────────────────┘
                                      │
            ┌─────────────────────────┴─────────────────────────┐
@@ -147,21 +147,21 @@ Agent 在接收到安裝或初始化指令時，應依照以下 Checklist 進行
 
 - [ ] 3. 19 項 canonical 公開工具檢核 (19-Tool Contract Verification)
       - 發送 `tools/list` 請求，確認 [`taiwan-card-rewards-skill/references/mcp-tools.md`](taiwan-card-rewards-skill/references/mcp-tools.md) 的 19 項工具完整存在：
-        [ ] recommendation_preflight (唯讀，支援 preflight 診斷)
-        [ ] recommend (唯讀，支援分頁與有界推薦)
+        [ ] recommend (唯讀，merchant-first intent，同時回傳直接刷卡與多層路徑候選)
         [ ] calculate_reward (唯讀，純數學計算)
-        [ ] rank_cards (唯讀，多卡純排序)
         [ ] resolve_merchant (唯讀，實體消歧義)
         [ ] search_active_offers (唯讀，有效優惠探索)
         [ ] list_cards (唯讀，卡片清冊查詢)
         [ ] remaining_caps (唯讀，上限餘額查詢)
         [ ] get_user_benefit_status (唯讀，權益/登錄狀態)
         [ ] list_payment_routes (唯讀，支付路徑清冊查詢)
+        [ ] list_payment_capabilities (唯讀，公共支付能力查詢)
         [ ] register_payment_account (寫入，wallet/bank opaque identity)
         [ ] list_payment_accounts (唯讀，account identity 查詢)
         [ ] register_card (寫入，卡片登記)
         [ ] upsert_offer (寫入，快照與規則建立)
         [ ] upsert_payment_route (寫入，支付路徑拓撲與扣款設定)
+        [ ] upsert_payment_capability (寫入，公共支付能力建立)
         [ ] upsert_user_benefit_status (寫入，權益與登錄確認)
         [ ] record_transaction (寫入，實際交易記帳與退款)
         [ ] record_event_reward (寫入，event rule/chain eligibility)
@@ -169,7 +169,7 @@ Agent 在接收到安裝或初始化指令時，應依照以下 Checklist 進行
 
 - [ ] 4. 聯通性健康檢查 (Connectivity Ping)
       - 呼叫 `list_cards`，預期回傳空陣列 `[]`（初始狀態）或已登記卡片。
-      - 發起一次最簡 `recommendation_preflight` 測試，確認回傳結構包含 `ready`、`diagnostics` 與 `dataVersion`。
+      - 發起一次最簡 `recommend` 測試（例如只帶 `merchant`），確認回傳結構包含 `status`、`candidates` 與 `resultVersion`。
 
 - [ ] 5. Skill 與 Adapter 整合確認 (Skill Integrity Check)
       - 若使用 Local Adapter，檢查檔頭包含 `sourceVersion`、`sourceHash` 與 `canonicalLink`。
@@ -187,7 +187,7 @@ Agent 在接收到安裝或初始化指令時，應依照以下 Checklist 進行
    cp -r /path/to/my-card-rewards-data /path/to/my-card-rewards-data.backup-$(date +%Y%m%d%H%M%S)
    ```
 3. **更新版本宣告**：將啟動命令或設定檔中的版本 tag 指向新版本（例如 `#v0.11.0`）。
-4. **重新執行健康檢查**：重跑第 4 節的 19 項工具驗證與 `recommendation_preflight`。
+4. **重新執行健康檢查**：重跑第 4 節的 19 項工具驗證與 `recommend` 健康檢查。
 
 ### 5.2 回滾程序 (Rollback Procedure)
 若升級後遇到相容性問題或異常：

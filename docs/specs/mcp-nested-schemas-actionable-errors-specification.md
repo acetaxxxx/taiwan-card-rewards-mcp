@@ -50,10 +50,10 @@ nested level.
 
 `recommend` is the exception to the transaction `cardId` requirement: the
 caller is asking which registered card to use, so its planned transaction may
-omit `cardId`. `rank_cards` supplies each candidate card internally. Actual
+omit `cardId`. Actual
 recording always requires `cardId` and `idempotencyKey`.
 
-`calculate_reward` and `rank_cards` accept optional `context.now`; omitted
+`calculate_reward` accepts optional `context.now`; omitted
 means the current evaluation time is selected internally. A caller-supplied
 future ISO-8601 timestamp is honored for planning. `occurredAt` remains the
 transaction event time and governs historical rule/cap evaluation.

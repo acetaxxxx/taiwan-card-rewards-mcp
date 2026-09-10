@@ -61,19 +61,16 @@ describe('planned reward stacking and cap preview', () => {
     expect(JSON.stringify(store.read().eventRewardLedger)).toBe(before);
   });
 
-  it('requires a current user eligibility fact before accepting a prerequisite component', () => {
+  it('trusts an Agent-supplied eligibility fact directly before accepting a prerequisite component', () => {
     const { service, route } = setup();
     const eligible = { ...rule(route.id, 'gold-wallet', 'wallet', 'gold', 10, { mode: 'additive', groupId: 'gold', version: '1' }), predicate: { op: 'EQUALS', field: 'user.membership', value: 'gold' } };
     addRule(service, eligible);
     const missing = service.recommendPaymentPaths({ amount: { amountMinor: 100, currency: 'TWD' }, routeIds: [route.id], eligibilityFacts: [] });
     expect(missing.status).toBe('needs_review');
     expect(missing.candidates[0]?.matchedRules).toHaveLength(0);
-    const evidence = service.submitEvidence({ id: 'ignored', requirementId: 'user.membership', sourceIdentity: 'membership', sourceType: 'official', authority: 'wallet', claim: { factKey: 'user.membership', value: 'gold', version: '1' }, observedAt: '2026-09-01T00:00:00Z', validFrom: '2026-09-01T00:00:00Z', validTo: '2026-09-30T23:59:59Z', confidence: 'high', contentHash: 'membership-hash', reviewState: 'accepted', sourceUrl: 'https://wallet.example/membership' });
-    const present = service.recommendPaymentPaths({ amount: { amountMinor: 100, currency: 'TWD' }, routeIds: [route.id], eligibilityFacts: [{ factKey: 'user.membership', value: 'gold', evidenceId: evidence.id, version: '1' }] });
+    const present = service.recommendPaymentPaths({ amount: { amountMinor: 100, currency: 'TWD' }, routeIds: [route.id], eligibilityFacts: [{ factKey: 'user.membership', value: 'gold', version: '1' }] });
     expect(present.status).toBe('ok');
     expect(present.candidates[0]?.matchedRules).toHaveLength(1);
-    const forged = service.recommendPaymentPaths({ amount: { amountMinor: 100, currency: 'TWD' }, routeIds: [route.id], eligibilityFacts: [{ factKey: 'user.membership', value: 'gold', evidenceId: 'ev_fake', version: '1' }] });
-    expect(forged.status).toBe('needs_review');
   });
 
   it('fails closed when a prerequisite rule is missing from the same candidate', () => {
@@ -84,18 +81,23 @@ describe('planned reward stacking and cap preview', () => {
     expect(result.candidates[0]?.matchedRules).toHaveLength(0);
   });
 
-  it('rejects stale, non-official, and cross-user evidence references', () => {
-    const { service, route, store } = setup();
+  it('rejects conflicting duplicate eligibility facts for the same key', () => {
+    const { service, route } = setup();
     const eligible = { ...rule(route.id, 'gold-wallet', 'wallet', 'gold', 10, { mode: 'additive', groupId: 'gold', version: '1' }), predicate: { op: 'EQUALS', field: 'user.membership', value: 'gold' } };
     addRule(service, eligible);
-    const stale = service.submitEvidence({ id: 'ignored', requirementId: 'stale-membership', sourceIdentity: 'membership', sourceType: 'official', authority: 'wallet', claim: { factKey: 'user.membership', value: 'gold', version: '1' }, observedAt: '2026-08-01T00:00:00Z', validTo: '2026-08-31T23:59:59Z', confidence: 'high', contentHash: 'stale-hash', reviewState: 'accepted', sourceUrl: 'https://wallet.example/membership' });
-    const staleResult = service.recommendPaymentPaths({ amount: { amountMinor: 100, currency: 'TWD' }, routeIds: [route.id], eligibilityFacts: [{ factKey: 'user.membership', value: 'gold', evidenceId: stale.id, version: '1' }] });
-    expect(staleResult.status).toBe('needs_review');
-    const community = service.submitEvidence({ id: 'ignored', requirementId: 'community-membership', sourceIdentity: 'membership', sourceType: 'community', authority: 'community', claim: { factKey: 'user.membership', value: 'gold', version: '1' }, observedAt: '2026-09-01T00:00:00Z', confidence: 'high', contentHash: 'community-hash', reviewState: 'accepted', sourceUrl: 'https://community.example/membership' });
-    const communityResult = service.recommendPaymentPaths({ amount: { amountMinor: 100, currency: 'TWD' }, routeIds: [route.id], eligibilityFacts: [{ factKey: 'user.membership', value: 'gold', evidenceId: community.id, version: '1' }] });
-    expect(communityResult.status).toBe('needs_review');
-    const other = new RewardService(store, 'u2').submitEvidence({ id: 'ignored', requirementId: 'other-membership', sourceIdentity: 'membership', sourceType: 'official', authority: 'wallet', claim: { factKey: 'user.membership', value: 'gold', version: '1' }, observedAt: '2026-09-01T00:00:00Z', confidence: 'high', contentHash: 'other-hash', reviewState: 'accepted', sourceUrl: 'https://wallet.example/membership' });
-    const crossUserResult = service.recommendPaymentPaths({ amount: { amountMinor: 100, currency: 'TWD' }, routeIds: [route.id], eligibilityFacts: [{ factKey: 'user.membership', value: 'gold', evidenceId: other.id, version: '1' }] });
-    expect(crossUserResult.status).toBe('needs_review');
+    const conflicting = service.recommendPaymentPaths({ amount: { amountMinor: 100, currency: 'TWD' }, routeIds: [route.id], eligibilityFacts: [{ factKey: 'user.membership', value: 'gold', version: '1' }, { factKey: 'user.membership', value: 'silver', version: '1' }] });
+    expect(conflicting.status).toBe('needs_review');
+  });
+
+  it('forwards eligibilityFacts from the public recommend intent into payment-path stacking', () => {
+    const { service, route } = setup();
+    const eligible = { ...rule(route.id, 'gold-wallet', 'wallet', 'gold', 10, { mode: 'additive', groupId: 'gold', version: '1' }), predicate: { op: 'EQUALS', field: 'user.membership', value: 'gold' } };
+    addRule(service, eligible);
+    const missing = service.recommendIntent({ merchant: 'Wallet Shop', amount: { amountMinor: 100, currency: 'TWD' }, occurredAt: '2026-09-02T00:00:00Z', routeIds: [route.id] });
+    const missingCandidate = missing.candidates.find((candidate) => candidate.routeId === route.id);
+    expect(missingCandidate?.matchedRules.some((item) => item.ruleId === 'gold-wallet' && item.status === 'matched')).toBe(false);
+    const present = service.recommendIntent({ merchant: 'Wallet Shop', amount: { amountMinor: 100, currency: 'TWD' }, occurredAt: '2026-09-02T00:00:00Z', routeIds: [route.id], eligibilityFacts: [{ factKey: 'user.membership', value: 'gold', version: '1' }] });
+    const presentCandidate = present.candidates.find((candidate) => candidate.routeId === route.id);
+    expect(presentCandidate?.matchedRules.some((item) => item.ruleId === 'gold-wallet' && item.status === 'matched')).toBe(true);
   });
 });

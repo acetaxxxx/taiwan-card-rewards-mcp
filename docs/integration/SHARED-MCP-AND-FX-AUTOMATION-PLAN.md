@@ -317,6 +317,5 @@ freshness > rate type policy。多個候選不可在 MCP 內自動平均；衝�
 
 ## 9. 既有規格依賴
 
-- [Agent Workspace 與 MCP Durable State Ownership 規格](../specs/agent-workspace-and-mcp-durable-state-ownership-specification.md)
-- [Agent-Supplied FX Lookup、Provenance、Freshness 與 Fail-Closed 規格](../specs/agent-supplied-fx-and-fail-closed-specification.md)
-- [FX Snapshot 儲存與 Current Rate 簡化政策](../specs/fx-snapshot-storage-and-current-rate-policy-specification.md)
+本節原先連結的三份 FX policy/observation 規格已隨 FX 模型收斂（單一 inline
+`fx` snapshot，見 [`mcp-tools.md`](../agents/taiwan-card-rewards-skill/references/mcp-tools.md)）而移除；本計畫描述的 FX 自動化設計中，實際 shipped 並保留的部分是 `fx.ts` 的 `buildFxResolutionRequest`／`freezeAppliedFxRate` 與 `recommend`/`record_transaction`/`record_event_reward` 的 fail-closed `fx` 檢查，而不是這三份文件描述的獨立 policy/observation 儲存層。

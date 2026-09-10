@@ -1,10 +1,10 @@
 import * as crypto from 'node:crypto';
 import { type LedgerStore, type RecordedTransaction, type StoredState } from './store.js';
 import { EventRewardLedger, convertMinor, createPaymentEventRewardCandidate, decidePaymentEventRewards, evaluateOffer, evaluatePredicate, matchPaymentEvent, matchPaymentEventChain, rankCards, resolveCyclePeriodKey } from './evaluator.js';
-import type { CardDescriptor, CardSwitchInput, CardSwitchProjection, CardSwitchStatus, CapPeriod, CapPoolDefinition, EvaluationContext, MerchantIdentity, MerchantResolution, Money, OfferConfirmation, OfferRuleVersion, OfferSourceSnapshot, RankingEntry, RewardBreakdown, RewardComponentRecord, TransactionTuple, UserBenefitInput, UserBenefitStatus, RecommendationPreflight, RecommendationRequiredAction, RecommendationRequirement, Diagnostic, EvidenceRecord, PaymentRouteRecord, PaymentCapabilityRecord, PaymentAccountRecord, EventRewardLedgerRecord, EventRewardReversalRecord, PaymentPathRequest, PaymentPathRecommendation, PaymentPathCandidate, PaymentPathEvent, EligibilityFact, RewardValuationSnapshot, FxResolutionRequest, FxRateObservation, AppliedFxRate, RecommendationIntent, RecommendationIntentResult, IntentCandidate, FxPolicyRecord, FxPolicyResearchRequest, FxObservationRecord, FxSnapshot, FxPolicyRequirement } from './types.js';
+import type { CardDescriptor, CardSwitchInput, CardSwitchProjection, CardSwitchStatus, CapPeriod, CapPoolDefinition, EvaluationContext, MerchantIdentity, MerchantResolution, Money, OfferConfirmation, OfferRuleVersion, OfferSourceSnapshot, RewardBreakdown, RewardComponentRecord, TransactionTuple, UserBenefitInput, UserBenefitStatus, EvidenceRecord, PaymentRouteRecord, PaymentCapabilityRecord, PaymentAccountRecord, EventRewardLedgerRecord, EventRewardReversalRecord, PaymentPathRequest, PaymentPathRecommendation, PaymentPathCandidate, PaymentPathEvent, EligibilityFact, RewardValuationSnapshot, FxResolutionRequest, AppliedFxRate, RecommendationIntent, RecommendationIntentResult, IntentCandidate, FxSnapshot } from './types.js';
 import type { StartupConfig } from './startup.js';
 import { RewardServiceError } from './errors.js';
-import { validateCard, validateCapPool, validateConfirmation, validateEligibilityFact, validateMerchant, validateRecommendationTransaction, validateRule, validateSnapshot, validateTransaction, validateEvidence, validateFactCandidate, validatePaymentRouteRecord, validatePaymentCapability, validatePaymentAccountRecord, validateEventRewardInput, validatePaymentEvent, validatePaymentEventChainRule, validatePaymentEventRule, validateRewardValuationSnapshot, validateFxPolicy, validateFxObservation, validateFxPolicyRequirement } from './validation.js';
+import { validateCard, validateCapPool, validateConfirmation, validateEligibilityFact, validateMerchant, validateRecommendationTransaction, validateRule, validateSnapshot, validateTransaction, validateEvidence, validateFactCandidate, validatePaymentRouteRecord, validatePaymentCapability, validatePaymentAccountRecord, validateEventRewardInput, validatePaymentEvent, validatePaymentEventChainRule, validatePaymentEventRule, validateRewardValuationSnapshot } from './validation.js';
 import { cardSwitchStatus, projectionFromInput } from './card-switch.js';
 import { buildFxResolutionRequest, freezeAppliedFxRate, deriveConversionOwner } from './fx.js';
 import { validateRecommendationIntent } from './validation.js';
@@ -39,23 +39,9 @@ function accountId(): string { return ownedId('acct'); }
 function normalizedMerchantKey(value: string): string {
   return value.normalize('NFKC').toLocaleLowerCase('und').replace(/[\p{P}\p{S}]+/gu, ' ').replace(/\s+/gu, ' ').trim();
 }
-type FxPolicyAction = RecommendationIntentResult['requiredActions'][number];
 
 export class RewardService {
   constructor(readonly store: LedgerStore, readonly metadataUser: string | undefined) {}
-
-  private hasFxPolicy(requirement: FxPolicyRequirement): boolean {
-    return (this.store.read().fxPolicies ?? []).some((policy) => policy.ownerUser === this.metadataUser && policy.baseCurrency === requirement.baseCurrency && policy.quoteCurrency === requirement.quoteCurrency && JSON.stringify(policy.scope) === JSON.stringify(requirement.scope));
-  }
-
-  private fxPolicyResearchAction(requirement: FxPolicyRequirement, sourceUrl?: string): FxPolicyAction {
-    const request: FxPolicyResearchRequest = {
-      purpose: 'policy_research', scope: requirement.scope, sourceStatus: sourceUrl ? 'known' : 'discovery_required', ...(sourceUrl ? { sourceUrls: [sourceUrl] } : {}),
-      requiredFields: ['scope', 'baseCurrency', 'quoteCurrency', 'conversionOwner', 'rateType', 'rateDirection', 'conversionTiming', 'feeBasis', 'markupBasis', 'freshForSeconds', 'maxEstimateAgeSeconds', 'sourceUrl', 'evidenceId', 'validity period'],
-      submission: { tool: 'upsert_fx_policy', field: 'policy' },
-    };
-    return { id: `fx-policy:${crypto.createHash('sha256').update(JSON.stringify(requirement)).digest('hex').slice(0, 16)}`, action: 'research_fx_policy', owner: 'agent', path: 'fxPolicy', requiredFacts: request.requiredFields, submission: request.submission, completionCondition: 'repeat the ingestion or recommend flow after storing a validated policy backed by accepted official evidence', fxPolicyResearchRequest: request };
-  }
 
   recordEventReward(input: unknown): EventRewardLedgerRecord {
     if (!this.metadataUser) throw new RewardServiceError('UNAUTHENTICATED', 'event reward recording requires an authenticated user');
@@ -180,50 +166,12 @@ export class RewardService {
     return (this.store.read().valuationSnapshots ?? []).filter((snapshot) => snapshot.ownerUser === this.metadataUser);
   }
 
-  upsertFxPolicy(input: unknown): FxPolicyRecord {
-    if (!this.metadataUser) throw new RewardServiceError('UNAUTHENTICATED', 'FX policy requires an authenticated user');
-    const source = typeof input === 'object' && input !== null ? input as Record<string, unknown> : {};
-    const parsed = validateFxPolicy({ ...source, id: source.id ?? 'policy_input' });
-    const state = this.store.read();
-    const evidence = state.evidence.find((candidate) => candidate.id === parsed.evidenceId && candidate.ownerUser === this.metadataUser);
-    if (!evidence || evidence.sourceType !== 'official' || evidence.reviewState !== 'accepted' || evidence.authority === 'user') throw new RewardServiceError('NEEDS_REVIEW', 'FX policy requires accepted official evidence owned by the current user');
-    const existing = (state.fxPolicies ?? []).find((candidate) => candidate.ownerUser === this.metadataUser && candidate.idempotencyKey === parsed.idempotencyKey);
-    const desired = { ...parsed, id: existing?.id ?? ownedId('fxp'), ownerUser: this.metadataUser };
-    if (existing) { if (JSON.stringify({ ...existing, id: parsed.id, ownerUser: parsed.ownerUser }) !== JSON.stringify({ ...desired, id: parsed.id, ownerUser: parsed.ownerUser })) throw new RewardServiceError('IDEMPOTENCY_CONFLICT', 'idempotencyKey already belongs to a different FX policy'); return existing; }
-    this.store.update((next) => { next.fxPolicies = [...(next.fxPolicies ?? []), desired]; });
-    return desired;
-  }
-
-  listFxPolicies(): readonly FxPolicyRecord[] {
-    if (!this.metadataUser) return [];
-    return (this.store.read().fxPolicies ?? []).filter((policy) => policy.ownerUser === this.metadataUser);
-  }
-
-  upsertFxObservation(input: unknown): FxObservationRecord {
-    if (!this.metadataUser) throw new RewardServiceError('UNAUTHENTICATED', 'FX observation requires an authenticated user');
-    const source = typeof input === 'object' && input !== null ? input as Record<string, unknown> : {};
-    const parsed = validateFxObservation({ ...source, id: source.id ?? 'observation_input' });
-    if (!parsed.sourceUrl?.startsWith('https://') || !parsed.contentHash) throw new RewardServiceError('INVALID_INPUT', 'FX observation requires an HTTPS sourceUrl and contentHash');
-    const state = this.store.read();
-    const existing = (state.fxObservations ?? []).find((candidate) => candidate.ownerUser === this.metadataUser && candidate.idempotencyKey === parsed.idempotencyKey);
-    const desired = { ...parsed, id: existing?.id ?? ownedId('fxp'), ownerUser: this.metadataUser };
-    if (existing) { if (JSON.stringify({ ...existing, id: parsed.id, ownerUser: parsed.ownerUser }) !== JSON.stringify({ ...desired, id: parsed.id, ownerUser: parsed.ownerUser })) throw new RewardServiceError('IDEMPOTENCY_CONFLICT', 'idempotencyKey already belongs to a different FX observation'); return existing; }
-    this.store.update((next) => { next.fxObservations = [...(next.fxObservations ?? []), desired]; });
-    return desired;
-  }
-
-  listFxObservations(): readonly FxObservationRecord[] {
-    if (!this.metadataUser) return [];
-    return (this.store.read().fxObservations ?? []).filter((observation) => observation.ownerUser === this.metadataUser);
-  }
-
   upsertPaymentCapability(input: unknown): PaymentCapabilityRecord {
     if (!this.metadataUser) throw new RewardServiceError('UNAUTHENTICATED', 'payment capability requires an authenticated user');
     const source = typeof input === 'object' && input !== null ? input as Record<string, unknown> : {};
     const parsed = validatePaymentCapability({ ...source, id: source.id ?? 'capability_input', status: source.status ?? 'active' });
+    if (parsed.evidenceIds.length === 0) throw new RewardServiceError('NEEDS_REVIEW', 'payment capability requires at least one self-asserted evidenceId');
     const state = this.store.read();
-    const evidence = parsed.evidenceIds.map((id) => state.evidence.find((candidate) => candidate.id === id && candidate.ownerUser === this.metadataUser));
-    if (evidence.some((candidate) => !candidate || candidate.sourceType !== 'official' || candidate.reviewState !== 'accepted')) throw new RewardServiceError('NEEDS_REVIEW', 'payment capability requires accepted official evidence owned by the current user');
     const existing = (state.paymentCapabilities ?? []).find((candidate) => candidate.idempotencyKey === parsed.idempotencyKey);
     const { ownerUser: _ownerUser, ...publicCapability } = parsed;
     const desired: PaymentCapabilityRecord = { ...publicCapability, id: existing?.id ?? ownedId('cap') };
@@ -234,9 +182,8 @@ export class RewardService {
 
   listPaymentCapabilities(): readonly PaymentCapabilityRecord[] { return this.store.read().paymentCapabilities ?? []; }
 
-  upsertPaymentRoute(input: unknown, fxPolicyRequirement?: FxPolicyRequirement): PaymentRouteRecord & { requiredActions?: readonly FxPolicyAction[] } {
+  upsertPaymentRoute(input: unknown): PaymentRouteRecord {
     const source = typeof input === 'object' && input !== null ? input as Record<string, unknown> : {};
-    const requirement = fxPolicyRequirement === undefined ? undefined : validateFxPolicyRequirement(fxPolicyRequirement);
     const parsed = validatePaymentRouteRecord({ ...source, id: 'route_input', ...(source.status === undefined ? { status: 'active' } : {}), ...(source.ownerUser === undefined ? {} : { ownerUser: source.ownerUser }) });
     const state = this.store.read();
     const accountId = parsed.funding.kind === 'account' ? parsed.funding.accountId : undefined;
@@ -252,13 +199,12 @@ export class RewardService {
         if (!parsed.failure) throw new RewardServiceError('INVALID_INPUT', 'failed payment routes require failure details');
         const failed: PaymentRouteRecord = { ...existing, status: 'failed', failure: parsed.failure };
         this.store.update((next) => { next.paymentRoutes = next.paymentRoutes.map((route) => route.id === existing.id ? failed : route); });
-        return requirement !== undefined && !this.hasFxPolicy(requirement) ? { ...failed, requiredActions: [this.fxPolicyResearchAction(requirement, failed.sourceUrl)] } : failed;
+        return failed;
       }
       if (JSON.stringify({ ...existing, id: parsed.id, ownerUser: parsed.ownerUser }) !== JSON.stringify({ ...desired, id: parsed.id, ownerUser: parsed.ownerUser })) throw new RewardServiceError('IDEMPOTENCY_CONFLICT', 'idempotencyKey already belongs to a different payment route');
-      return requirement !== undefined && !this.hasFxPolicy(requirement) ? { ...existing, requiredActions: [this.fxPolicyResearchAction(requirement, existing.sourceUrl)] } : existing;
+      return existing;
     }
     this.store.update((next) => { next.paymentRoutes.push(desired); });
-    if (requirement !== undefined && !this.hasFxPolicy(requirement)) return { ...desired, requiredActions: [this.fxPolicyResearchAction(requirement, desired.sourceUrl)] };
     return desired;
   }
 
@@ -295,7 +241,8 @@ export class RewardService {
     return state.cardSwitches.filter((projection) => projection.ownerUser === this.metadataUser || (projection.ownerUser === undefined && this.metadataUser === undefined));
   }
 
-  private context(state: StoredState, now = nowIso(), forTransaction?: TransactionTuple): EvaluationContext {
+  /** Builds a cap-aware evaluation context; public so callers can drive `rankCards`/`evaluateOffer` directly for dry-run inspection. */
+  context(state: StoredState, now = nowIso(), forTransaction?: TransactionTuple): EvaluationContext {
     const usageByKey: Record<string, Money> = {};
     const targetDate = forTransaction?.occurredAt ?? now;
 
@@ -391,7 +338,7 @@ export class RewardService {
     });
   }
 
-  registerCard(card: CardDescriptor, fxPolicyRequirement?: FxPolicyRequirement): CardDescriptor & { requiredActions?: readonly FxPolicyAction[] } {
+  registerCard(card: CardDescriptor): CardDescriptor {
     card = validateCard(card);
     if (!card.id || !card.issuer || !card.productName) throw new RewardServiceError('INVALID_CARD', 'card id, issuer, and productName are required');
     let result!: CardDescriptor;
@@ -401,10 +348,6 @@ export class RewardService {
       else state.cards.push(card);
       result = card;
     });
-    if (fxPolicyRequirement !== undefined) {
-      const requirement = validateFxPolicyRequirement(fxPolicyRequirement);
-      if (!this.hasFxPolicy(requirement)) return { ...result, requiredActions: [this.fxPolicyResearchAction(requirement)] };
-    }
     return result;
   }
 
@@ -571,15 +514,13 @@ export class RewardService {
     confirmation?: OfferConfirmation,
     capPools?: readonly CapPoolDefinition[],
     merchant?: MerchantOnboardingInput,
-    fxPolicyRequirement?: FxPolicyRequirement,
-  ): { snapshot: OfferSourceSnapshot; rule: OfferRuleVersion; merchant?: MerchantIdentity; requiredActions?: readonly RecommendationIntentResult['requiredActions'][number][] } {
+  ): { snapshot: OfferSourceSnapshot; rule: OfferRuleVersion; merchant?: MerchantIdentity } {
     snapshot = validateSnapshot(snapshot);
     if (merchant !== undefined && merchant.status !== undefined && merchant.status !== 'candidate') throw new RewardServiceError('INVALID_INPUT', 'new merchants must start as candidate');
     const merchantDraft = merchant === undefined ? undefined : validateMerchant({ ...merchant, canonicalId: 'mch_pending', status: 'candidate' });
     rule = validateRule(rule);
     if (merchantDraft?.provenance.sourceSnapshotId !== undefined && merchantDraft.provenance.sourceSnapshotId !== snapshot.id) throw new RewardServiceError('INVALID_OFFER', 'merchant provenance must reference the offer source snapshot');
     const incomingPools = (capPools ?? []).map((pool) => validateCapPool(pool));
-    const requiredFxPolicy = fxPolicyRequirement === undefined ? undefined : validateFxPolicyRequirement(fxPolicyRequirement);
     const conf = confirmation
       ? validateConfirmation(confirmation)
       : (rule.confirmation ? validateConfirmation(rule.confirmation) : undefined);
@@ -655,18 +596,6 @@ export class RewardService {
       else state.rules.push(storedRule);
       if (onboardedMerchant && !state.merchants.some((item) => item.canonicalId === onboardedMerchant!.canonicalId)) state.merchants.push(onboardedMerchant);
     });
-    if (requiredFxPolicy) {
-      const current = this.store.read().fxPolicies ?? [];
-      const policyExists = current.some((policy) => policy.ownerUser === this.metadataUser && policy.baseCurrency === requiredFxPolicy.baseCurrency && policy.quoteCurrency === requiredFxPolicy.quoteCurrency && JSON.stringify(policy.scope) === JSON.stringify(requiredFxPolicy.scope));
-      if (!policyExists) {
-        const request: FxPolicyResearchRequest = {
-          purpose: 'policy_research', scope: requiredFxPolicy.scope, sourceStatus: 'known', sourceUrls: [snapshot.url],
-          requiredFields: ['scope', 'baseCurrency', 'quoteCurrency', 'conversionOwner', 'rateType', 'rateDirection', 'conversionTiming', 'feeBasis', 'markupBasis', 'freshForSeconds', 'maxEstimateAgeSeconds', 'sourceUrl', 'evidenceId', 'validity period'],
-          submission: { tool: 'upsert_fx_policy', field: 'policy' },
-        };
-        return { snapshot, rule: storedRule, ...(onboardedMerchant ? { merchant: onboardedMerchant } : {}), requiredActions: [{ id: `fx-policy:${crypto.createHash('sha256').update(JSON.stringify(requiredFxPolicy)).digest('hex').slice(0, 16)}`, action: 'research_fx_policy', owner: 'agent' as const, path: 'fxPolicy', requiredFacts: request.requiredFields, submission: request.submission, completionCondition: 'repeat the ingestion or recommend flow after storing a validated policy backed by accepted official evidence', fxPolicyResearchRequest: request }] };
-      }
-    }
     return { snapshot, rule: storedRule, ...(onboardedMerchant ? { merchant: onboardedMerchant } : {}) };
   }
 
@@ -680,119 +609,7 @@ export class RewardService {
     return result.rule;
   }
 
-  preflightRecommendation(transaction: unknown, options: { context?: EvaluationContext } = {}): RecommendationPreflight {
-    const state = this.store.read();
-    let parsed: TransactionTuple;
-    try {
-      parsed = validateRecommendationTransaction(transaction);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'invalid recommendation transaction';
-      const dataVersion = crypto.createHash('sha256').update(JSON.stringify(state)).digest('hex').slice(0, 16);
-      return { ready: false, knownFacts: [], requirements: [{ id: 'transaction', category: 'transaction', path: 'transaction', status: 'invalid', retryAction: 'fix_payload' }], requiredActions: [{ action: 'ask_user', path: 'transaction', requiredFacts: [message] }], diagnostics: [{ code: 'invalid_input', path: 'transaction', requiredFacts: [message], retryAction: 'fix_payload' }], evaluatedAt: options.context?.now ?? nowIso(), dataVersion };
-    }
-    const evaluatedAt = options.context?.now ?? parsed.occurredAt;
-    const requirements: RecommendationRequirement[] = [];
-    const requiredActions: RecommendationRequiredAction[] = [];
-    const diagnostics: Diagnostic[] = [];
-    const knownFacts = ['transaction:amount', 'transaction:occurredAt'];
-    let resolvedMerchantId: string | undefined;
-    const card = parsed.cardId ? state.cards.find((candidate) => candidate.id === parsed.cardId) : undefined;
-    if (card) knownFacts.push(`card:${card.id}`);
-    else if (parsed.cardId) {
-      requirements.push({ id: 'card', category: 'card', path: 'transaction.cardId', status: 'missing', retryAction: 'register_card' });
-      diagnostics.push({ code: 'missing_required_fact', path: 'transaction.cardId', requiredFacts: ['transaction.cardId'], retryAction: 'register_card' });
-      requiredActions.push({ action: 'ask_user', path: 'transaction.cardId', requiredFacts: ['transaction.cardId'] });
-    }
-    if (parsed.routeId) {
-      const route = state.paymentRoutes.find((candidate) => candidate.id === parsed.routeId && (candidate.ownerUser === this.metadataUser || (candidate.ownerUser === undefined && this.metadataUser === undefined)));
-      if (!route) {
-        requirements.push({ id: 'route', category: 'payment_route', path: 'transaction.routeId', status: 'missing', retryAction: 'register_payment_route' });
-        diagnostics.push({ code: 'missing_required_fact', path: 'transaction.routeId', requiredFacts: ['registered payment route'], retryAction: 'register_payment_route' });
-        requiredActions.push({ action: 'register_payment_route', path: 'transaction.routeId', requiredFacts: ['registered payment route'] });
-      } else if (route.status !== 'active' || (route.validTo && Date.parse(route.validTo) < Date.parse(evaluatedAt))) {
-        requirements.push({ id: 'route', category: 'payment_route', path: 'transaction.routeId', status: route.status === 'conflict' ? 'conflict' : 'stale', retryAction: 'refresh_external_data' });
-        diagnostics.push({ code: route.status === 'conflict' ? 'needs_review' : 'stale_rule', path: 'transaction.routeId', requiredFacts: ['active current payment route'], retryAction: 'refresh_external_data' });
-        requiredActions.push({ action: 'refresh_external_data', path: 'transaction.routeId', requiredFacts: ['active current payment route'] });
-      } else knownFacts.push(`route:${route.id}`);
-    }
-    const rules = state.rules.filter((rule) => rule.status === 'active' && (!card || rule.cardId === card.id));
-    const merchantSpecific = rules.some((rule) => Boolean(rule.match.merchants?.length));
-    if (parsed.merchant && merchantSpecific) {
-      const resolution = this.resolveMerchant(parsed.merchant, { ...(parsed.country ? { country: parsed.country } : {}) });
-      if (resolution.resolutionStatus !== 'confirmed') {
-        requirements.push({ id: 'merchant', category: 'merchant_identity', path: 'transaction.merchant', status: resolution.resolutionStatus === 'ambiguous' ? 'needs_review' : 'missing', retryAction: 'resolve_merchant' });
-        diagnostics.push({ code: 'merchant_ambiguous', path: 'transaction.merchant', requiredFacts: ['transaction.market'], retryAction: 'resolve_merchant' });
-        requiredActions.push({ action: 'resolve_merchant', path: 'transaction.merchant', requiredFacts: ['transaction.market'] });
-      } else { resolvedMerchantId = resolution.merchant!.canonicalId; knownFacts.push(`merchant:${resolvedMerchantId}`); }
-    }
-    if (!rules.length && card) {
-      requirements.push({ id: 'offer', category: 'offer_rule', path: 'rules', status: 'needs_review', retryAction: 'review_offer' });
-      diagnostics.push({ code: 'needs_review', path: 'rules', requiredFacts: ['verified active offer rule'], retryAction: 'review_offer' });
-      requiredActions.push({ action: 'review_offer', path: 'rules', requiredFacts: ['verified active offer rule'] });
-    }
-    if (resolvedMerchantId && !rules.some((rule) => rule.match.merchants?.includes(resolvedMerchantId!))) {
-      diagnostics.push({ code: 'no_active_offer', path: 'transaction.merchant', requiredFacts: [], retryAction: 'continue_with_base_rule' });
-    }
-    for (const rule of rules) {
-      const snapshot = state.snapshots.find((candidate) => candidate.id === rule.sourceSnapshotId);
-      if (!snapshot?.verified) {
-        requirements.push({ id: `source:${rule.id}`, category: 'offer_source', path: `rules.${rule.id}.sourceSnapshotId`, status: 'needs_review', retryAction: 'review_offer' });
-        diagnostics.push({ code: 'source_untrusted', path: `rules.${rule.id}.sourceSnapshotId`, requiredFacts: ['verified offer source'], retryAction: 'review_offer' });
-        requiredActions.push({ action: 'review_offer', path: `rules.${rule.id}`, requiredFacts: ['verified offer source'] });
-      }
-      if (Date.parse(rule.validFrom) > Date.parse(evaluatedAt) || (rule.validTo !== undefined && Date.parse(rule.validTo) < Date.parse(evaluatedAt))) {
-        requirements.push({ id: `rule:${rule.id}`, category: 'offer_rule', path: `rules.${rule.id}`, status: 'stale', retryAction: 'refresh_external_data' });
-        diagnostics.push({ code: 'stale_rule', path: `rules.${rule.id}`, requiredFacts: ['current offer rule'], retryAction: 'refresh_external_data' });
-        requiredActions.push({ action: 'refresh_external_data', path: `rules.${rule.id}`, requiredFacts: ['current offer rule'] });
-      }
-    }
-    for (const evidence of state.evidence) {
-      const relevant = evidence.requirementId.startsWith('fx') || evidence.requirementId.includes(parsed.cardId ?? '') || evidence.requirementId.includes(parsed.merchant ?? '');
-      if (!relevant) continue;
-      if (evidence.reviewState === 'conflict') {
-        requirements.push({ id: `evidence:${evidence.id}`, category: 'external_data', path: `evidence.${evidence.id}`, status: 'conflict', retryAction: 'submit_evidence' });
-        diagnostics.push({ code: evidence.requirementId.startsWith('fx') ? 'fx_conflict' : 'needs_review', path: `evidence.${evidence.id}`, requiredFacts: ['resolved evidence'], retryAction: 'submit_evidence' });
-        requiredActions.push({ action: 'submit_evidence', path: `evidence.${evidence.id}`, requiredFacts: ['resolved evidence'] });
-      } else if (evidence.refreshAfter !== undefined && Date.parse(evidence.refreshAfter) <= Date.parse(evaluatedAt)) {
-        requirements.push({ id: `evidence:${evidence.id}`, category: 'external_data', path: `evidence.${evidence.id}`, status: 'stale', retryAction: 'refresh_external_data' });
-        diagnostics.push({ code: evidence.requirementId.startsWith('fx') ? 'fx_stale' : 'stale_rule', path: `evidence.${evidence.id}`, requiredFacts: ['fresh external evidence'], retryAction: 'refresh_external_data' });
-        requiredActions.push({ action: 'refresh_external_data', path: `evidence.${evidence.id}`, requiredFacts: ['fresh external evidence'] });
-      }
-    }
-    const foreignRule = rules.some((rule) => rule.settlementCurrency !== parsed.amount.currency);
-    let fxResolutionRequest: FxResolutionRequest | undefined;
-    if (foreignRule) {
-      fxResolutionRequest = buildFxResolutionRequest({
-        transaction: parsed,
-        rules,
-        card,
-      });
-      if (parsed.routeContext && !parsed.routeContext.conversionOwner) {
-        requirements.push({ id: 'route', category: 'payment_route', path: 'transaction.routeContext.conversionOwner', status: 'missing', retryAction: 'ask_user' });
-        diagnostics.push({ code: 'missing_required_fact', path: 'transaction.routeContext.conversionOwner', requiredFacts: ['transaction.routeContext.conversionOwner'], retryAction: 'ask_user' });
-        requiredActions.push({ action: 'ask_user', path: 'transaction.routeContext.conversionOwner', requiredFacts: ['transaction.routeContext.conversionOwner'] });
-      }
-      if (!parsed.fx) {
-        requirements.push({ id: 'fx', category: 'fx_rate', path: 'transaction.fx', status: 'missing', retryAction: fxResolutionRequest.retryAction });
-        diagnostics.push({ code: 'fx_missing', path: 'transaction.fx', requiredFacts: fxResolutionRequest.requiredFacts, retryAction: fxResolutionRequest.retryAction });
-        requiredActions.push({ action: fxResolutionRequest.retryAction === 'ask_user' ? 'ask_user' : 'refresh_external_data', path: 'transaction.fx', requiredFacts: fxResolutionRequest.requiredFacts });
-      } else if (parsed.fx.baseCurrency !== parsed.amount.currency) {
-        requirements.push({ id: 'fx', category: 'fx_rate', path: 'transaction.fx.baseCurrency', status: 'invalid', retryAction: 'rebuild_snapshot' });
-        diagnostics.push({ code: 'fx_pair_mismatch', path: 'transaction.fx.baseCurrency', requiredFacts: [`base currency ${parsed.amount.currency}`], retryAction: 'rebuild_snapshot' });
-        requiredActions.push({ action: 'refresh_external_data', path: 'transaction.fx', requiredFacts: [`base currency ${parsed.amount.currency}`] });
-      } else if (parsed.mode === 'actual' && parsed.fx.rateType === 'mid_market') {
-        requirements.push({ id: 'fx', category: 'fx_rate', path: 'transaction.fx.rateType', status: 'needs_review', retryAction: 'query_approved_fx_source' });
-        diagnostics.push({ code: 'needs_review', path: 'transaction.fx.rateType', requiredFacts: ['transaction.fx.rateType'], retryAction: 'query_approved_fx_source' });
-        requiredActions.push({ action: 'refresh_external_data', path: 'transaction.fx.rateType', requiredFacts: ['transaction.fx.rateType'] });
-      }
-    }
-    const dataVersion = crypto.createHash('sha256').update(JSON.stringify(state)).digest('hex').slice(0, 16);
-    const blocking = diagnostics.some((diagnostic) => diagnostic.code !== 'no_active_offer');
-    return { ready: !blocking, knownFacts, requirements, requiredActions, diagnostics, evaluatedAt, dataVersion, ...(fxResolutionRequest ? { fxResolutionRequest } : {}) };
-  }
-
-  /** Merchant-first recommendation entry point. It only reads the tenant
-   * store; the older transaction-shaped recommend remains unchanged. */
+  /** Merchant-first recommendation entry point; the single public entry point for recommendations. */
   recommendIntent(value: unknown): RecommendationIntentResult {
     const input = validateRecommendationIntent(value);
     const details = typeof input.merchant === 'string' ? { name: input.merchant } : input.merchant;
@@ -832,18 +649,11 @@ export class RewardService {
       ...(input.channel ? { channel: input.channel } : {}),
     });
     const actions: Array<RecommendationIntentResult['requiredActions'][number]> = [];
-    const fxPolicyRequests = new Map<string, { request: FxPolicyResearchRequest; candidateIds: Set<string> }>();
     const addAction = (action: RecommendationIntentResult['requiredActions'][number]) => {
       const existing = actions.find((candidate) => candidate.id === action.id);
       if (!existing) { actions.push(action); return; }
       const candidateIds = [...new Set([...(existing.candidateIds ?? []), ...(action.candidateIds ?? [])])].sort();
       if (candidateIds.length) (existing as { candidateIds?: readonly string[] }).candidateIds = candidateIds;
-    };
-    const registerFxPolicyResearch = (request: FxPolicyResearchRequest, candidateId: string) => {
-      const key = JSON.stringify(request.scope);
-      const existing = fxPolicyRequests.get(key);
-      if (existing) existing.candidateIds.add(candidateId);
-      else fxPolicyRequests.set(key, { request, candidateIds: new Set([candidateId]) });
     };
     if (resolution.resolutionStatus !== 'confirmed') addAction({
       id: 'merchant', action: resolution.resolutionStatus === 'ambiguous' ? 'resolve_merchant' : 'research_merchant',
@@ -858,29 +668,9 @@ export class RewardService {
       ...(merchant ? { merchant } : {}), ...(country ? { country } : {}),
       ...(input.channel ? { channel: input.channel } : {}),
       ...(input.paymentMethod ? { paymentMethod: input.paymentMethod } : {}),
-      ...(input.fx ? { fx: input.fx } : input.fxObservation ? { fx: input.fxObservation } : {}),
+      ...(input.fx ? { fx: input.fx } : {}),
     }) : undefined;
     const context = this.context(state, evaluatedAt, transaction);
-    const storedFx = (baseCurrency: string, quoteCurrency: string, card?: CardDescriptor): { observation: FxObservationRecord; stale: boolean } | undefined => {
-      const target = Date.parse(evaluatedAt);
-      const policy = (state.fxPolicies ?? []).filter((candidate) => candidate.ownerUser === this.metadataUser && candidate.baseCurrency === baseCurrency.toUpperCase() && candidate.quoteCurrency === quoteCurrency.toUpperCase() &&
-        ((candidate.scope.kind === 'card' && candidate.scope.cardId === card?.id) || (candidate.scope.kind === 'issuer' && candidate.scope.issuer === card?.issuer)) &&
-        (!candidate.validFrom || Date.parse(candidate.validFrom) <= target) && (!candidate.validTo || Date.parse(candidate.validTo) >= target))
-        .sort((a, b) => Number(b.scope.kind === 'card') - Number(a.scope.kind === 'card'))[0];
-      const maxEstimateAge = (policy?.maxEstimateAgeSeconds ?? 30 * 24 * 3600) * 1000;
-      const candidates = (state.fxObservations ?? [])
-        .filter((observation) => observation.ownerUser === this.metadataUser && observation.baseCurrency === baseCurrency.toUpperCase() && observation.quoteCurrency === quoteCurrency.toUpperCase())
-        .filter((observation) => observation.routeIdScope === undefined && observation.edgeIdScope === undefined)
-        .filter((observation) => !policy || (observation.rateType === policy.rateType && (observation.conversionOwner === undefined || observation.conversionOwner === policy.conversionOwner)))
-        .filter((observation) => (!observation.cardIdScope || observation.cardIdScope === card?.id) && (!observation.issuerScope || observation.issuerScope === card?.issuer))
-        .filter((observation) => { const captured = Date.parse(observation.capturedAt); return Number.isFinite(captured) && captured <= target && target - captured <= maxEstimateAge; })
-        .sort((a, b) => Date.parse(b.capturedAt) - Date.parse(a.capturedAt));
-      const observation = candidates[0];
-      if (!observation) return undefined;
-      const age = target - Date.parse(observation.capturedAt);
-      const freshFor = (policy?.freshForSeconds ?? observation.maxAgeSeconds ?? 7 * 24 * 3600) * 1000;
-      return { observation, stale: age > freshFor && age <= maxEstimateAge };
-    };
     const cards = state.cards.filter(card => input.cardIds === undefined || input.cardIds.includes(card.id));
     const registeredRoutes = this.listPaymentRoutes().filter(route =>
       (input.routeIds === undefined || input.routeIds.includes(route.id)) &&
@@ -893,7 +683,7 @@ export class RewardService {
         (!capability.channel || capability.channel === input.channel) &&
         (!capability.validFrom || Date.parse(capability.validFrom) <= Date.parse(evaluatedAt)) &&
         (!capability.validTo || Date.parse(capability.validTo) >= Date.parse(evaluatedAt)) &&
-        capability.evidenceIds.length > 0 && capability.evidenceIds.every((id) => state.evidence.some((evidence) => evidence.id === id && evidence.ownerUser === this.metadataUser && evidence.sourceType === 'official' && evidence.reviewState === 'accepted' && (!evidence.validFrom || Date.parse(evidence.validFrom) <= Date.parse(evaluatedAt)) && (!evidence.validTo || Date.parse(evidence.validTo) >= Date.parse(evaluatedAt))));
+        capability.evidenceIds.length > 0;
       for (const capability of this.listPaymentCapabilities().filter(validCapability)) {
         const fundingOptions: PaymentRouteRecord['funding'][] = [];
         if (capability.fundingKinds.includes('credit_card')) for (const card of cards) fundingOptions.push({ kind: 'credit_card', cardId: card.id });
@@ -957,41 +747,10 @@ export class RewardService {
     if (input.routeIds === undefined) for (const card of cards) {
       const rules = applicable(card.id);
       const ruleQuote = transaction ? rules.find((rule) => rule.settlementCurrency.toUpperCase() !== transaction.amount.currency.toUpperCase())?.settlementCurrency : undefined;
-      if (transaction && ruleQuote) {
-        const matchingPolicies = (state.fxPolicies ?? []).filter((candidate) => candidate.ownerUser === this.metadataUser &&
-          candidate.baseCurrency === transaction.amount.currency.toUpperCase() && candidate.quoteCurrency === ruleQuote.toUpperCase() &&
-          ((candidate.scope.kind === 'card' && candidate.scope.cardId === card.id) ||
-           (candidate.scope.kind === 'issuer' && candidate.scope.issuer === card.issuer)) &&
-          (!candidate.validFrom || Date.parse(candidate.validFrom) <= Date.parse(evaluatedAt)) &&
-          (!candidate.validTo || Date.parse(candidate.validTo) >= Date.parse(evaluatedAt)));
-        const policySignatures = new Set(matchingPolicies.map((candidate) => JSON.stringify({ conversionOwner: candidate.conversionOwner, rateType: candidate.rateType, rateDirection: candidate.rateDirection, conversionTiming: candidate.conversionTiming, feeBasis: candidate.feeBasis, markupBasis: candidate.markupBasis })));
-        if (policySignatures.size > 1) addAction({
-          id: `fx-policy-conflict:${card.id}`, action: 'ask_user', owner: 'user', path: 'fxPolicy',
-          requiredFacts: ['which conflicting FX policy applies to this card and transaction'], candidateIds: [`card:${card.id}`],
-          completionCondition: 'repeat recommend after the applicable policy is clarified or conflicting evidence is resolved',
-        });
-        const policy = policySignatures.size > 1 ? undefined : matchingPolicies[0];
-        if (!policy && policySignatures.size <= 1) {
-          const sourceUrls = state.evidence
-            .filter((evidence) => evidence.ownerUser === this.metadataUser && evidence.sourceType === 'official' && evidence.authority === 'issuer' && evidence.sourceUrl)
-            .map((evidence) => evidence.sourceUrl!)
-            .filter((url, index, all) => all.indexOf(url) === index)
-            .sort();
-          registerFxPolicyResearch({
-            purpose: 'policy_research', scope: { kind: 'issuer', issuer: card.issuer },
-            ...(sourceUrls.length ? { sourceUrls, sourceStatus: 'known' as const } : { sourceStatus: 'discovery_required' as const }),
-            requiredFields: ['scope', 'conversionOwner', 'rateType', 'rateDirection', 'conversionTiming', 'feeBasis', 'markupBasis', 'freshForSeconds', 'maxEstimateAgeSeconds', 'sourceUrl', 'evidenceId', 'validity period'],
-            submission: { tool: 'upsert_fx_policy', field: 'policy' },
-          }, `card:${card.id}`);
-        }
-      }
-      const reusable = transaction && ruleQuote ? storedFx(transaction.amount.currency, ruleQuote, card) : undefined;
-      const reusableFx = reusable?.observation;
-      const estimateFx = reusable?.stale ? { ...reusable.observation, maxAgeSeconds: 30 * 24 * 3600 } : reusableFx;
       const applicableFx = transaction?.fx &&
         (!transaction.fx.cardIdScope || transaction.fx.cardIdScope === card.id) &&
         (!transaction.fx.issuerScope || transaction.fx.issuerScope === card.issuer)
-        ? transaction.fx : estimateFx;
+        ? transaction.fx : undefined;
       const tx = transaction ? { ...transaction, cardId: card.id, route: { kind: 'direct_card' as const }, ...(applicableFx ? { fx: applicableFx } : { fx: undefined }) } : undefined;
       const evaluations = rules.map(rule => ({ rule, result: tx ? evaluateOffer(rule, tx, context) : undefined }));
       const projected = evaluations.map(({ rule, result }) => projectRule(rule, result));
@@ -1007,37 +766,30 @@ export class RewardService {
           });
           registerFxRequest(request, `card:${card.id}`, diagnostic.code);
         }
-        if (!input.fx && reusable?.stale && ruleQuote) {
-          const request = buildFxResolutionRequest({ transaction: tx, rules: [rules.find((rule) => rule.settlementCurrency === ruleQuote)!], card, scope: { kind: 'card', cardId: card.id, issuer: card.issuer }, submission: { tool: 'recommend', field: 'fx' } });
-          registerFxRequest(request, `card:${card.id}`, 'fx_stale');
-        }
       }
       candidates.push({
         id: `card:${card.id}`, kind: 'direct_card', cardId: card.id,
         fundingSource: { kind: 'credit_card', cardId: card.id },
         nodes: [{ id: 'funding', kind: 'funding_source', displayName: card.productName }, { id: 'merchant', kind: 'merchant', displayName: rawMerchant }],
         events: tx ? [{ kind: 'purchase', fromNodeId: 'funding', toNodeId: 'merchant', amount: tx.amount, transition: 'card_authorization' }] : [],
-        status: row?.status === 'ok' && !input.fxObservation ? 'ready' : !tx || unresolved || !rules.length ? 'unknown' : input.fxObservation ? 'unknown' : 'no_match',
+        status: row?.status === 'ok' ? 'ready' : !tx || unresolved || !rules.length ? 'unknown' : 'no_match',
         matchedRules: projected,
         ...(row?.status === 'ok' && row.cappedReward ? { reward: row.cappedReward } : {}),
         ...(row?.status === 'ok' && row.cappedReward && row.cappedReward.currency === transaction?.amount.currency ? { netSpend: { amountMinor: Math.max(0, (transaction?.amount.amountMinor ?? 0) - row.cappedReward.amountMinor), currency: transaction.amount.currency } } : {}),
-        ...(input.fxObservation ? { fxEstimate: { status: 'reference_estimate' as const, provider: input.fxObservation.provider, capturedAt: input.fxObservation.capturedAt, ...(input.fxObservation.sourceUrl ? { sourceUrl: input.fxObservation.sourceUrl } : {}), assumption: 'using an Agent-supplied public reference observation; issuer, card-scheme, fee, and eligibility terms remain unconfirmed' } } : reusable ? { fxEstimate: { status: reusable.observation.sourceKind === 'public_reference' ? 'reference_estimate' as const : reusable.stale ? 'stale_estimate' as const : 'policy_current' as const, provider: reusable.observation.provider, capturedAt: reusable.observation.capturedAt, ...(reusable.observation.sourceUrl ? { sourceUrl: reusable.observation.sourceUrl } : {}), assumption: reusable.observation.sourceKind === 'public_reference' ? 'using a stored public reference observation; issuer, card-scheme, fee, and eligibility terms remain unconfirmed' : reusable.stale ? 'using the stored observation within the planned-estimate maximum age; refresh before relying on the value' : 'using a fresh stored observation' } } : ruleQuote ? { fxEstimate: { status: 'unavailable' as const, assumption: 'no applicable stored observation is available; Agent must obtain the public reference observation before an estimate can be calculated' } } : {}),
+        ...(!applicableFx && ruleQuote ? { fxEstimate: { status: 'unavailable' as const, assumption: 'no fx snapshot was supplied for this foreign-currency rule; the Agent must fetch a current rate and supply it inline before an estimate can be calculated' } } : {}),
         exclusionReasons: row?.unknownReasons ?? (!rules.length ? ['no known offer rules'] : []),
       });
     }
     let pathTruncated = false;
     if (transaction && this.metadataUser) {
-      const persistedRouteFacts = (state.fxObservations ?? [])
-        .filter((observation) => observation.ownerUser === this.metadataUser && observation.routeIdScope !== undefined)
-        .map((observation) => ({ routeId: observation.routeIdScope!, ...(observation.edgeIdScope === undefined ? {} : { edgeId: observation.edgeIdScope }), fx: observation }));
       const routeFactMap = new Map<string, { routeId: string; edgeId?: string; fx: FxSnapshot }>();
-      for (const fact of [...persistedRouteFacts, ...(input.routeFacts ?? [])]) routeFactMap.set(`${fact.routeId}|${fact.edgeId ?? '*'}`, fact);
-      if (input.fxObservation) for (const route of routes) for (const edge of route.edges ?? []) {
+      for (const fact of input.routeFacts ?? []) routeFactMap.set(`${fact.routeId}|${fact.edgeId ?? '*'}`, fact);
+      if (input.fx) for (const route of routes) for (const edge of route.edges ?? []) {
         const costs = [edge.fee, edge.markup, edge.foreignTransactionFee, edge.dcc?.selected ? edge.dcc.fee : undefined]
           .filter((cost): cost is Money => cost !== undefined && cost.currency !== transaction.amount.currency);
-        if (costs.some((cost) => cost.currency === input.fxObservation!.baseCurrency && input.fxObservation!.quoteCurrency === transaction.amount.currency)) {
+        if (costs.some((cost) => cost.currency === input.fx!.baseCurrency && input.fx!.quoteCurrency === transaction.amount.currency)) {
           const key = `${route.id}|${edge.edgeId}`;
-          if (!routeFactMap.has(key)) routeFactMap.set(key, { routeId: route.id, edgeId: edge.edgeId, fx: input.fxObservation });
+          if (!routeFactMap.has(key)) routeFactMap.set(key, { routeId: route.id, edgeId: edge.edgeId, fx: input.fx });
         }
       }
       const result = this.recommendPaymentPaths({
@@ -1045,6 +797,7 @@ export class RewardService {
         ...(country ? { country } : {}), ...(input.channel ? { channel: input.channel } : {}),
         ...(input.paymentMethod ? { paymentMethod: input.paymentMethod } : {}),
         routeFacts: [...routeFactMap.values()],
+        ...(input.eligibilityFacts ? { eligibilityFacts: input.eligibilityFacts } : {}),
         routeIds: routes.map(route => route.id), routes, limit: 128, continuation: true,
       });
       for (const path of result.candidates) {
@@ -1066,8 +819,8 @@ export class RewardService {
         }) ? (() => {
           const stale = fxCostEvents.some((event) => Math.abs(Date.parse(evaluatedAt) - Date.parse(event.fx!.capturedAt)) > (event.fx!.maxAgeSeconds ?? 7 * 24 * 3600) * 1000);
           const observation = fxCostEvents[0]!.fx!;
-          const reference = input.fxObservation?.id === observation.id;
-          return { status: reference ? 'reference_estimate' as const : stale ? 'stale_estimate' as const : 'policy_current' as const, provider: observation.provider, capturedAt: observation.capturedAt, ...(observation.sourceUrl ? { sourceUrl: observation.sourceUrl } : {}), assumption: reference ? 'using an Agent-supplied public reference observation; route policy and final settlement cost remain unconfirmed' : stale ? 'using a route FX snapshot beyond its freshness window; refresh before relying on the value' : 'using the route or edge FX snapshot for foreign-currency costs' };
+          const fallback = input.fx?.id === observation.id;
+          return { status: stale ? 'stale_estimate' as const : fallback ? 'estimated_fallback' as const : 'estimated' as const, provider: observation.provider, capturedAt: observation.capturedAt, ...(observation.sourceUrl ? { sourceUrl: observation.sourceUrl } : {}), assumption: stale ? 'using a route FX snapshot beyond its freshness window; refresh before relying on the value' : fallback ? 'using the Agent-supplied fx snapshot as a general currency-pair fallback, not an exact per-edge fact; route policy and final settlement cost remain unconfirmed' : 'using the route or edge FX snapshot for foreign-currency costs' };
         })() : { status: 'unavailable' as const, assumption: 'foreign-currency route costs cannot be compared without a matching route or edge FX snapshot' };
         candidates.push({
           id: path.id, kind: 'payment_path', routeId: path.routeId, fundingSource: path.fundingSource,
@@ -1126,13 +879,6 @@ export class RewardService {
     for (const [key, { request, candidateIds, diagnostic }] of fxRequests) {
       addAction({ id: `fx:${crypto.createHash('sha256').update(key).digest('hex').slice(0, 16)}`, action: request.retryAction, owner: request.retryAction === 'ask_user' ? 'user' : 'agent', path: request.submission?.field ?? 'fx', requiredFacts: request.requiredFacts, candidateIds: [...candidateIds].sort(), ...(request.submission ? { submission: request.submission } : {}), completionCondition: `repeat recommend after supplying a validated ${request.baseCurrency}/${request.quoteCurrency} observation; without new evidence, stop retrying ${diagnostic}`, fxResolutionRequest: request });
     }
-    for (const { request, candidateIds } of fxPolicyRequests.values()) addAction({
-      id: `fx-policy:${crypto.createHash('sha256').update(JSON.stringify(request.scope)).digest('hex').slice(0, 16)}`,
-      action: 'research_fx_policy', owner: 'agent', path: 'fxPolicy', requiredFacts: request.requiredFields,
-      candidateIds: [...candidateIds].sort(), submission: request.submission,
-      completionCondition: 'repeat recommend after storing a validated policy backed by accepted official evidence',
-      fxPolicyResearchRequest: request,
-    });
     for (const action of actions) if (action.candidateIds === undefined) {
       const affected = action.id === 'merchant'
         ? candidates.filter((candidate) => candidate.matchedRules.some((rule) => Boolean(rule.conditions.merchants?.length))).map((candidate) => candidate.id)
@@ -1162,19 +908,6 @@ export class RewardService {
     };
   }
 
-  recommend(transaction: unknown, limit = 10, options: { cardIds?: readonly string[]; context?: EvaluationContext } = {}): RankingEntry[] {
-    let parsedTransaction = validateRecommendationTransaction(transaction);
-    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 20) throw new RewardServiceError('INVALID_INPUT', 'limit must be a safe integer from 1 to 20');
-    const state = this.store.read();
-    if (parsedTransaction.merchant) {
-      const resolution = this.resolveMerchant(parsedTransaction.merchant, { ...(parsedTransaction.country ? { country: parsedTransaction.country } : {}) });
-      if (resolution.resolutionStatus === 'confirmed' && resolution.merchant) parsedTransaction = { ...parsedTransaction, merchant: resolution.merchant.canonicalId };
-    }
-    const cards = options.cardIds === undefined ? state.cards : state.cards.filter((card) => options.cardIds!.includes(card.id));
-    const context = options.context ?? this.context(state, nowIso(), parsedTransaction);
-    return rankCards(cards, state.rules, parsedTransaction, context, limit);
-  }
-
   /** Build only explicitly active, user-owned and officially evidenced routes. */
   recommendPaymentPaths(input: PaymentPathRequest | { kind: 'payment_path'; payment_path: PaymentPathRequest }): PaymentPathRecommendation {
     if (!this.metadataUser) throw new RewardServiceError('UNAUTHENTICATED', 'payment path recommendation requires an authenticated user');
@@ -1193,12 +926,6 @@ export class RewardService {
     let invalidEligibilityEvidence = false;
     const factValues = new Map<string, string>();
     for (const fact of eligibilityFacts) {
-      const evidence = fact.evidenceId === undefined ? undefined : state.evidence.find((candidate) => candidate.id === fact.evidenceId);
-      const claim = evidence?.claim;
-      const validWindow = evidence !== undefined && (!evidence.validFrom || Date.parse(evidence.validFrom) <= Date.parse(asOf)) && (!evidence.validTo || Date.parse(evidence.validTo) >= Date.parse(asOf)) && (!evidence.refreshAfter || Date.parse(evidence.refreshAfter) >= Date.parse(asOf));
-      const owned = evidence?.ownerUser === this.metadataUser;
-      const exact = claim?.factKey === fact.factKey && JSON.stringify(claim.value) === JSON.stringify(fact.value) && (fact.version === undefined || claim.version === fact.version);
-      if (fact.validFrom !== undefined || fact.validTo !== undefined || !evidence || !owned || evidence.sourceType !== 'official' || evidence.reviewState !== 'accepted' || !validWindow || !exact) { invalidEligibilityEvidence = true; continue; }
       const key = `${fact.cardId ?? ''}|${fact.factKey}`;
       const value = JSON.stringify(fact.value);
       if (factValues.has(key) && factValues.get(key) !== value) { invalidEligibilityEvidence = true; continue; }
@@ -1233,8 +960,6 @@ export class RewardService {
       if (route.validFrom && Date.parse(route.validFrom) > Date.parse(asOf)) return false;
       if (route.validTo && Date.parse(route.validTo) < Date.parse(asOf)) return false;
       if (route.funding.kind === 'account' && route.funding.subtype === 'wallet_balance') { const account = state.paymentAccounts.find((candidate) => candidate.id === (route.funding as { accountId?: string }).accountId && candidate.ownerUser === this.metadataUser); if (!account?.balance || account.balance.amountMinor < input.amount.amountMinor || account.balance.currency !== input.amount.currency) return false; }
-      const validEvidence = (id: string) => state.evidence.some((evidence) => evidence.id === id && evidence.sourceType === 'official' && evidence.reviewState === 'accepted' && (!evidence.validFrom || Date.parse(evidence.validFrom) <= Date.parse(asOf)) && (!evidence.validTo || Date.parse(evidence.validTo) >= Date.parse(asOf)));
-      if (!route.evidenceIds.every(validEvidence)) return false;
       if (route.edges?.length) {
         if (!route.nodes?.length) return false;
       }
@@ -1244,7 +969,6 @@ export class RewardService {
     const branchBlocked: { routeId: string; reason: string }[] = [];
     const routePaths: PathOption[] = routes.flatMap((route): PathOption[] => {
       if (!route.edges?.length || !route.nodes?.length) return [{ route }];
-      const validEvidence = (id: string) => state.evidence.some((evidence) => evidence.id === id && evidence.sourceType === 'official' && evidence.reviewState === 'accepted' && (!evidence.validFrom || Date.parse(evidence.validFrom) <= Date.parse(asOf)) && (!evidence.validTo || Date.parse(evidence.validTo) >= Date.parse(asOf)));
       const usable = (edge: NonNullable<PaymentRouteRecord['edges']>[number]) => {
         const from = route.nodes?.find((node) => node.id === edge.fromNodeId);
         const to = route.nodes?.find((node) => node.id === edge.toNodeId);
@@ -1252,21 +976,10 @@ export class RewardService {
         const toRole = to?.kind;
         const legal = edge.transition === 'wallet_top_up' ? fromRole === 'funding_source' && toRole === 'wallet_balance' : edge.transition === 'account_debit' ? fromRole === 'funding_source' && ['wallet_balance', 'merchant'].includes(toRole ?? '') : edge.transition === 'wallet_debit' ? fromRole === 'wallet_balance' && ['payment_service', 'acceptance_network', 'merchant'].includes(toRole ?? '') : edge.transition === 'service_to_acceptance' ? fromRole === 'payment_service' && toRole === 'acceptance_network' : edge.transition === 'merchant_settlement' ? ['wallet_balance', 'payment_service', 'acceptance_network'].includes(fromRole ?? '') && toRole === 'merchant' : edge.transition === 'direct_settlement' ? fromRole === 'funding_source' && toRole === 'merchant' : edge.transition === 'card_authorization' ? fromRole === 'funding_source' && ['acceptance_network', 'merchant'].includes(toRole ?? '') : edge.transition === 'split_tender' ? ['funding_source', 'wallet_balance'].includes(fromRole ?? '') && toRole === 'merchant' : false;
         const directionIsAdmissible = edge.direction !== 'inbound';
-        const claims = edge.evidenceIds.map((id) => state.evidence.find((candidate) => candidate.id === id)?.claim).filter(Boolean).map((claim) => JSON.stringify(claim));
-        const exact = edge.evidenceIds.every((id) => {
-          const evidence = state.evidence.find((candidate) => candidate.id === id);
-          if (!evidence) return false;
-          const claim = evidence.claim;
-          const requiresDirection = edge.fromMarket !== undefined || edge.toMarket !== undefined;
-          const claimHasDirection = claim.fromMarket !== undefined || claim.toMarket !== undefined;
-          if (claimHasDirection && !requiresDirection) return false;
-          if (requiresDirection && (claim.fromRole === undefined || claim.toRole === undefined || claim.transition === undefined || claim.fromMarket === undefined || claim.toMarket === undefined)) return false;
-          return (claim.fromRole === undefined && !requiresDirection) || (claim.fromRole === fromRole && claim.toRole === toRole && claim.transition === edge.transition && (edge.fromMarket === undefined || claim.fromMarket === edge.fromMarket) && (edge.toMarket === undefined || claim.toMarket === edge.toMarket) && (edge.market === undefined || claim.market === edge.market) && (edge.currency === undefined || claim.currency === edge.currency));
-        });
-        return legal && directionIsAdmissible && new Set(claims).size <= 1 && edge.provenance !== 'model_fixture' && edge.evidenceIds.length > 0 && edge.evidenceIds.every(validEvidence) && (!edge.validFrom || Date.parse(edge.validFrom) <= Date.parse(asOf)) && (!edge.validTo || Date.parse(edge.validTo) >= Date.parse(asOf)) && exact;
+        return legal && directionIsAdmissible && edge.provenance !== 'model_fixture' && edge.evidenceIds.length > 0 && (!edge.validFrom || Date.parse(edge.validFrom) <= Date.parse(asOf)) && (!edge.validTo || Date.parse(edge.validTo) >= Date.parse(asOf));
       };
       const adjacency = new Map<string, typeof route.edges>();
-      for (const edge of [...route.edges].sort((a, b) => a.edgeId.localeCompare(b.edgeId))) { if (!usable(edge)) { branchBlocked.push({ routeId: route.id, reason: `edge ${edge.edgeId} lacks exact current evidence` }); continue; } const outgoing = adjacency.get(edge.fromNodeId) ?? []; if (outgoing.length < maxBranchesPerNode) adjacency.set(edge.fromNodeId, [...outgoing, edge]); else branchBlocked.push({ routeId: route.id, reason: `truncated_by_bound:maxBranchesPerNode=${maxBranchesPerNode}` }); }
+      for (const edge of [...route.edges].sort((a, b) => a.edgeId.localeCompare(b.edgeId))) { if (!usable(edge)) { branchBlocked.push({ routeId: route.id, reason: `edge ${edge.edgeId} is not admissible (invalid transition topology or direction, missing evidenceIds, model_fixture provenance, or outside its validity window)` }); continue; } const outgoing = adjacency.get(edge.fromNodeId) ?? []; if (outgoing.length < maxBranchesPerNode) adjacency.set(edge.fromNodeId, [...outgoing, edge]); else branchBlocked.push({ routeId: route.id, reason: `truncated_by_bound:maxBranchesPerNode=${maxBranchesPerNode}` }); }
       const starts = route.nodes.filter((node) => node.kind === 'funding_source').map((node) => node.id).sort();
       const paths: PathOption[] = [];
       const visit = (nodeId: string, seen: Set<string>, path: NonNullable<PaymentRouteRecord['edges']>[number][]) => {

@@ -43,7 +43,7 @@ describe('server-side event eligibility gate', () => {
       const first = service.recordValidatedEventReward({ event: target, sourceEvents: [source], chainRule, candidate, idempotencyKey: 'stack-key-1' });
       expect(service.recordValidatedEventReward({ event: target, sourceEvents: [source], chainRule, candidate, idempotencyKey: 'stack-key-1' })).toEqual(first);
       expect(() => service.recordValidatedEventReward({ event: target, sourceEvents: [source], chainRule, candidate: { ...candidate, ruleId: 'other-rule' }, idempotencyKey: 'stack-key-2' })).toThrow(/NEEDS_REVIEW/);
-      expect(() => validateToolArgs('record_event_reward_v2', { event: target, candidate, idempotencyKey: 'x', user_id: 'other' })).toThrow(/UNKNOWN_FIELD/);
+      expect(() => validateToolArgs('record_event_reward', { event: target, candidate, idempotencyKey: 'x', user_id: 'other' })).toThrow(/UNKNOWN_FIELD/);
       store.close();
     } finally { rmSync(dir, { recursive: true, force: true }); }
   });

@@ -1,9 +1,9 @@
 # 多層付款路徑推薦規格
 
-**狀態**：Target normative specification，待獨立 Review  
-**版本**：0.1.0  
-**範圍**：統一公開 recommend 的 payment_path branch 之候選路徑生成、事件計畫、回饋比較與遷移驗收  
-**限制**：本文件只定義可實作的模型與驗收條件；本次不修改 runtime，也不宣稱任何未有當期官方證據的產品路徑可用。
+**狀態**：Normative specification；除 §1.2 標註的 `split_tender` 缺口外，本文件描述的模型已 shipped 並由測試回歸保護  
+**版本**：0.2.0  
+**範圍**：`recommend` 統一入口內的候選路徑生成、事件計畫、回饋比較與驗收基準  
+**限制**：本文件只定義可實作的模型與驗收條件；不宣稱任何未有當期官方證據的產品路徑可用。
 
 ## 1. 目的與邊界
 
@@ -38,22 +38,36 @@ cap。只有之後收到真實事件並通過實際事件 API，才可進行 dur
 
 ### 1.2 Current runtime audit
 
-本規格以 HEAD 936660e 的現況為遷移基線：
+**狀態更新**：本節原先（v0.1.0）把下列能力列為待實作目標；實際上，這份規格
+描述的 Phase 2～5 與 M-06～M-27 範圍已經實作並持續由 `tests/payment-path-*.test.ts`
+回歸保護。以下是重新盤點過的現況：
 
-- 已有 user-scoped payment account/route onboarding、active/confirmed 與
-  official evidence freshness gate，以及 routeId exact filter。
-- 現有 recommend 與 rankCards 仍是 card-oriented；舊 OfferRuleVersion 仍以
-  cardId 為必要欄位，actual recording 也仍以 card transaction 為主。
-- 現有 recommend_payment_paths_v1 只對無 layer 或單一 card_issuer layer 的
-  窄路徑產生結果；它的 layers 尚不是 typed transitions，不能代表 account →
-  wallet 或 card → wallet → acceptance 的完整計算。
-- 現有 event evaluator/ledger 已能承接部分 event-local 與 explicit funded_by
-  語意，但 non-card reward ownership、typed multi-hop transition、path graph、
-  native reward vector 與跨 event recommendation 尚未完整提供。
+- **已 shipped**：typed node/edge graph traversal（僅限本規格定義的 8 種
+  transition）、cycle/hop/event/branch-count 上限與對應 `truncated_by_bound`
+  診斷、edge evidence 的精確性/新鮮度/方向檢查、path-signature 去重、
+  top_up+purchase 的 planned event 拆分、全部 5 種 stacking mode
+  （additive/replace/best_of/exclusive/prerequisite，含 cycle-safe
+  prerequisite 解析）、cap-pool preview、以 valuation snapshot 為準的
+  native-unit 回饋換算、FX-aware 的 fee/net-value 計算（缺對應轉換一律
+  `unknown`，不 fallback）、以及 8 層 deterministic tie-break 排序。
+- **唯一已知缺口**：`split_tender`（一筆消費同時由多個資金來源分攤）雖然是
+  已定義的 transition enum 值，但目前的圖搜尋尚未實作把一筆購買拆成多個並行
+  資金來源分攤的邏輯。
+- **不是程式碼缺口，是資料填充工作**：真實台灣錢包（PayPay、街口、Pay+、
+  悠遊付等）的官方 evidence 需要逐一研究並透過 `upsert_payment_route`／
+  `upsert_payment_capability` 建立；在對應 route/edge 真的帶有官方來源之前，
+  沒有任何 route 會判定為 `ready`——這是本規格一直以來的 fail-closed 設計，
+  不是尚待完成的程式功能。
+- **入口整合**：`recommend`（merchant-first intent）內部已經呼叫本規格描述的
+  路徑引擎，並把結果與卡片候選合併進同一個 `candidates[]`（`kind:
+  'direct_card' | 'payment_path'`），一次呼叫即可同時比較兩者。原本規劃的
+  `recommend_payment_paths_v1` 這類獨立、較低階的入口已經移除——它是整合前的
+  舊入口，回傳的欄位（沒有 `fxEstimate`、沒有與卡片候選合併排序）比整合後的
+  `recommend` 少。
 
-因此，本文件後面的 v2、Phase 2～5 和 M-06～M-27 都是待實作目標。v1 adapter
-只在可以無歧義證明 direct path 時轉換；任何現有 layers 需要猜 transition 的
-情況都必須 blocked/needs_review。
+因此，除了 `split_tender` 之外，本文件後面章節描述的模型與行為應視為目前
+runtime 的現況說明，而不是未來目標；沿用本文件的驗收矩陣（第 10 節）作為
+回歸測試的對照基準。
 
 ## 2. 詞彙與模型邊界
 
@@ -222,20 +236,17 @@ interface RecommendPaymentPathResponse {
 }
 ~~~
 
-公開 envelope 的 discriminant 應明確表達 branch：
-
-~~~typescript
-interface RecommendRequest {
-  kind: "payment_path";
-  payment_path: RecommendPaymentPathRequest;
-}
-~~~
-
-公開入口固定為 recommend(kind=payment_path)，其 branch body 接受上述 canonical
-request；recommend 的既有 card branch 仍維持相容。依工具整併規格
-docs/specs/reduced-mcp-tool-surface-without-version-suffixes.md 的 21→19
-方向，payment_path 是 recommend 的 branch，不是新增的獨立或版本後綴工具。
-內部可用 schema/policy version 管理演進，但 public tool name 不帶版本後綴。
+**已 shipped 的實際整合方式**（取代本節原先規劃的獨立 `{kind: "payment_path",
+payment_path: {...}}` envelope）：`recommend` 只有一個公開 request 形狀——
+merchant-first `recommendationIntent`（`merchant`/`amount`/`fx`/`routeFacts`/
+`country`/`market`/`channel`/`paymentMethod`/`occurredAt`/`cardIds`/
+`routeIds`/`limit`/`page`/`cursor`/`resultVersion`）。`recommendIntent()`
+內部把同一個 intent 轉成上述 `RecommendPaymentPathRequest` 呼叫路徑引擎，
+再把每個 `PaymentPathCandidate` 併入同一個 `candidates[]`（`kind:
+'direct_card' | 'payment_path'`），與卡片候選一起排序、分頁。沒有獨立的
+payment-path 專用 tool，也沒有帶 discriminant 的 envelope；`RecommendPaymentPathRequest`/
+`RecommendPaymentPathResponse` 只是內部呼叫路徑引擎時的契約形狀，不是額外的
+public surface。
 
 既有 flat payload（例如 amount、merchant、mcc、country、channel、paymentMethod、
 asOf、routeIds、limit）只可由 compatibility adapter 轉成上述 nested body。adapter
@@ -642,6 +653,12 @@ wallet → acceptance 路徑。該 branch 必須是 unknown/needs_review，直�
 production data admission／evidence contract；C 是與現有 runtime 的相容性。
 兩者不得混為同一個通過證明。
 
+> C-06～C-08 描述的「public branch」／「payment_path branch」是整合前的
+> migration 階段規劃；實際 shipped 結果是 §4.2 所述的統一 `recommend`
+> intent（單一 request 形狀，內部合併 candidates），沒有獨立的 payment_path
+> branch 或版本後綴 adapter。這幾列保留作為歷史遷移語意的紀錄，讀者請以
+> §1.2／§4.2 的現況說明為準。
+
 | ID | 類型 | Given | When | Then |
 | --- | --- | --- | --- | --- |
 | M-01 | bound | 12 個 seed、每個最多 8 條 edge | 生成 candidate | 不超過 declared max branches/candidates；輸出 limits 與截斷 diagnostic |
@@ -691,8 +708,14 @@ production data admission／evidence contract；C 是與現有 runtime 的相容
 
 ## 11. 分段實作與 migration
 
-本文件是 target specification；實作應分段完成，每段都要有對應矩陣行通過，
-不可用「所有真實產品路徑都 blocked」作為多層功能完成的證明。
+**狀態**：以下 Phase 0～5 與「Legacy recommend 相容策略」描述的遷移路徑已經
+走完；本節保留作為完成歷程的紀錄。差異之處：最終沒有走「獨立 payment_path
+branch」這條路，而是把路徑候選直接併入統一 `recommend` intent 的
+`candidates[]`（見 §1.2、§4.2）。閱讀本節時請把「payment_path branch」理解為
+「候選是 payment_path kind 的 candidate」，不是一個獨立的公開 branch 或 tool。
+
+本文件原是 target specification；實作分段完成，每段都有對應矩陣行通過，
+不以「所有真實產品路徑都 blocked」作為多層功能完成的證明。
 
 ### Phase 0：保留舊 seam 與資料隔離
 

@@ -20,9 +20,9 @@ refunds. Use this skill for questions, confirmation, external research, and pres
 
 1. Connect to the host-provided pinned MCP package (release `0.11.0` or a
    later reviewed release).
-2. Validate handshake, server identity, all 25 canonical public tools (including
-   `recommendation_preflight`), and each nested schema including required fields,
-   bounds, enums, and closed object shapes.
+2. Validate handshake, server identity, all 19 canonical public tools, and each
+   nested schema including required fields, bounds, enums, and closed object
+   shapes.
 3. Stop with an unavailable message if validation fails.
 
 ## Recommendation and pre-flight flows
@@ -34,19 +34,16 @@ Refresh checklist: search issuer card/campaign/registration pages, app notices, 
 1. For a normal merchant question, execute merchant-first `recommend` directly with
    the known intent; do not list cards or routes first. Follow the canonical
    `recommendation-intent` workflow and inspect its bounded status/actions result.
-2. For an older host or explicit transaction diagnostic, execute
-   `recommendation_preflight` with current transaction context.
-3. Route on `requiredActions`:
-   - `clarify_merchant` / `choose_market`: invoke `resolve_merchant` and present candidates to user.
-   - `refresh_external_data` (`fx_rate`): treat `fxResolutionRequest` as a lookup request (not an observation), query the specified pair/type/time from an approved source, then return typed FX evidence with the same intent and call `recommend` again. Do not claim the observation was saved or made reusable.
-   - `research_evidence` / `refresh_offer`: research official sources, obtain `OfferConfirmation`, and submit via `upsert_offer`.
-   - `register_card`: onboard card descriptor via `register_card`.
-   - `review_conflict`: prompt user to arbitrate contradictory terms.
-4. In the legacy diagnostic flow, rerun `recommendation_preflight` until its
-   diagnostic permits recommendation.
-5. Execute `recommend` (bounded limit; use only pagination capabilities confirmed
-   by the current contract).
-6. Display ranked results with component breakdown, cap consumption, and explainable status.
+   There is no separate preflight tool; `recommend` is the only entry point.
+2. Route on `requiredActions` (see `preflight-and-required-actions.md` for the
+   full action-by-action playbook):
+   - `resolve_merchant` / `research_merchant`: invoke `resolve_merchant` and present candidates to user.
+   - `query_approved_fx_source` / `ask_user` (FX): treat `fxResolutionRequest` as a lookup request, query the specified pair/type/time from an approved source, then attach the fetched rate as an inline `fx` snapshot on the same intent and call `recommend` again. There is no observation storage to save or reuse.
+   - `bind_payment_method`: onboard the missing card/account via `register_card` or `register_payment_account`.
+   - `review_payment_route` / `review_candidate`: research official sources and refresh the relevant route/offer via `upsert_payment_route` or `upsert_offer`.
+3. Repeat `recommend` with the same intent plus the new fact/evidence until it
+   reaches `ready`/`partial` or no new evidence is available.
+4. Display ranked results with component breakdown, cap consumption, and explainable status.
 
 ## Write flow
 

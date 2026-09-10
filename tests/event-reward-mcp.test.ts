@@ -10,8 +10,8 @@ const candidate = { eventId: 'evt_mcp', ruleId: 'rule_mcp', ruleVersion: 'v1', e
 describe('event reward MCP contract and authenticated service seam', () => {
   it('validates representative record/reversal payloads and rejects owner or sensitive fields', () => {
     expect(validateEventRewardInput({ event, candidate, idempotencyKey: 'event-key' }).event.id).toBe('evt_mcp');
-    expect(() => validateToolArgs('record_event_reward_v1', { event, candidate, idempotencyKey: 'event-key', ownerUser: 'other' })).toThrow(/UNKNOWN_FIELD/);
-    expect(() => validateToolArgs('reverse_event_reward_v1', { event, idempotencyKey: 'event-key', token: 'secret' })).toThrow(/UNKNOWN_FIELD/);
+    expect(() => validateToolArgs('record_event_reward', { event, candidate, idempotencyKey: 'event-key', ownerUser: 'other' })).toThrow(/UNKNOWN_FIELD/);
+    expect(() => validateToolArgs('reverse_event_reward', { event, idempotencyKey: 'event-key', token: 'secret' })).toThrow(/UNKNOWN_FIELD/);
   });
 
   it('records only matched candidates for the authenticated owner and supports explicit reversal', () => {

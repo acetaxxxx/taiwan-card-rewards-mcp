@@ -91,43 +91,45 @@ fee, FX, or that a named product actually supports this path.
 
 ## 3. Ask for bounded candidate paths
 
-Use the `recommend` payment-path union, not a card transaction with a guessed
-`paymentRoute` field:
+There is no separate payment-path tool. Call `recommend` with the normal
+merchant-first intent, optionally narrowing to a specific route:
 
 ```json
 {
-  "kind": "payment_path",
-  "payment_path": {
-    "amount": { "amountMinor": 10000, "currency": "TWD" },
-    "merchant": "merchant_illustrative",
-    "country": "TW",
-    "channel": "online",
-    "paymentMethod": "wallet_balance",
-    "routeIds": ["route_bank_wallet_merchant_illustrative"],
-    "limit": 20,
-    "maxHops": 6,
-    "maxEvents": 4,
-    "maxBranchesPerNode": 8
-  }
+  "merchant": "merchant_illustrative",
+  "amount": { "amountMinor": 10000, "currency": "TWD" },
+  "country": "TW",
+  "channel": "online",
+  "paymentMethod": "wallet_balance",
+  "routeIds": ["route_bank_wallet_merchant_illustrative"],
+  "limit": 20
 }
 ```
 
-The source schema also has `eligibilityFacts`, but current CLI dispatch does
-not forward it for this branch. Until that runtime parity gap is fixed, an
-Agent needing Gold/member facts must report `needs_review`/blocked instead of
-claiming this public call evaluated membership.
+The response's `candidates[]` mixes `direct_card` and `payment_path` entries in
+one ranked list; filter for `kind === "payment_path"` to isolate route-based
+candidates. `maxHops`/`maxEvents`/`maxBranchesPerNode` graph-search bounds and
+`eligibilityFacts` (for stacking prerequisites, e.g. a Gold-membership fact)
+are internal parameters of the underlying path engine but are not yet exposed
+on `recommend`'s public intent schema — a caller needing to supply a stacking
+eligibility fact through the public MCP surface currently cannot; report
+`needs_review`/blocked instead of claiming membership was evaluated.
 
 ## 4. Expected planned candidate (shape and uncertainty)
 
-A verified route can produce a candidate with two planned events:
+A verified route can produce a `payment_path` candidate with two planned events,
+returned inside `recommend`'s unified `candidates[]`:
 
 ```json
 {
-  "status": "needs_review",
+  "status": "partial",
   "candidates": [
     {
+      "id": "path:illustrative",
+      "kind": "payment_path",
       "routeId": "route_bank_wallet_merchant_illustrative",
       "fundingSource": { "kind": "account", "subtype": "linked_bank_account", "accountId": "bank_illustrative" },
+      "nodes": [],
       "events": [
         {
           "planEventId": "plan:debit",
@@ -156,16 +158,13 @@ A verified route can produce a candidate with two planned events:
           "provenance": "official"
         }
       ],
-      "grossReward": { "amountMinor": 0, "currency": "TWD" },
-      "cappedReward": { "amountMinor": 0, "currency": "TWD" },
-      "netReward": { "amountMinor": 0, "currency": "TWD" },
       "matchedRules": [],
       "exclusionReasons": ["top-up amount and event eligibility remain unknown"],
       "status": "blocked"
     }
   ],
-  "blocked": [],
-  "limits": { "maxCandidates": 20, "maxHops": 6, "maxEvents": 4, "maxBranchesPerNode": 8 }
+  "requiredActions": [],
+  "coverage": { "scope": "registered cards and payment routes; route acceptance requires evidence", "discoveredCount": 1, "bounded": false, "explorationComplete": true, "total": 1, "notes": [] }
 }
 ```
 

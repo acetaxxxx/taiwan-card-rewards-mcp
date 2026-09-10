@@ -57,7 +57,7 @@ describe('Ticket 04 & Contract Convergence: 10 tools and Offer Confirmation in u
   };
 
   it('preserves existing tools and adds unversioned event reward and payment path tools', () => {
-    expect(mcpTools).toHaveLength(25);
+    expect(mcpTools).toHaveLength(19);
     const toolNames = mcpTools.map((t) => t.name);
     expect(toolNames).not.toContain('confirm_offer');
     expect(toolNames).toContain('upsert_offer');
@@ -68,19 +68,10 @@ describe('Ticket 04 & Contract Convergence: 10 tools and Offer Confirmation in u
     service.registerCard({ id: 'card-1', issuer: 'Example Bank', productName: 'Travel Card' });
     service.upsertOffer(validSnapshot, candidateRule);
 
-    const tx: TransactionTuple = {
-      cardId: 'card-1',
-      kind: 'purchase',
-      mode: 'planned',
-      occurredAt: '2026-08-15T12:00:00Z',
-      amount: { amountMinor: 50000, currency: 'TWD' },
-      country: 'JP',
-    };
-
-    const recs = service.recommend(tx);
-    expect(recs).toHaveLength(1);
-    expect(recs[0].status).toBe('needs_review');
-    expect(recs[0].unknownReasons).toContain('rule status is candidate');
+    const result = service.recommendIntent({ merchant: 'JP Shop', amount: { amountMinor: 50000, currency: 'TWD' }, country: 'JP', occurredAt: '2026-08-15T12:00:00Z', cardIds: ['card-1'] });
+    const candidate = result.candidates.find((item) => item.cardId === 'card-1');
+    expect(candidate?.status).toBe('unknown');
+    expect(candidate?.matchedRules[0]?.reasons).toContain('rule status is candidate');
   });
 
   it('enforces immutability: rejects conflicting mutation of existing snapshot or rule version', () => {
@@ -136,19 +127,10 @@ describe('Ticket 04 & Contract Convergence: 10 tools and Offer Confirmation in u
     expect(result.rule.confirmation).toEqual(validConfirmation);
     expect(result.snapshot.verified).toBe(true);
 
-    const tx: TransactionTuple = {
-      cardId: 'card-1',
-      kind: 'purchase',
-      mode: 'planned',
-      occurredAt: '2026-08-15T12:00:00Z',
-      amount: { amountMinor: 10000, currency: 'TWD' },
-      country: 'JP',
-    };
-
-    const recs = service.recommend(tx);
-    expect(recs).toHaveLength(1);
-    expect(recs[0].status).toBe('ok');
-    expect(recs[0].grossReward?.amountMinor).toBe(300);
+    const result2 = service.recommendIntent({ merchant: 'JP Shop', amount: { amountMinor: 10000, currency: 'TWD' }, country: 'JP', occurredAt: '2026-08-15T12:00:00Z', cardIds: ['card-1'] });
+    const candidate = result2.candidates.find((item) => item.cardId === 'card-1');
+    expect(candidate?.status).toBe('ready');
+    expect(candidate?.reward?.amountMinor).toBe(300);
   });
 
   it('atomically onboards a merchant identity for merchant-specific offers', () => {

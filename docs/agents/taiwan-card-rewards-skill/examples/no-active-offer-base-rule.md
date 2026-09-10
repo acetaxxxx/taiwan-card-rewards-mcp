@@ -5,23 +5,16 @@
 
 ```json
 {
-  "transaction": {
-    "cardId": "card_illustrative",
-    "kind": "purchase",
-    "mode": "planned",
-    "occurredAt": "2026-09-06T15:00:00+08:00",
-    "amount": { "amountMinor": 120000, "currency": "TWD" },
-    "merchant": "阿福五金行",
-    "country": "TW",
-    "channel": "in_store",
-    "paymentMethod": "direct_card"
-  },
-  "limit": 3,
-  "projection": "detail"
+  "merchant": "阿福五金行",
+  "amount": { "amountMinor": 120000, "currency": "TWD" },
+  "country": "TW",
+  "channel": "in_store",
+  "occurredAt": "2026-09-06T15:00:00+08:00",
+  "limit": 3
 }
 ```
 
-`recommend` 回傳的是 bounded ranking entries，不是自訂 `recommendations`
-wrapper。若已驗證的 issuer base rule 命中，entry 可呈現該 rule 的
-`grossReward`/`cappedReward`；若沒有可用 rule，status/reason 由 MCP 回傳，
+`recommend` 回傳的是 `{status, candidates, requiredActions, coverage}`，不是自訂
+`recommendations` wrapper。若已驗證的 issuer base rule 命中，該 candidate 可呈現
+`reward`；若沒有可用 rule，`status`/`exclusionReasons` 由 MCP 回傳，
 Agent 不得憑卡片品牌自行補一個基礎比例。planned call 永不扣 cap。

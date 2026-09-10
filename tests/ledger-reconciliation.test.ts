@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { describe, expect, it } from 'vitest';
-import { FileStore, RewardService } from '../src/index.js';
+import { FileStore, RewardService, rankCards } from '../src/index.js';
 import type { CapPoolDefinition, OfferRuleVersion, OfferSourceSnapshot, TransactionTuple } from '../src/types.js';
 
 const source: OfferSourceSnapshot = { id: 's1', url: 'https://bank.example/', fetchedAt: '2026-08-01T00:00:00Z', contentHash: 'hash', parserVersion: '1' };
@@ -39,7 +39,9 @@ describe('purchase and refund reconciliation', () => {
       expect(service.recordTransaction(refund('cap-f1', 'cap-p1', 5000)).cappedReward?.amountMinor).toBe(-100);
       expect(service.remainingCaps('c1', '2026-08-25T00:00:00Z')[0]?.remaining.amountMinor).toBe(400);
 
-      const recommendation = service.recommend({ cardId: 'c1', kind: 'purchase', mode: 'planned', occurredAt: '2026-08-25T00:00:00Z', amount: { amountMinor: 30000, currency: 'TWD' } }, 1)[0];
+      const plannedTx: TransactionTuple = { cardId: 'c1', kind: 'purchase', mode: 'planned', occurredAt: '2026-08-25T00:00:00Z', amount: { amountMinor: 30000, currency: 'TWD' } };
+      const state = service.store.read();
+      const recommendation = rankCards([state.cards.find((card) => card.id === 'c1')!], state.rules, plannedTx, service.context(state, plannedTx.occurredAt, plannedTx), 1)[0];
       expect(recommendation?.cappedReward?.amountMinor).toBe(400);
     } finally { store.close(); rmSync(dir, { recursive: true, force: true }); }
   });

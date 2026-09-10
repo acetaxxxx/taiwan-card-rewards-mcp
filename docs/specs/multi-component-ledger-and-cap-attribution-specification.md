@@ -24,7 +24,7 @@ The key words **MUST**, **MUST NOT**, **REQUIRED**, **SHALL**, **SHALL NOT**, **
 - Exact integer proportional partial refund and remainder balancing algorithms.
 - Deduplication of `spend` and `transaction_count` metrics on shared pools.
 - Heterogeneous native reward unit handling without lossy forced summation.
-- Public MCP tool response compatibility (`record_transaction`, `recommend`, `calculate_reward`, `rank_cards`, `remaining_caps`).
+- Public MCP tool response compatibility (`record_transaction`, `recommend`, `calculate_reward`, `remaining_caps`).
 - Legacy single-rule record compatibility and fail-closed boundaries.
 
 ---
@@ -162,7 +162,7 @@ When a transaction triggers multiple components across layers, each component yi
 
 ### 4.2 Prohibition of Forced Summation
 1. The ledger and calculation engine MUST NOT coerce or collapse different `unitName`s or `currency` codes into a single scalar value without an explicit, provenance-bearing valuation snapshot.
-2. Transient calculation responses (`calculate_reward`, `recommend`, `rank_cards`) and persistent query responses (`record_transaction`, `remaining_caps`) MUST return an array of component breakdowns grouped by native unit.
+2. Transient calculation responses (`calculate_reward`, `recommend`) and persistent query responses (`record_transaction`, `remaining_caps`) MUST return an array of component breakdowns grouped by native unit.
 
 ---
 
@@ -305,4 +305,4 @@ To ensure steady, incremental delivery, the multi-unit reward model is phased as
 - [`docs/adr/0005-payment-route-opportunity-stacking.md`](../adr/0005-payment-route-opportunity-stacking.md): Payment Route Opportunity Stacking Decision.
 - [`docs/adr/0006-multi-component-reward-ledger-and-cap-attribution.md`](../adr/0006-multi-component-reward-ledger-and-cap-attribution.md): Multi-Component Ledger Decision.
 - [`docs/specs/card-rewards-schema-v2-specification.md`](card-rewards-schema-v2-specification.md): Base Schema v2 Specification.
-- [`docs/research/wallet-and-merchant-app-stacked-rewards.md`](../research/wallet-and-merchant-app-stacked-rewards.md): Payment Wallet Research Notes.
+- [`docs/research/wallet-and-merchant-app-stacked-rewards.md`](../research/archive/wallet-and-merchant-app-stacked-rewards.md): Payment Wallet Research Notes.

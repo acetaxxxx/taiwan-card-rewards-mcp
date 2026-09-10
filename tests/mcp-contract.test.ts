@@ -98,14 +98,9 @@ describe("MCP Contract and Agent Boundary", () => {
   });
   it("publishes the public contract distinctions that validators enforce", () => {
     const recommend = mcpTools.find((tool) => tool.name === "recommend")!.inputSchema as any;
-    expect(recommend.oneOf).toHaveLength(3);
-    const intentBranch = recommend.oneOf.find((branch: any) => branch.properties?.merchant && !branch.properties?.transaction);
-    expect(intentBranch.required).toContain("merchant");
-    expect(intentBranch.properties.limit.maximum).toBe(128);
-    const cardBranch = recommend.oneOf.find((branch: any) => branch.properties?.transaction);
-    expect(cardBranch.properties.transaction.required).not.toContain("cardId");
-    expect(cardBranch.properties.cardIds.items.type).toBe("string");
-    expect(cardBranch.properties.merchant.additionalProperties).toBe(false);
+    expect(recommend.required).toContain("merchant");
+    expect(recommend.properties.limit.maximum).toBe(128);
+    expect(recommend.properties.merchant.oneOf[1].additionalProperties).toBe(false);
 
     const calculate = mcpTools.find((tool) => tool.name === "calculate_reward")!.inputSchema as any;
     expect(calculate.properties.transaction.properties.fx.required).toEqual(expect.arrayContaining(["provider", "rateType"]));
@@ -114,18 +109,13 @@ describe("MCP Contract and Agent Boundary", () => {
     expect(search.properties).toEqual(expect.objectContaining({ canonicalMerchantId: expect.any(Object), market: expect.any(Object), mcc: expect.any(Object) }));
 
     const upsertOffer = mcpTools.find((tool) => tool.name === "upsert_offer")!.inputSchema as any;
-    const registerCard = mcpTools.find((tool) => tool.name === "register_card")!.inputSchema as any;
-    expect(registerCard.properties.fxPolicyRequirement.required).toEqual(["baseCurrency", "quoteCurrency", "scope"]);
     expect(upsertOffer.properties.capPools.type).toBe("array");
     expect(upsertOffer.properties.capPools.items.type).toBe("object");
     expect(upsertOffer.properties.merchant.additionalProperties).toBe(false);
     expect(upsertOffer.properties.merchant.properties.canonicalNameLocale.const).toBe("zh-Hant-TW");
     expect(upsertOffer.properties.merchant.properties.channels.items.enum).toEqual(["in_store", "online"]);
-    expect(upsertOffer.properties.fxPolicyRequirement.required).toEqual(["baseCurrency", "quoteCurrency", "scope"]);
-    expect(upsertOffer.properties.fxPolicyRequirement.properties.scope.properties.kind.enum).toEqual(["card", "issuer", "route", "route_edge"]);
 
     const upsertRoute = mcpTools.find((tool) => tool.name === "upsert_payment_route")!.inputSchema as any;
-    expect(upsertRoute.properties.fxPolicyRequirement.properties.scope.properties.kind.enum).toEqual(["card", "issuer", "route", "route_edge"]);
     const edge = upsertRoute.properties.route.properties.edges.items;
     expect(edge.additionalProperties).toBe(false);
     expect(edge.properties.direction.enum).toEqual(["inbound", "outbound"]);
@@ -187,15 +177,13 @@ describe("MCP Contract and Agent Boundary", () => {
       // 2. tools/list
       const listRes = await client.send({ id: 2, method: "tools/list" });
       expect(listRes.result).toBeDefined();
-      expect(listRes.result.tools).toHaveLength(25);
+      expect(listRes.result.tools).toHaveLength(19);
 
       const toolNames = listRes.result.tools.map((t: any) => t.name).sort();
       const expectedNames = [
         "calculate_reward",
         "list_cards",
-        "rank_cards",
         "recommend",
-        "recommendation_preflight",
         "upsert_payment_route",
         "list_payment_routes",
         "register_payment_account",
@@ -211,23 +199,17 @@ describe("MCP Contract and Agent Boundary", () => {
         "search_active_offers",
         "upsert_user_benefit_status",
         "upsert_offer",
-        "upsert_fx_policy",
-        "list_fx_policies",
-        "upsert_fx_observation",
-        "list_fx_observations",
         "upsert_payment_capability",
       ].sort();
       expect(toolNames).toEqual(expectedNames);
-      expect(mcpTools).toHaveLength(25);
+      expect(mcpTools).toHaveLength(19);
 
       // Verify schema properties of all tools
       for (const tool of listRes.result.tools) {
         expect(tool.name).toBeTypeOf("string");
         expect(tool.description).toBeTypeOf("string");
         expect(tool.inputSchema).toBeTypeOf("object");
-        if (tool.name === "recommend") expect(tool.inputSchema.oneOf).toHaveLength(3);
-        else if (tool.name === "recommendation_preflight") expect(tool.inputSchema.oneOf).toHaveLength(2);
-        else expect(tool.inputSchema.type).toBe("object");
+        expect(tool.inputSchema.type).toBe("object");
       }
     } finally {
       await client.close();
@@ -259,12 +241,13 @@ describe("MCP Contract and Agent Boundary", () => {
       });
       expect(unknownToolRes.error?.message).toBe("TOOL_NOT_FOUND");
 
+      // legacy versioned tool names are fully retired, not just hidden
       const legacyEventRes = await client.send({
         id: 12,
         method: "tools/call",
         params: { name: "record_event_reward_v1", arguments: { event: {}, candidate: {}, idempotencyKey: "legacy" } },
       });
-      expect(legacyEventRes.error?.message).toBe("MIGRATION_REQUIRED");
+      expect(legacyEventRes.error?.message).toBe("TOOL_NOT_FOUND");
     } finally {
       await client.close();
       rmSync(dir, { recursive: true, force: true });
@@ -452,34 +435,18 @@ describe("MCP Contract and Agent Boundary", () => {
       expect(calcRes.result.structuredContent.grossReward.amountMinor).toBe(17000);
       expect(calcRes.result.structuredContent.cappedReward.amountMinor).toBe(17000);
 
-      // Step 5: rank_cards (pure ranking)
-      const rankRes = await client.send({
-        id: 105,
-        method: "tools/call",
-        params: {
-          name: "rank_cards",
-          arguments: {
-            cards: [cardInput],
-            rules: [ruleInput],
-            transaction: plannedTx,
-            context: calcContext,
-          },
-        },
-      });
-      expect(rankRes.result.structuredContent).toHaveLength(1);
-      expect(rankRes.result.structuredContent[0].rank).toBe(1);
-
       // Step 6: recommend (store-backed recommendation without mutating ledger)
       const recRes = await client.send({
         id: 106,
         method: "tools/call",
         params: {
           name: "recommend",
-          arguments: { transaction: plannedTx, limit: 5 },
+          arguments: { merchant: "Osaka Souvenir Shop", amount: plannedTx.amount, country: plannedTx.country, occurredAt: plannedTx.occurredAt, cardIds: ["esun-travel-card"], limit: 5 },
         },
       });
-      expect(recRes.result.structuredContent).toHaveLength(1);
-      expect(recRes.result.structuredContent[0].cardId).toBe("esun-travel-card");
+      const directCardCandidates = recRes.result.structuredContent.candidates.filter((c: any) => c.kind === "direct_card");
+      expect(directCardCandidates).toHaveLength(1);
+      expect(directCardCandidates[0].cardId).toBe("esun-travel-card");
 
       // Verify no cap was consumed by planned recommend
       const capBeforeRes = await client.send({

@@ -338,58 +338,6 @@ export interface FxSnapshot {
   issuerScope?: string | undefined;
 }
 
-export interface FxRateObservation extends FxSnapshot {
-  conversionOwner?: 'card_scheme' | 'issuer' | 'wallet' | 'merchant_dcc' | 'unknown' | undefined;
-  effectiveAt?: string | undefined;
-  confidence?: 'high' | 'medium' | 'low' | undefined;
-}
-
-export interface FxObservationRecord extends FxRateObservation {
-  sourceKind: 'policy_observation' | 'public_reference';
-  routeIdScope?: string;
-  edgeIdScope?: string;
-  idempotencyKey: string;
-  ownerUser?: string;
-}
-
-export type FxPolicyScope = { kind: 'card' | 'issuer' | 'route' | 'route_edge'; cardId?: string; issuer?: string; routeId?: string; edgeId?: string };
-export interface FxPolicyRecord {
-  id: string;
-  policyKey: string;
-  version: string;
-  baseCurrency: Currency;
-  quoteCurrency: Currency;
-  scope: FxPolicyScope;
-  conversionOwner: 'card_scheme' | 'issuer' | 'wallet' | 'merchant_dcc' | 'unknown';
-  rateType: FxRateType;
-  rateDirection: 'base_to_quote';
-  conversionTiming: 'transaction' | 'clearing' | 'settlement' | 'posting';
-  feeBasis?: string;
-  markupBasis?: string;
-  freshForSeconds?: number;
-  maxEstimateAgeSeconds?: number;
-  sourceUrl?: string;
-  evidenceId: string;
-  observedAt: string;
-  validFrom?: string;
-  validTo?: string;
-  idempotencyKey: string;
-  ownerUser?: string;
-}
-export interface FxPolicyRequirement {
-  baseCurrency: Currency;
-  quoteCurrency: Currency;
-  scope: FxPolicyScope;
-}
-export interface FxPolicyResearchRequest {
-  purpose: 'policy_research';
-  scope: FxPolicyScope;
-  sourceUrls?: readonly string[];
-  sourceStatus: 'known' | 'discovery_required';
-  requiredFields: readonly string[];
-  submission: { tool: 'upsert_fx_policy'; field: 'policy' };
-}
-
 export interface AppliedFxRate {
   snapshotId: string;
   baseCurrency: Currency;
@@ -468,20 +416,6 @@ export interface Diagnostic {
   retryAction: string;
 }
 
-export type PreflightRequirementStatus = 'available' | 'missing' | 'stale' | 'conflict' | 'invalid' | 'needs_review';
-export interface RecommendationRequirement {
-  id: string;
-  category: string;
-  path: string;
-  status: PreflightRequirementStatus;
-  scope?: Readonly<Record<string, string>>;
-  retryAction?: string;
-}
-export interface RecommendationRequiredAction {
-  action: 'resolve_merchant' | 'ask_user' | 'register_payment_route' | 'refresh_external_data' | 'submit_evidence' | 'review_offer';
-  path: string;
-  requiredFacts: readonly string[];
-}
 export interface FxResolutionRequest {
   baseCurrency: string;
   quoteCurrency: string;
@@ -504,16 +438,6 @@ export interface FxResolutionRequest {
   submission?: { tool: string; field: string };
 }
 
-export interface RecommendationPreflight {
-  ready: boolean;
-  knownFacts: readonly string[];
-  requirements: readonly RecommendationRequirement[];
-  requiredActions: readonly RecommendationRequiredAction[];
-  diagnostics: readonly Diagnostic[];
-  evaluatedAt: string;
-  dataVersion: string;
-  fxResolutionRequest?: FxResolutionRequest | undefined;
-}
 
 export type EvidenceSourceType = 'official' | 'trusted_secondary' | 'community' | 'user_provided';
 export type EvidenceAuthority = 'issuer' | 'network' | 'wallet' | 'merchant' | 'secondary' | 'community' | 'user';
@@ -677,9 +601,8 @@ export interface RecommendationIntent {
   cursor?: string;
   resultVersion?: string;
   fx?: FxSnapshot;
-  /** Agent-supplied public reference observation, separate from policy/path FX. */
-  fxObservation?: FxRateObservation;
   routeFacts?: readonly { routeId: string; edgeId?: string; fx: FxSnapshot }[];
+  eligibilityFacts?: readonly EligibilityFact[];
 }
 export interface IntentCandidate {
   id: string;
@@ -694,7 +617,7 @@ export interface IntentCandidate {
   reward?: Money;
   netSpend?: Money;
   exclusionReasons: readonly string[];
-  fxEstimate?: { status: 'policy_current' | 'stale_estimate' | 'reference_estimate' | 'unavailable'; provider?: string; capturedAt?: string; sourceUrl?: string; assumption: string };
+  fxEstimate?: { status: 'estimated' | 'estimated_fallback' | 'stale_estimate' | 'unavailable'; provider?: string; capturedAt?: string; sourceUrl?: string; assumption: string };
 }
 export interface IntentRule {
   ruleId: string;
@@ -715,7 +638,7 @@ export interface IntentRule {
 export interface RecommendationIntentResult {
   status: 'ready' | 'partial' | 'needs_input' | 'no_match';
   candidates: readonly IntentCandidate[];
-  requiredActions: readonly { id: string; action: string; owner: 'agent' | 'user'; path?: string; requiredFacts: readonly string[]; candidateIds?: readonly string[]; submission?: { tool: string; field: string }; completionCondition?: string; fxResolutionRequest?: FxResolutionRequest; fxPolicyResearchRequest?: FxPolicyResearchRequest }[];
+  requiredActions: readonly { id: string; action: string; owner: 'agent' | 'user'; path?: string; requiredFacts: readonly string[]; candidateIds?: readonly string[]; submission?: { tool: string; field: string }; completionCondition?: string; fxResolutionRequest?: FxResolutionRequest }[];
   coverage: { scope: string; discoveredCount: number; bounded: boolean; explorationComplete: boolean; total?: number; notes: readonly string[] };
   evaluatedAt: string;
   fxResolutionRequest?: FxResolutionRequest;

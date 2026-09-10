@@ -5,31 +5,30 @@
 
 ---
 
-## Step 1: Pre-flight 偵測到商家名稱與促銷查詢需求
+## Step 1: 呼叫 `recommend` 偵測到商家名稱歧義
 
-Agent 呼叫 `recommendation_preflight`：
+Agent 呼叫 `recommend`：
 ```json
 {
-  "transaction": {
-    "kind": "purchase",
-    "mode": "planned",
-    "occurredAt": "2026-09-06T16:00:00+08:00",
-    "amount": { "amountMinor": 1000000, "currency": "TWD" },
-    "merchant": "PChome"
-  }
+  "merchant": "PChome",
+  "amount": { "amountMinor": 1000000, "currency": "TWD" },
+  "occurredAt": "2026-09-06T16:00:00+08:00"
 }
 ```
 
-**MCP 回傳**：
+**MCP 回傳**（節錄）：
 ```json
 {
-  "ready": false,
-  "requiredActions": ["clarify_merchant"],
-  "diagnostics": [
-    { "code": "AMBIGUOUS_MERCHANT", "message": "PChome 存在 PChome 24h購物 與 PChome 商店街多個子實體。" }
+  "status": "needs_input",
+  "candidates": [],
+  "requiredActions": [
+    { "id": "merchant", "action": "resolve_merchant", "owner": "user", "path": "merchant", "requiredFacts": ["confirmed merchant identity and market"], "submission": { "tool": "recommend", "field": "merchant" } }
   ]
 }
 ```
+
+`resolve_merchant` action 代表「PChome」比對到多個候選（例如 PChome 24h購物
+與 PChome 商店街）；`owner: "user"` 表示需要使用者選擇，不能由 Agent 自行猜測。
 
 ---
 
@@ -77,17 +76,10 @@ Agent 將 25 筆候選優惠全數聚合完畢，無遺漏。
 
 ---
 
-## Step 4: 帶入權威商家 ID 執行 `recommend`
+## Step 4: 帶入權威商家 ID 重跑 `recommend`
 
 ```json
 {
-  "transaction": {
-    "kind": "purchase",
-    "mode": "planned",
-    "occurredAt": "2026-09-06T16:00:00+08:00",
-    "amount": { "amountMinor": 1000000, "currency": "TWD" },
-    "merchant": "PChome 24h購物"
-  },
   "merchant": {
     "canonicalId": "mch_pchome_24h",
     "canonicalNameZhHant": "PChome 24h購物",
@@ -95,6 +87,8 @@ Agent 將 25 筆候選優惠全數聚合完畢，無遺漏。
     "market": "ecommerce",
     "country": "TW"
   },
+  "amount": { "amountMinor": 1000000, "currency": "TWD" },
+  "occurredAt": "2026-09-06T16:00:00+08:00",
   "limit": 5
 }
 ```

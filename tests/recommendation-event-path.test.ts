@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { rankCards } from '../src/evaluator.js';
-import { validateContext, validateRule, validateToolArgs } from '../src/validation.js';
-import { mcpTools } from '../src/mcp-contract.js';
+import { validateContext, validateRule } from '../src/validation.js';
 
 const snapshot = { id: 'snap-route', url: 'https://wallet.example/terms', fetchedAt: '2026-09-01T00:00:00Z', contentHash: 'hash', parserVersion: '1', verified: true };
 const card = { id: 'card-1', issuer: 'Bank', productName: 'Reward Card' };
@@ -25,15 +24,5 @@ describe('recommendation cross-event payment path', () => {
   it('does not recommend when wallet provenance is missing or ambiguous', () => {
     const result = rankCards([card], [rule()], { cardId: 'card-1', kind: 'purchase', mode: 'planned', occurredAt: target.occurredAt, amount: target.amount, channel: 'jkopay', paymentMethod: 'wallet_balance' }, validateContext({ now: '2026-09-05T00:00:00Z', sourceSnapshots: { [snapshot.id]: snapshot }, paymentEvents: { target: { ...target, relations: undefined }, sourceEvents: [source] } }));
     expect(result[0]?.status).not.toBe('ok');
-  });
-
-  it('exposes the same event-path contract through recommend', () => {
-    const tool = mcpTools.find((candidate) => candidate.name === 'recommend');
-    expect(tool?.inputSchema).toHaveProperty('oneOf');
-    expect((tool?.inputSchema as any).oneOf.find((branch: any) => branch.properties?.transaction)).toHaveProperty('properties.context');
-    expect(() => validateToolArgs('recommend', {
-      transaction: { kind: 'purchase', mode: 'planned', occurredAt: target.occurredAt, amount: target.amount },
-      context: { paymentEvents: { target, sourceEvents: [source] } },
-    })).not.toThrow();
   });
 });

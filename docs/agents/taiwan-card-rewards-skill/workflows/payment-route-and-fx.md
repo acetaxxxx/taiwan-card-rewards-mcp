@@ -2,7 +2,7 @@
 
 本標準作業程序規範多層支付路徑架構、最終扣款工具分類、支付拓撲與開放識別碼、外幣匯率研究及 PPM 量化標準。
 
-> **先讀研究與 ADR**：遇到跨境錢包、PayPay、TWQR、台灣 Pay、Pay+ 或任何新 provider，先讀 [`payment-route-chain-reality-and-mcp-design.md`](../../../research/payment-route-chain-reality-and-mcp-design.md) 與 [ADR 0007](../../../adr/0007-provider-neutral-payment-route-facts-and-evidence.md)。品牌、QR 受理網路、消費者 App、互通方案、funding 與 settlement 是不同事實；只有官方證據支持時才可把它們串成一條 route。
+> **先讀研究與 ADR**：遇到跨境錢包、PayPay、TWQR、台灣 Pay、Pay+ 或任何新 provider，先讀 [`payment-route-chain-reality-and-mcp-design.md`](../../../research/archive/payment-route-chain-reality-and-mcp-design.md) 與 [ADR 0007](../../../adr/0007-provider-neutral-payment-route-facts-and-evidence.md)。品牌、QR 受理網路、消費者 App、互通方案、funding 與 settlement 是不同事實；只有官方證據支持時才可把它們串成一條 route。
 
 ---
 
@@ -76,7 +76,7 @@ MCP 合約中維持穩定封閉列舉：
 3. 缺資料時由 Agent Workspace 查官方 FAQ、費率、匯率、回饋與排除條款，建立逐層 `EvidenceRecord`；MCP 不自行上網，也不把品牌名稱當成清算事實。
 4. 用 `upsert_payment_route` 寫入有證據的路徑；一致證據可直接為 `active`，不需要逐筆 confirmation。若使用者表示不可用，使用相同 idempotency key、附 `failure` 將既有 route 標成 `failed`；禁止寫入卡號、驗證碼、密碼或任何支付憑據。
 5. 若有只適用此路徑的回饋規則，將規則以 `OfferRuleVersion.routeId` 綁定該 route；通用規則不綁 route，維持既有相容性。
-6. 正常 merchant-first 流程直接送出 `recommend`；只有 legacy transaction 或明確診斷時才把 `transaction.routeId` 與 route context 送入 `recommendation_preflight`。路徑不存在、過期、funding 不一致、匯率／費用／回饋條款衝突時，回傳 `requiredActions` 讓 Agent 補資料或詢問使用者，不能猜測。
+6. 正常 merchant-first 流程直接送出 `recommend`；要限制搜尋範圍就用 intent 的 `routeIds`。路徑不存在、過期、funding 不一致、匯率／費用／回饋條款衝突時，`recommend` 回傳 `requiredActions` 讓 Agent 補資料或詢問使用者，不能猜測。
 
 新增支付服務只需要新的開放識別碼與官方證據；除非出現新的計算語意，否則不需要新增 PayPay、街口或其他品牌專用工具。
 
@@ -147,17 +147,17 @@ $$\text{ratePpm} = \text{匯率 (1 單位外幣折合新台幣金額)} \times 1,
 ```
 
 > [!CAUTION]
-> **嚴禁 1:1 匯率回退**：若交易幣別非 `TWD` 且未注入有效 `FxSnapshot`，Pre-flight 必須回傳 `ready: false` 並標註 `requiredActions: ["refresh_external_data"]`。
+> **嚴禁 1:1 匯率回退**：若交易幣別非 `TWD` 且未提供有效 `FxSnapshot`，`recommend` 對受影響的 candidate 回傳 `status: "unknown"` 或 `"blocked"`，並在 `requiredActions` 附上 `action: "query_approved_fx_source"`（或 `"ask_user"`）與對應的 `fxResolutionRequest`。
 
 ---
 
-## 6. FX 自動化解析合約與匯率來源仲裁流程 (FX Resolution Contract & Provenance Automation)
+## 6. FX 自動化解析合約 (FX Resolution Contract)
 
-為消除 Host Agent 與 MCP 核心之間的外幣資訊落差，同時恪守「核心零直接網路 I/O、失敗即關閉 (Fail-Closed)」之架構承諾，系統回傳標準化 `FxResolutionRequest`，供 Agent 查詢並以本次 typed evidence 重試。可重用的 observation 保存屬後續能力；本文件不把它宣稱為現行入口。
+為消除 Host Agent 與 MCP 核心之間的外幣資訊落差，同時恪守「核心零直接網路 I/O、失敗即關閉 (Fail-Closed)」之架構承諾，系統回傳標準化 `FxResolutionRequest`，供 Agent 查詢並以本次 typed `fx` snapshot 重試。MCP 不保存或仲裁多個匯率候選值——Agent 每次呼叫自行取得單一目前匯率，附在同一個 intent／transaction／event 上，通過幣別配對與新鮮度檢查即被直接信任套用。
 
 ### 6.1 `FxResolutionRequest` 合約架構
 
-當交易幣別與回饋規則／清算幣別不一致（即跨幣別消費）時，推薦結果、Pre-flight 或 Mutation 錯誤可附帶結構化的 `FxResolutionRequest`。它是待查要求，不是已取得的 `fxObservation`：
+當交易幣別與回饋規則／清算幣別不一致（即跨幣別消費）時，`recommend` 回應或 Mutation 錯誤可附帶結構化的 `FxResolutionRequest`。它是待查要求，不是已取得的 `fx` snapshot：
 
 ```typescript
 export interface FxResolutionRequest {
@@ -199,26 +199,18 @@ export interface FxResolutionRequest {
 
 ### 6.3 寫入操作原子性保證與 Fail-Closed 機制
 
-1. **本次 typed evidence**：
-   Agent 查詢並驗證報價後，將 typed FX observation/evidence 帶回原本的 planned intent（一般 `fx` 或指定 `routeFacts` 的 route/edge scope），再呼叫 `recommend` 讓 MCP 重新計算。Actual `record_transaction` 或 `record_event_reward` 仍必須傳入驗證過的 `fx: FxSnapshot`；recommend 本身不保存可重用 observation。
+1. **本次 typed snapshot**：
+   Agent 查詢並驗證報價後，將 typed `fx` snapshot 帶回原本的 planned intent（一般 `fx` 或指定 `routeFacts` 的 route/edge scope），再呼叫 `recommend` 讓 MCP 重新計算。Actual `record_transaction` 或 `record_event_reward` 同樣傳入驗證過的 `fx: FxSnapshot`；沒有任何儲存／重用機制，Agent 每次都直接提供目前值。
 2. **`fx_missing` 結構化錯誤回傳**：
-   若未提供匯率觀測值，核心引擎立即拋出 `fx_missing` 錯誤，並在 `error.details` 中完整附帶 `fxResolutionRequest`，引導外部 Agent 透過核可管道查詢補齊後重試。
+   若未提供匯率快照，核心引擎立即拋出 `fx_missing` 錯誤，並在 `error.details` 中完整附帶 `fxResolutionRequest`，引導外部 Agent 透過核可管道查詢補齊後重試。
 3. **歷史入帳凍結與退款匯率豁免 (Frozen Provenance & Refund Immunity)**：
    - 交易成功入帳時，核心將當下採納之匯率快照永久凍結於 `AppliedFxRate`（包含 `ratePpm`, `capturedAt`, `rateType`, `conversionOwner`, `appliedAtUtc`）。
    - 當發起後續退款交易 (`kind: 'refund'`) 時，系統自動繼承原始交易之 `appliedFx` 與 `fx` 快照，退款金額與回饋沖銷完全按原始入帳匯率等比例折算，免於後續匯率波動或匯率快照過期之影響。
 
-### 6.4 外部匯率候選值仲裁與衝突偵測 (Candidate Selection & Conflict Detection)
-
-外部 Agent 在抓取多個資料源匯率時，需依據以下規則評分與仲裁：
-1. **幣別對完全吻合**：`baseCurrency` 與 `quoteCurrency` 必須與交易相符。
-2. **時間視窗判定**：觀測時間 `capturedAt` 必須落於交易發生日之合理有效期內。
-3. **權威來源優先級**：`central_bank` / `card_scheme` (權重 100) > `issuer` / `wallet` (權重 80) > `merchant` (權重 60) > `secondary` (權重 40)。
-4. **顯著分歧衝突阻斷**：當兩個具備相同權重之同級權威來源之間匯率差異超過 5% 時，系統判定為 `conflict`，要求 Agent 提交審查或詢問使用者，不得擅自採納或折衷。
-
-### 6.5 查詢與重試原則 (Query and Retry Strategy)
+### 6.4 查詢與重試原則 (Query and Retry Strategy)
 
 為確保使用者體驗不被打擾，系統遵循嚴格的提問策略：
-- `FxResolutionRequest` 是 request，`fxObservation` 是 Agent 查詢後取得的資料，兩者不可互換。
+- `FxResolutionRequest` 是 request，`fx` 是 Agent 查詢後取得、直接信任套用的單一 snapshot，兩者不可互換；MCP 不對多個候選匯率評分或仲裁——一次呼叫只信任一個 Agent 提供的值。
 - Agent 依 request 指定的幣別對、時間、主體、rate type、方向與 scope 查詢核准來源；只有 planned `sourceStatus: known`、`purpose: reference_estimate` 才可使用臺灣銀行牌告頁（`https://rate.bot.com.tw/xrt?Lang=zh-TW`）作公共參考候選。Actual 或 `discovery_required` 不得使用 BOT fallback；它不是任何卡片／錢包的實際政策或結算報價。
-- 查詢並驗證後，將 typed FX 資料帶回同一 intent，再呼叫 `recommend` 重算；目前不提供保存／重用 observation 或自動 reference estimate。Actual conversion owner 不明時，依 request 的 `userQuestion` 詢問使用者。
+- 查詢並驗證後，將 typed `fx` 資料帶回同一 intent，再呼叫 `recommend` 重算。Actual conversion owner 不明時，依 request 的 `userQuestion` 詢問使用者。
 - 一旦使用者或資料源給定事實，系統即刻推導並固化，絕不就匯率問題進行重複對話。

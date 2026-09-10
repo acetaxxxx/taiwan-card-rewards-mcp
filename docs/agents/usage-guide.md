@@ -67,21 +67,23 @@ node dist/cli.js --data-dir <absolute-path> [--user <user-id>]
 
 ## 3. The MCP Tool Surface
 
-The MCP server exposes reward tools plus bounded merchant resolution, recommendation preflight, and generic
+The MCP server exposes reward tools plus bounded merchant resolution and generic
 benefit tools. Standalone `confirm_offer` is not part of the surface; candidate
-activation is folded directly into `upsert_offer`.
+activation is folded directly into `upsert_offer`. There is no separate
+preflight tool — `recommend` is the single recommendation entry point and its
+response already carries every diagnostic an Agent needs.
 
 | Tool Name | Persistence | Description | Key Fail-Closed Errors |
 |---|:---:|---|---|
-| `calculate_reward` | Read-only | Pure stateless evaluation of a rule against a transaction with evaluation context. | `INSUFFICIENT_FACTS`, `SOURCE_UNAVAILABLE`, `NEEDS_REVIEW`, `STALE` |
-| `rank_cards` | Read-only | Pure stateless deterministic ranking with bounded pages (default 10); the Agent may select five for presentation. | `INSUFFICIENT_FACTS`, `SOURCE_UNAVAILABLE`, `NEEDS_REVIEW`, `STALE` |
+| `calculate_reward` | Read-only | Pure stateless evaluation of a rule against a transaction with evaluation context; use it to verify a rule's math before persisting via `upsert_offer`, or to show hypothetical math for an unconfirmed candidate offer. | `INSUFFICIENT_FACTS`, `SOURCE_UNAVAILABLE`, `NEEDS_REVIEW`, `STALE` |
 | `register_card` | Mutating | Register or update a card product descriptor (`id`, `issuer`, `productName`, `network`, `country`). | `INVALID_CARD`, `STORE_UNAVAILABLE` |
 | `list_cards` | Read-only | List all registered cards in the user's store. | `STORE_UNAVAILABLE` |
 | `upsert_offer` | Mutating | Ingest an official or candidate source snapshot and versioned rule; activates candidate if valid confirmation is supplied. | `INVALID_OFFER`, `INVALID_CONFIRMATION`, `STORE_UNAVAILABLE` |
-| `recommend` | Read-only | Merchant-first planned recommendation reads registered cards and verified routes; optional legacy transaction and payment-path branches remain supported. Results are bounded (default 10) and do not mutate usage. | `INSUFFICIENT_FACTS`, `NEEDS_REVIEW`, `STALE` |
-| `recommendation_preflight` | Read-only | Check typed transaction, merchant, offer, payment-route, FX, freshness, and conflict prerequisites without mutation or network access. | `INVALID_INPUT`, `INSUFFICIENT_FACTS`, `NEEDS_REVIEW`, `STALE` |
-| `upsert_payment_route` | Mutating | Register a confirmed or candidate payment route; MCP assigns its route identity and stores no credentials. | `INVALID_INPUT`, `IDEMPOTENCY_CONFLICT`, `SENSITIVE_FIELD_FORBIDDEN` |
+| `recommend` | Read-only | Merchant-first planned recommendation; reads registered cards and verified routes and returns direct-card and multi-layer payment-path candidates together in one ranked list. Results are bounded (default 10) and do not mutate usage. | `INSUFFICIENT_FACTS`, `NEEDS_REVIEW`, `STALE` |
+| `upsert_payment_route` | Mutating | Register a payment route; MCP assigns its route identity, trusts the caller's self-asserted `evidenceIds` directly, and stores no credentials. | `INVALID_INPUT`, `IDEMPOTENCY_CONFLICT`, `SENSITIVE_FIELD_FORBIDDEN` |
 | `list_payment_routes` | Read-only | List the current user's registered payment routes as bounded projections. | `INVALID_INPUT`, `STORE_UNAVAILABLE` |
+| `upsert_payment_capability` | Mutating | Register a public payment capability separately from user-owned routes/accounts; trusts self-asserted `evidenceIds` directly. | `UNAUTHENTICATED`, `NEEDS_REVIEW`, `IDEMPOTENCY_CONFLICT`, `STORE_UNAVAILABLE` |
+| `list_payment_capabilities` | Read-only | List public payment capabilities available for planned route generation. | `UNAUTHENTICATED`, `STORE_UNAVAILABLE` |
 | `register_payment_account` | Mutating | Register a wallet or linked bank account identity with evidence; never send credentials or account numbers. | `INVALID_CONFIRMATION`, `IDEMPOTENCY_CONFLICT`, `SENSITIVE_FIELD_FORBIDDEN` |
 | `list_payment_accounts` | Read-only | List user-scoped account identities before constructing payment routes. | `INVALID_INPUT`, `STORE_UNAVAILABLE` |
 | `search_active_offers` | Read-only | Search current active offers and return bounded canonical merchant/offer records; it never applies a reward. | `MISSING_REQUIRED_FACT`, `NOT_FOUND`, `STALE` |
@@ -101,7 +103,7 @@ activation is folded directly into `upsert_offer`.
 1. For a recommendation, call `recommend` directly with the merchant-first intent. `list_cards` is for management, explicit inventory requests, or onboarding checks; it is not a normal recommendation prerequisite.
 2. If the user holds a new card, call `register_card` with card descriptors (e.g. `{ id: "esun-kumamon", issuer: "ESunBank", productName: "Kumamon Card", network: "JCB", country: "TW" }`).
 
-For the merchant-first recommendation shape, follow [`recommendation-intent.md`](taiwan-card-rewards-skill/workflows/recommendation-intent.md). The older transaction-shaped `recommend` branch and `recommendation_preflight` remain compatibility/diagnostic paths; they are not required before the normal intent call.
+For the merchant-first recommendation shape, follow [`recommendation-intent.md`](taiwan-card-rewards-skill/workflows/recommendation-intent.md). `recommend` is the only entry point; there is no separate preflight call or legacy transaction branch.
 
 ### B. Offer Ingestion, OCR & Candidate Activation
 1. **Official Web Sources**: The Agent or UI retrieves official bank pages using its own approved browsing or ingestion path, then supplies an unverified structured source snapshot with provenance and content fingerprint. The MCP does not retrieve web content.
@@ -142,7 +144,7 @@ For the merchant-first recommendation shape, follow [`recommendation-intent.md`]
 ### C. Planned Spend Recommendations vs Actual Purchases
 - **Planned Evaluation (Simulation / Intent)**:
   - Set `mode: "planned"`.
-  - Call `recommend` (or `calculate_reward` / `rank_cards`).
+  - Call `recommend` against registered cards and routes; use `calculate_reward` to verify a single rule before persisting it or to show hypothetical math for an unconfirmed candidate offer.
   - **Planned transactions NEVER consume caps or mutate the ledger.**
 - **Actual Purchase (Ledger Writing)**:
   - Set `mode: "actual"`.
@@ -166,13 +168,13 @@ For the merchant-first recommendation shape, follow [`recommendation-intent.md`]
 - Missing or stale FX snapshots fail closed (`unknown` or `stale`).
 
 For the merchant-first intent, treat `fxResolutionRequest` as a typed request for
-external lookup, not as an `fxObservation`. Use its currency pair, conversion owner,
+external lookup, not as an already-obtained rate. Use its currency pair, conversion owner,
 suggested rate types, time, and required facts to query an approved source. The Bank
 of Taiwan quote page may be a public reference candidate, but it is not the actual
-policy or settlement rate of a card, wallet, or issuer. Return the validated typed FX
-evidence with the same intent and call `recommend` again so MCP recomputes the result.
-Observation persistence and reusable estimates are not available in this workflow;
-do not claim they are saved or reused.
+policy or settlement rate of a card, wallet, or issuer. Return the validated typed `fx`
+snapshot with the same intent and call `recommend` again so MCP recomputes the result.
+There is no separate FX policy or observation storage — the Agent supplies a fresh
+`fx` snapshot on every call that needs one; nothing is saved or reused server-side.
 
 ### F. Top-ups, Wallet Purchases & Cross-Event Rewards
 
@@ -190,8 +192,8 @@ infer a provider, issuer, or funding source that is not explicitly evidenced.
    `upsert_payment_route`. Research official evidence outside MCP, then ingest
    the offer with `upsert_offer` only after the source and user confirmation
    requirements are satisfied.
-3. For a planned action, use `recommend` or `recommendation_preflight`; planned
-   actions never create event ledger records.
+3. For a planned action, use `recommend`; planned actions never create event
+   ledger records.
 4. For an actual event, submit `record_event_reward` with the target event,
    either an `eventRule` or a `chainRule` (exactly one), any required bounded
    `sourceEvents`, the reward candidate, and an idempotency key. The server
@@ -249,7 +251,7 @@ or `needs_review`; the Agent must not allocate the balance automatically.
 
 #### PayPay, EasyWallet, and card-funded wallet routes
 
-For proactive route selection, call `recommend` with the closed `{ "kind": "payment_path", "payment_path": { ... } }` envelope. It considers only the current user's active routes with accepted official HTTPS evidence and returns bounded nodes, transitions, funding source, reward totals, matched rules, and explicit exclusions. Consistent evidence is usable by default; ask only when facts conflict or are ambiguous, and mark a route failed when the user says it is unavailable. It never invents mixed wallet funding, unregistered routes, or unverified cross-border paths; absent or expired evidence yields no candidate. The current CLI dispatcher does not forward `payment_path.eligibilityFacts`; treat Gold/member-dependent path recommendations as a parity gap until runtime is aligned.
+For proactive route selection, call the normal merchant-first `recommend` intent, optionally narrowed with `routeIds`. Its `candidates[]` already mixes `direct_card` and `payment_path` results in one ranked list — there is no separate path-only tool or envelope. It considers only the current user's active routes with self-asserted `evidenceIds` and returns bounded nodes, transitions, funding source, reward totals, matched rules, and explicit exclusions. Routes are usable by default once evidenceIds are supplied; ask only when facts conflict or are ambiguous, and mark a route failed when the user says it is unavailable. It never invents mixed wallet funding, unregistered routes, or unverified cross-border paths; absent evidence yields no candidate. `recommend`'s public intent schema does not yet expose `eligibilityFacts`; treat Gold/member-dependent stacking prerequisites as a schema gap until it is exposed.
 
 Do not collapse these into one card purchase:
 

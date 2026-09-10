@@ -267,7 +267,7 @@ When a rule references one or more `CapPoolDefinition`s, each metric acts as a s
    - Recording an actual purchase updates all referenced pools atomically.
 
 ### 4.4 Unified Combination Policy Resolution Algorithm
-The exact same combination resolution algorithm MUST be used across `recommend`, `record_transaction`, and `rank_cards`:
+The exact same combination resolution algorithm MUST be used across `recommend` and `record_transaction`:
 
 1. **Partitioning**: Group matching rules on the card by `combination.groupId`.
 2. **Prerequisite Resolution**: Rules with `combination.type === 'prerequisite'` apply ONLY if their `prerequisiteRuleId` matched and qualified.
@@ -291,7 +291,7 @@ Card evaluation results MUST categorize outcomes into:
 ## 5. Time, Timezone, and Transaction Lifecycle
 
 ### 5.1 Timezone Rules
-1. Period and benefit dates use the applicable stored or explicitly supplied IANA timezone. Missing relevant timezone is fail-closed; conflicting timezone values are rejected. Service read queries may use their internally supplied current UTC `now`; pure `calculate_reward`/`rank_cards` accept optional `context.now` and use current time internally when omitted.
+1. Period and benefit dates use the applicable stored or explicitly supplied IANA timezone. Missing relevant timezone is fail-closed; conflicting timezone values are rejected. Service read queries may use their internally supplied current UTC `now`; pure `calculate_reward` accepts optional `context.now` and use current time internally when omitted.
 2. Daily plan switches evaluate the active plan at `occurredAt` by default. If a rule explicitly declares `settlementTiming: 'daily_settlement_selection'` backed by official provenance, the plan active at `23:59:59.999` in the rule's timezone is used. If timing semantics are ambiguous or unverified, the evaluator MUST fail closed with `needs_review`.
 
 ### 5.2 Current-State Model and Backfilled Purchases
@@ -322,7 +322,7 @@ The system MUST return explicit non-confident statuses when conditions are unres
 
 ## 7. Public MCP Tool Surface (19-Tool Contract)
 
-Schema v2 defines exactly **19 tools** on the public MCP surface, including the read-only `recommendation_preflight` prerequisite checker, payment-account and payment-route onboarding/listing, the closed card/payment_path `recommend` union, and canonical event tools. Outbound network fetching is handled externally by the host/agent, not by the MCP server. Merchant catalog registration remains a controlled service/catalog-ingestion operation and is not an additional public MCP tool.
+Schema v2 defines exactly **19 tools** on the public MCP surface, including the single merchant-first `recommend` entry point (its response unifies direct-card and multi-layer payment-path candidates; there is no separate preflight tool), payment-account and payment-route onboarding/listing, and canonical event tools. Outbound network fetching is handled externally by the host/agent, not by the MCP server. Merchant catalog registration remains a controlled service/catalog-ingestion operation and is not an additional public MCP tool.
 
 The authoritative 19-tool matrix, including read/write status and closed input
 schemas, lives in

@@ -21,21 +21,22 @@ validTo: 2026-12-31T23:59:59Z
 claim: { factKey: "user.membership", value: "gold", version: "terms-1" }
 ```
 
-若條款是使用者自己的 status，而非公開 issuer/provider claim，不能升級成
-authoritative。Agent 應先走 evidence/research 流程，將官方 snapshot/rule
-交給 `upsert_offer`，並在需要時由 runtime 的 evidence ingestion API 建立
-user-owned accepted evidence。現行 public 25-tool surface 沒有獨立的
-`submit_evidence` 或 `submit_valuation_snapshot` tool，不能在文件中假裝它們
-存在。
+Agent 應先走 evidence/research 流程，將官方 snapshot/rule 交給 `upsert_offer`。
+Eligibility fact（例如 Gold 會員資格）本身是 self-asserted：只要 Agent 提供
+`factKey`/`value`（見下），系統直接信任並用來評估 predicate，不需要另外呼叫
+任何 evidence 提交 tool 先行核准——現行 19-tool public surface 也沒有這種
+tool，不能在文件中假裝它存在。同一個 `factKey`（同一張卡）出現兩個不同的
+`value` 會被視為衝突並導致 `needs_review`，這是唯一剩下的內建保護。
 
-## 2. 使用 Gold fact 做 card recommendation
+## 2. Card predicate 用 eligibility fact
 
-卡片 branch 的 `recommend` 可將合法 `eligibilityFacts` 放在 `context`；fact
-必須指向該 user/卡片 scope 的 accepted official evidence，不能只傳字串
-`"gold"`：
+`recommend` 的 merchant-first intent 目前沒有暴露 `context`/`eligibilityFacts`
+欄位；需要精確控制 predicate 輸入時改用 `calculate_reward`（單一 rule 試算，
+接受完整 `context`）：
 
 ```json
 {
+  "rule": { "...": "the offer rule with a predicate keyed on user.membership" },
   "transaction": {
     "cardId": "card_illustrative",
     "kind": "purchase",
@@ -52,7 +53,6 @@ user-owned accepted evidence。現行 public 25-tool surface 沒有獨立的
     "eligibilityFacts": [
       {
         "id": "fact_gold_illustrative",
-        "evidenceId": "ev_gold_official_illustrative",
         "version": "terms-1",
         "cardId": "card_illustrative",
         "factKey": "user.membership",
@@ -72,44 +72,23 @@ user-owned accepted evidence。現行 public 25-tool surface 沒有獨立的
         "timezone": "Asia/Taipei"
       }
     ]
-  },
-  "limit": 3,
-  "projection": "detail"
-}
-```
-
-這個 card branch payload 只表示 contract shape。若 Gold evidence 未被現行
-store 接受、已過期、跨 user 或 rule 沒有明確 predicate/combination/cap，
-MCP 應回 unknown/needs_review，而不是把 Gold bonus 當成 guaranteed。
-
-## 3. Payment-path Gold parity gap
-
-`recommend` 的 payment_path source schema 也定義 `eligibilityFacts`，但目前
-`cli.ts` 的 payment_path allowlist 未轉送它；因此下列需求在 public CLI 是
-明確 blocked，不能宣稱已完成：
-
-```json
-{
-  "kind": "payment_path",
-  "payment_path": {
-    "amount": { "amountMinor": 10000, "currency": "TWD" },
-    "routeIds": ["route_illustrative"],
-    "eligibilityFacts": [
-      {
-        "evidenceId": "ev_gold_official_illustrative",
-        "version": "terms-1",
-        "cardId": "card_illustrative",
-        "factKey": "user.membership",
-        "value": "gold"
-      }
-    ]
   }
 }
 ```
 
-在 runtime parity 修復前，Agent 應回報 `eligibilityFacts` forwarding gap，
-改走可支援的 card branch 或等待 runtime 更新；不要移除 fact 後聲稱 Gold
-已判定。
+若 rule 沒有明確 predicate/combination/cap，或 fact 已過期，MCP 應回
+unknown/needs_review，而不是把 Gold bonus 當成 guaranteed。
+
+## 3. Payment-path eligibility fact 尚未公開
+
+`recommendPaymentPaths` 內部（`upsert_payment_route` 建立的路徑進行 stacking
+prerequisite 判斷時）支援同樣的 `eligibilityFacts` 機制，一樣是直接信任、
+不需要先提交 evidence。但 `recommend` 目前唯一的公開 intent schema
+（`merchant`/`amount`/`fx`/`routeFacts`/…）沒有暴露 `eligibilityFacts` 欄位，
+所以透過公開 MCP 呼叫，暫時無法對 payment-path 的 stacking prerequisite 提供
+這類 fact。需要此能力的呼叫者應回報這是目前的 schema 缺口，改用不依賴
+eligibility fact 的 route，或等待 `recommend` 的 intent schema 擴充；不要
+移除 fact 後聲稱 Gold 已判定。
 
 ## 4. Valuation、FX 與 fee 的 fail-closed recovery
 
@@ -128,7 +107,7 @@ version: valuation-terms-1
 evidenceId: ev_valuation_official_illustrative
 ```
 
-目前 public 25-tool surface 沒有提交此 valuation snapshot 的工具；若 durable
+目前 public 19-tool surface 沒有提交此 valuation snapshot 的工具；若 durable
 store 也沒有已驗證 snapshot，payment-path candidate 必須帶
 `requiredActions: ["provide a validated valuation snapshot for each reward unit"]`
 並為 `blocked`/`needs_review`。Agent 不可用「1 point = NT$1」臆測。
@@ -162,10 +141,10 @@ selected DCC 的明確 currency。若費用 currency 仍不能用該 event 的 F
 
 | Blocker | 補救 | 可完成標準 |
 |---|---|---|
-| Gold fact missing/stale | 重新取得官方 evidence，確認 user/card scope 與有效期 | server 能重算 predicate，status 不再 unknown |
-| payment_path CLI parity | 修 runtime forwarding，再跑 contract/route tests | `eligibilityFacts` 不再被 unknown-field 丟棄 |
+| Gold fact missing/stale/conflicting | 重新確認官方條款後，直接以正確的 `factKey`/`value` 重新提供 | server 能重算 predicate，status 不再 unknown |
+| payment-path eligibility fact 未公開 | 改用不依賴該 fact 的 route，或等待 `recommend` intent schema 擴充 | `recommend` 公開 `eligibilityFacts` 前先明示這個限制 |
 | native valuation missing | 提供已接受的 official valuation snapshot（目前缺 public tool） | reward units 可轉到比較 currency |
-| FX/fee missing | 提供完整 FX 與費用來源、期間、currency | `feeTotal`/`netValue` 可重算 |
+| FX/fee missing | 提供完整 `fx` 快照與費用來源、期間、currency | `feeTotal`/`netValue` 可重算 |
 | stacking/cap ambiguous | 提交條款明示的 combination mode、group、cap pool | additive/replace/best_of 等決策可重現 |
 
 直到所有 blockers 解決，Agent 只能報告 blocked/needs_review；這是預期的

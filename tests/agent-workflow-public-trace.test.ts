@@ -36,14 +36,13 @@ describe('deterministic public agent workflow trace', () => {
       const direct = await call('recommend', { merchant: 'Trace Shop', amount: { amountMinor: 1000, currency: 'TWD' }, occurredAt: '2026-09-10T00:00:00Z' });
       expect(direct.candidates.some((candidate: any) => candidate.status === 'ready')).toBe(true);
 
-      await call('upsert_offer', { snapshot: snapshot('trace-jpy'), rule: { id: 'trace-jpy-rule', cardId: 'trace-card', version: '1', sourceSnapshotId: 'trace-jpy', status: 'active', validFrom: '2026-01-01T00:00:00Z', settlementCurrency: 'TWD', match: {}, reward: { kind: 'flat', amountMinor: 100, currency: 'TWD' } }, fxPolicyRequirement: { baseCurrency: 'JPY', quoteCurrency: 'TWD', scope: { kind: 'card', cardId: 'trace-card' } } });
+      await call('upsert_offer', { snapshot: snapshot('trace-jpy'), rule: { id: 'trace-jpy-rule', cardId: 'trace-card', version: '1', sourceSnapshotId: 'trace-jpy', status: 'active', validFrom: '2026-01-01T00:00:00Z', settlementCurrency: 'TWD', match: {}, reward: { kind: 'flat', amountMinor: 100, currency: 'TWD' } } });
       const missing = await call('recommend', { merchant: 'Trace Shop', amount: { amountMinor: 1000, currency: 'JPY' }, occurredAt: '2026-09-10T00:00:00Z' });
       expect(missing.requiredActions).toEqual(expect.arrayContaining([expect.objectContaining({ action: 'query_approved_fx_source', owner: 'agent', fxResolutionRequest: expect.objectContaining({ referenceSourceUrls: ['https://rate.bot.com.tw/xrt?Lang=zh-TW'] }) })]));
       const repeated = await call('recommend', { merchant: 'Trace Shop', amount: { amountMinor: 1000, currency: 'JPY' }, occurredAt: '2026-09-10T00:00:00Z' });
       expect(repeated.requiredActions.map((action: any) => action.id)).toEqual(missing.requiredActions.map((action: any) => action.id));
 
-      await call('upsert_fx_observation', { observation: { baseCurrency: 'JPY', quoteCurrency: 'TWD', ratePpm: 220000, capturedAt: '2026-09-10T00:00:00Z', provider: 'Example Bank', rateType: 'card_scheme', sourceUrl: 'https://bank.example/fx', contentHash: 'trace-fx', idempotencyKey: 'trace-fx' } });
-      const refreshed = await call('recommend', { merchant: 'Trace Shop', amount: { amountMinor: 1000, currency: 'JPY' }, occurredAt: '2026-09-10T00:00:00Z' });
+      const refreshed = await call('recommend', { merchant: 'Trace Shop', amount: { amountMinor: 1000, currency: 'JPY' }, occurredAt: '2026-09-10T00:00:00Z', fx: { id: 'trace-fx', baseCurrency: 'JPY', quoteCurrency: 'TWD', ratePpm: 220000, capturedAt: '2026-09-10T00:00:00Z', provider: 'Example Bank', rateType: 'card_scheme', sourceUrl: 'https://bank.example/fx', contentHash: 'trace-fx' } });
       expect(refreshed.candidates.some((candidate: any) => candidate.status === 'ready')).toBe(true);
       expect(refreshed.requiredActions.some((action: any) => action.action === 'query_approved_fx_source')).toBe(false);
 

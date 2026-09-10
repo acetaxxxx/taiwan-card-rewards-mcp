@@ -1,4 +1,4 @@
-import type { CardDescriptor, CardProduct, CapPeriod, CapPoolDefinition, CardSwitchCampaign, CardSwitchConfirmation, CardSwitchInput, CardSwitchEnrollment, CardSwitchProjection, EligibilityFact, EvaluationContext, FxSnapshot, FxPolicyRecord, FxPolicyRequirement, FxObservationRecord, HeldCard, MerchantIdentity, MerchantProvenance, Money, OfferConfirmation, OfferProvenance, OfferRuleVersion, OfferSourceSnapshot, Predicate, PredicateValue, RewardBreakdown, RewardSpec, RuleMatch, TransactionTuple, PaymentRouteKind, RewardComponentKind, RewardComponentRecord, PaymentRouteContext, PaymentRouteRecord, PaymentCapabilityRecord, PaymentAccountRecord, PaymentEvent, PaymentEventKind, PaymentEventRule, PaymentEventChainRule, EventRewardLedgerRecord, EventRewardReversalRecord, EventRewardCapUsageRecord, PaymentEventRewardCandidate, PaymentEventRewardCandidateInput, PaymentEventMatch, RewardValuationSnapshot } from './types.js';
+import type { CardDescriptor, CardProduct, CapPeriod, CapPoolDefinition, CardSwitchCampaign, CardSwitchConfirmation, CardSwitchInput, CardSwitchEnrollment, CardSwitchProjection, EligibilityFact, EvaluationContext, FxSnapshot, HeldCard, MerchantIdentity, MerchantProvenance, Money, OfferConfirmation, OfferProvenance, OfferRuleVersion, OfferSourceSnapshot, Predicate, PredicateValue, RewardBreakdown, RewardSpec, RuleMatch, TransactionTuple, PaymentRouteKind, RewardComponentKind, RewardComponentRecord, PaymentRouteContext, PaymentRouteRecord, PaymentCapabilityRecord, PaymentAccountRecord, PaymentEvent, PaymentEventKind, PaymentEventRule, PaymentEventChainRule, EventRewardLedgerRecord, EventRewardReversalRecord, EventRewardCapUsageRecord, PaymentEventRewardCandidate, PaymentEventRewardCandidateInput, PaymentEventMatch, RewardValuationSnapshot } from './types.js';
 import type { StoredState } from './store.js';
 import type { EvidenceRecord, FactCandidate } from './types.js';
 import { RewardServiceError } from './errors.js';
@@ -77,17 +77,9 @@ export function validateRewardValuationSnapshot(value: unknown): RewardValuation
 
 export function validateFxSnapshot(value: unknown, name: string): FxSnapshot {
   const item = object(value, name);
-  keys(item, ['id', 'baseCurrency', 'quoteCurrency', 'ratePpm', 'capturedAt', 'maxAgeSeconds', 'provider', 'rateType', 'sourceUrl', 'contentHash', 'cardIdScope', 'issuerScope', 'conversionOwner', 'effectiveAt', 'confidence'], name);
+  keys(item, ['id', 'baseCurrency', 'quoteCurrency', 'ratePpm', 'capturedAt', 'maxAgeSeconds', 'provider', 'rateType', 'sourceUrl', 'contentHash', 'cardIdScope', 'issuerScope'], name);
   const rateType = requiredString(item.rateType, `${name}.rateType`);
   if (!['cash_selling', 'spot_selling', 'mid_market', 'card_scheme'].includes(rateType)) throw new RewardServiceError('INVALID_INPUT', `${name}.rateType is invalid`);
-  const conversionOwner = item.conversionOwner === undefined ? undefined : requiredString(item.conversionOwner, `${name}.conversionOwner`);
-  if (conversionOwner !== undefined && !['card_scheme', 'issuer', 'wallet', 'merchant_dcc', 'unknown'].includes(conversionOwner)) {
-    throw new RewardServiceError('INVALID_INPUT', `${name}.conversionOwner is invalid`);
-  }
-  const confidence = item.confidence === undefined ? undefined : requiredString(item.confidence, `${name}.confidence`);
-  if (confidence !== undefined && !['high', 'medium', 'low'].includes(confidence)) {
-    throw new RewardServiceError('INVALID_INPUT', `${name}.confidence is invalid`);
-  }
   return {
     id: requiredString(item.id, `${name}.id`, true),
     baseCurrency: requiredString(item.baseCurrency, `${name}.baseCurrency`, true).toUpperCase(),
@@ -101,24 +93,8 @@ export function validateFxSnapshot(value: unknown, name: string): FxSnapshot {
     ...(item.contentHash === undefined ? {} : { contentHash: requiredString(item.contentHash, `${name}.contentHash`) }),
     ...(item.cardIdScope === undefined ? {} : { cardIdScope: requiredString(item.cardIdScope, `${name}.cardIdScope`, true) }),
     ...(item.issuerScope === undefined ? {} : { issuerScope: requiredString(item.issuerScope, `${name}.issuerScope`) }),
-    ...(conversionOwner === undefined ? {} : { conversionOwner: conversionOwner as any }),
-    ...(item.effectiveAt === undefined ? {} : { effectiveAt: iso(item.effectiveAt, `${name}.effectiveAt`) }),
-    ...(confidence === undefined ? {} : { confidence: confidence as any }),
   };
 }
-export { validateFxSnapshot as validateFxRateObservation };
-
-export function validateFxObservation(value: unknown): FxObservationRecord {
-  const item = object(value, 'fx observation');
-  keys(item, ['id', 'baseCurrency', 'quoteCurrency', 'ratePpm', 'capturedAt', 'maxAgeSeconds', 'provider', 'rateType', 'sourceUrl', 'contentHash', 'cardIdScope', 'issuerScope', 'routeIdScope', 'edgeIdScope', 'sourceKind', 'conversionOwner', 'effectiveAt', 'confidence', 'idempotencyKey', 'ownerUser'], 'fx observation');
-  const { idempotencyKey: _idempotencyKey, ownerUser: _ownerUser, routeIdScope, edgeIdScope, sourceKind, ...snapshotInput } = item;
-  const snapshot = validateFxSnapshot(snapshotInput, 'fx observation');
-  const kind = sourceKind === undefined ? 'policy_observation' : requiredString(sourceKind, 'fx observation.sourceKind');
-  if (kind !== 'policy_observation' && kind !== 'public_reference') throw new RewardServiceError('INVALID_INPUT', 'fx observation sourceKind is invalid');
-  if (edgeIdScope !== undefined && routeIdScope === undefined) throw new RewardServiceError('INVALID_INPUT', 'fx observation.edgeIdScope requires routeIdScope');
-  return { ...snapshot, sourceKind: kind, ...(routeIdScope === undefined ? {} : { routeIdScope: requiredString(routeIdScope, 'fx observation.routeIdScope', true) }), ...(edgeIdScope === undefined ? {} : { edgeIdScope: requiredString(edgeIdScope, 'fx observation.edgeIdScope', true) }), idempotencyKey: requiredString(item.idempotencyKey, 'fx observation.idempotencyKey', true), ...(item.ownerUser === undefined ? {} : { ownerUser: requiredString(item.ownerUser, 'fx observation.ownerUser', true) }) };
-}
-
 export function validatePaymentCapability(value: unknown): PaymentCapabilityRecord {
   const item = object(value, 'payment capability');
   keys(item, ['id', 'status', 'providerId', 'acceptanceProviderId', 'consumerAppId', 'merchant', 'market', 'channel', 'fundingKinds', 'transitions', 'sourceUrl', 'evidenceIds', 'observedAt', 'validFrom', 'validTo', 'idempotencyKey', 'ownerUser'], 'payment capability');
@@ -128,46 +104,6 @@ export function validatePaymentCapability(value: unknown): PaymentCapabilityReco
   if (!Array.isArray(item.transitions) || item.transitions.length === 0 || item.transitions.some((transition) => !['card_authorization', 'account_debit', 'wallet_top_up', 'wallet_debit', 'service_to_acceptance', 'merchant_settlement', 'direct_settlement', 'split_tender'].includes(transition))) throw new RewardServiceError('INVALID_INPUT', 'payment capability transitions is invalid');
   const evidenceIds = Array.isArray(item.evidenceIds) ? item.evidenceIds.map((id) => requiredString(id, 'payment capability evidenceIds[]', true)) : (() => { throw new RewardServiceError('INVALID_INPUT', 'payment capability evidenceIds must be an array'); })();
   return { id: requiredString(item.id, 'payment capability id', true), status: status as PaymentCapabilityRecord['status'], providerId: requiredString(item.providerId, 'payment capability providerId'), ...(item.acceptanceProviderId === undefined ? {} : { acceptanceProviderId: requiredString(item.acceptanceProviderId, 'payment capability acceptanceProviderId') }), ...(item.consumerAppId === undefined ? {} : { consumerAppId: requiredString(item.consumerAppId, 'payment capability consumerAppId') }), ...(item.merchant === undefined ? {} : { merchant: requiredString(item.merchant, 'payment capability merchant') }), ...(item.market === undefined ? {} : { market: requiredString(item.market, 'payment capability market') }), ...(item.channel === undefined ? {} : { channel: requiredString(item.channel, 'payment capability channel') }), fundingKinds: item.fundingKinds as PaymentCapabilityRecord['fundingKinds'], transitions: item.transitions as PaymentCapabilityRecord['transitions'], ...(item.sourceUrl === undefined ? {} : { sourceUrl: requiredString(item.sourceUrl, 'payment capability sourceUrl') }), evidenceIds, observedAt: iso(item.observedAt, 'payment capability observedAt'), ...(item.validFrom === undefined ? {} : { validFrom: iso(item.validFrom, 'payment capability validFrom') }), ...(item.validTo === undefined ? {} : { validTo: iso(item.validTo, 'payment capability validTo') }), idempotencyKey: requiredString(item.idempotencyKey, 'payment capability idempotencyKey', true), ...(item.ownerUser === undefined ? {} : { ownerUser: requiredString(item.ownerUser, 'payment capability ownerUser', true) }) };
-}
-
-export function validateFxPolicyRequirement(value: unknown): FxPolicyRequirement {
-  const item = object(value, 'fx policy requirement');
-  keys(item, ['baseCurrency', 'quoteCurrency', 'scope'], 'fx policy requirement');
-  const baseCurrency = requiredString(item.baseCurrency, 'fx policy requirement.baseCurrency', true).toUpperCase();
-  const quoteCurrency = requiredString(item.quoteCurrency, 'fx policy requirement.quoteCurrency', true).toUpperCase();
-  const scope = object(item.scope, 'fx policy requirement.scope');
-  keys(scope, ['kind', 'cardId', 'issuer', 'routeId', 'edgeId'], 'fx policy requirement.scope');
-  const kind = requiredString(scope.kind, 'fx policy requirement.scope.kind');
-  if (!['card', 'issuer', 'route', 'route_edge'].includes(kind)) throw new RewardServiceError('INVALID_INPUT', 'fx policy requirement scope is invalid');
-  if (kind === 'card' && scope.cardId === undefined) throw new RewardServiceError('INVALID_INPUT', 'card FX policy requirement scope requires cardId');
-  if (kind === 'issuer' && scope.issuer === undefined) throw new RewardServiceError('INVALID_INPUT', 'issuer FX policy requirement scope requires issuer');
-  if (kind === 'route' && scope.routeId === undefined) throw new RewardServiceError('INVALID_INPUT', 'route FX policy requirement scope requires routeId');
-  if (kind === 'route_edge' && (scope.routeId === undefined || scope.edgeId === undefined)) throw new RewardServiceError('INVALID_INPUT', 'route_edge FX policy requirement scope requires routeId and edgeId');
-  return { baseCurrency, quoteCurrency, scope: { kind: kind as FxPolicyRequirement['scope']['kind'], ...(scope.cardId === undefined ? {} : { cardId: requiredString(scope.cardId, 'fx policy requirement.scope.cardId', true) }), ...(scope.issuer === undefined ? {} : { issuer: requiredString(scope.issuer, 'fx policy requirement.scope.issuer') }), ...(scope.routeId === undefined ? {} : { routeId: requiredString(scope.routeId, 'fx policy requirement.scope.routeId', true) }), ...(scope.edgeId === undefined ? {} : { edgeId: requiredString(scope.edgeId, 'fx policy requirement.scope.edgeId', true) }) } };
-}
-
-export function validateFxPolicy(value: unknown): FxPolicyRecord {
-  const item = object(value, 'fx policy');
-  keys(item, ['id', 'policyKey', 'version', 'baseCurrency', 'quoteCurrency', 'scope', 'conversionOwner', 'rateType', 'rateDirection', 'conversionTiming', 'feeBasis', 'markupBasis', 'freshForSeconds', 'maxEstimateAgeSeconds', 'sourceUrl', 'evidenceId', 'observedAt', 'validFrom', 'validTo', 'idempotencyKey', 'ownerUser'], 'fx policy');
-  const scope = object(item.scope, 'fx policy.scope');
-  keys(scope, ['kind', 'cardId', 'issuer', 'routeId', 'edgeId'], 'fx policy.scope');
-  const kind = requiredString(scope.kind, 'fx policy.scope.kind');
-  if (!['card', 'issuer', 'route', 'route_edge'].includes(kind)) throw new RewardServiceError('INVALID_INPUT', 'fx policy scope is invalid');
-  if (kind === 'card' && scope.cardId === undefined) throw new RewardServiceError('INVALID_INPUT', 'card FX policy scope requires cardId');
-  if (kind === 'issuer' && scope.issuer === undefined) throw new RewardServiceError('INVALID_INPUT', 'issuer FX policy scope requires issuer');
-  if (kind === 'route' && scope.routeId === undefined) throw new RewardServiceError('INVALID_INPUT', 'route FX policy scope requires routeId');
-  if (kind === 'route_edge' && (scope.routeId === undefined || scope.edgeId === undefined)) throw new RewardServiceError('INVALID_INPUT', 'route_edge FX policy scope requires routeId and edgeId');
-  const owner = requiredString(item.conversionOwner, 'fx policy.conversionOwner');
-  if (!['card_scheme', 'issuer', 'wallet', 'merchant_dcc', 'unknown'].includes(owner)) throw new RewardServiceError('INVALID_INPUT', 'fx policy conversionOwner is invalid');
-  const rateType = requiredString(item.rateType, 'fx policy.rateType');
-  if (!['cash_selling', 'spot_selling', 'mid_market', 'card_scheme'].includes(rateType)) throw new RewardServiceError('INVALID_INPUT', 'fx policy rateType is invalid');
-  const timing = requiredString(item.conversionTiming, 'fx policy.conversionTiming');
-  if (!['transaction', 'clearing', 'settlement', 'posting'].includes(timing)) throw new RewardServiceError('INVALID_INPUT', 'fx policy conversionTiming is invalid');
-  const freshness = (field: 'freshForSeconds' | 'maxEstimateAgeSeconds') => item[field] === undefined ? undefined : safeInt(item[field], `fx policy.${field}`, 1);
-  const freshForSeconds = freshness('freshForSeconds');
-  const maxEstimateAgeSeconds = freshness('maxEstimateAgeSeconds');
-  if (freshForSeconds !== undefined && maxEstimateAgeSeconds !== undefined && freshForSeconds > maxEstimateAgeSeconds) throw new RewardServiceError('INVALID_INPUT', 'fx policy freshForSeconds cannot exceed maxEstimateAgeSeconds');
-  return { id: requiredString(item.id, 'fx policy.id', true), policyKey: requiredString(item.policyKey, 'fx policy.policyKey', true), version: requiredString(item.version, 'fx policy.version', true), baseCurrency: requiredString(item.baseCurrency, 'fx policy.baseCurrency', true).toUpperCase() as FxPolicyRecord['baseCurrency'], quoteCurrency: requiredString(item.quoteCurrency, 'fx policy.quoteCurrency', true).toUpperCase() as FxPolicyRecord['quoteCurrency'], scope: { kind: kind as FxPolicyRecord['scope']['kind'], ...(scope.cardId === undefined ? {} : { cardId: requiredString(scope.cardId, 'fx policy.scope.cardId', true) }), ...(scope.issuer === undefined ? {} : { issuer: requiredString(scope.issuer, 'fx policy.scope.issuer') }), ...(scope.routeId === undefined ? {} : { routeId: requiredString(scope.routeId, 'fx policy.scope.routeId', true) }), ...(scope.edgeId === undefined ? {} : { edgeId: requiredString(scope.edgeId, 'fx policy.scope.edgeId', true) }) }, conversionOwner: owner as FxPolicyRecord['conversionOwner'], rateType: rateType as FxPolicyRecord['rateType'], rateDirection: item.rateDirection === 'base_to_quote' ? 'base_to_quote' : (() => { throw new RewardServiceError('INVALID_INPUT', 'fx policy rateDirection is invalid'); })(), conversionTiming: timing as FxPolicyRecord['conversionTiming'], ...(item.feeBasis === undefined ? {} : { feeBasis: requiredString(item.feeBasis, 'fx policy.feeBasis') }), ...(item.markupBasis === undefined ? {} : { markupBasis: requiredString(item.markupBasis, 'fx policy.markupBasis') }), ...(freshForSeconds === undefined ? {} : { freshForSeconds }), ...(maxEstimateAgeSeconds === undefined ? {} : { maxEstimateAgeSeconds }), ...(item.sourceUrl === undefined ? {} : { sourceUrl: requiredString(item.sourceUrl, 'fx policy.sourceUrl') }), evidenceId: requiredString(item.evidenceId, 'fx policy.evidenceId', true), observedAt: iso(item.observedAt, 'fx policy.observedAt'), ...(item.validFrom === undefined ? {} : { validFrom: iso(item.validFrom, 'fx policy.validFrom') }), ...(item.validTo === undefined ? {} : { validTo: iso(item.validTo, 'fx policy.validTo') }), idempotencyKey: requiredString(item.idempotencyKey, 'fx policy.idempotencyKey', true), ...(item.ownerUser === undefined ? {} : { ownerUser: requiredString(item.ownerUser, 'fx policy.ownerUser', true) }) };
 }
 
 export function validatePaymentEvent(value: unknown): PaymentEvent {
@@ -754,7 +690,7 @@ function validateEventRewardCapUsage(value: unknown, index: number): EventReward
 
 export function validateStoredState(value: unknown): StoredState {
   const item = object(value, 'stored state');
-  keys(item, ['schemaVersion', 'cards', 'snapshots', 'rules', 'transactions', 'campaigns', 'switchEnrollments', 'cardSwitches', 'capPools', 'rewardComponents', 'merchants', 'evidence', 'factCandidates', 'paymentRoutes', 'paymentCapabilities', 'paymentAccounts', 'valuationSnapshots', 'fxPolicies', 'fxObservations', 'eventRewardSchemaVersion', 'eventRewardLedger', 'eventRewardReversals', 'eventRewardCapUsage'], 'stored state');
+  keys(item, ['schemaVersion', 'cards', 'snapshots', 'rules', 'transactions', 'campaigns', 'switchEnrollments', 'cardSwitches', 'capPools', 'rewardComponents', 'merchants', 'evidence', 'factCandidates', 'paymentRoutes', 'paymentCapabilities', 'paymentAccounts', 'valuationSnapshots', 'eventRewardSchemaVersion', 'eventRewardLedger', 'eventRewardReversals', 'eventRewardCapUsage'], 'stored state');
   if (item.schemaVersion !== 2) throw new RewardServiceError('INCOMPATIBLE_SCHEMA', 'schema v1 or another unsupported schema requires explicit migration or reset; data was not deleted');
   if (item.eventRewardSchemaVersion !== undefined && item.eventRewardSchemaVersion !== 1) throw new RewardServiceError('INCOMPATIBLE_SCHEMA', 'unsupported event reward ledger schema version; data was not deleted');
   if (!Array.isArray(item.cards) || !Array.isArray(item.snapshots) || !Array.isArray(item.rules) || !Array.isArray(item.transactions)) throw new RewardServiceError('STORE_CORRUPT', 'state collections must be arrays');
@@ -778,15 +714,13 @@ export function validateStoredState(value: unknown): StoredState {
   const paymentCapabilities = item.paymentCapabilities === undefined ? [] : (Array.isArray(item.paymentCapabilities) ? item.paymentCapabilities.map(validatePaymentCapability) : (() => { throw new RewardServiceError('STORE_CORRUPT', 'paymentCapabilities must be an array'); })());
   const paymentAccounts = item.paymentAccounts === undefined ? [] : (Array.isArray(item.paymentAccounts) ? item.paymentAccounts.map(validatePaymentAccountRecord) : (() => { throw new RewardServiceError('STORE_CORRUPT', 'paymentAccounts must be an array'); })());
   const valuationSnapshots = item.valuationSnapshots === undefined ? [] : (Array.isArray(item.valuationSnapshots) ? item.valuationSnapshots.map(validateRewardValuationSnapshot) : (() => { throw new RewardServiceError('STORE_CORRUPT', 'valuationSnapshots must be an array'); })());
-  const fxPolicies = item.fxPolicies === undefined ? [] : (Array.isArray(item.fxPolicies) ? item.fxPolicies.map(validateFxPolicy) : (() => { throw new RewardServiceError('STORE_CORRUPT', 'fxPolicies must be an array'); })());
-  const fxObservations = item.fxObservations === undefined ? [] : (Array.isArray(item.fxObservations) ? item.fxObservations.map(validateFxObservation) : (() => { throw new RewardServiceError('STORE_CORRUPT', 'fxObservations must be an array'); })());
   const eventRewardLedger = item.eventRewardLedger === undefined ? [] : (Array.isArray(item.eventRewardLedger) ? item.eventRewardLedger.map(validateEventRewardLedger) : (() => { throw new RewardServiceError('STORE_CORRUPT', 'eventRewardLedger must be an array'); })());
   const eventRewardReversals = item.eventRewardReversals === undefined ? [] : (Array.isArray(item.eventRewardReversals) ? item.eventRewardReversals.map(validateEventRewardReversal) : (() => { throw new RewardServiceError('STORE_CORRUPT', 'eventRewardReversals must be an array'); })());
   const eventRewardCapUsage = item.eventRewardCapUsage === undefined ? [] : (Array.isArray(item.eventRewardCapUsage) ? item.eventRewardCapUsage.map(validateEventRewardCapUsage) : (() => { throw new RewardServiceError('STORE_CORRUPT', 'eventRewardCapUsage must be an array'); })());
   if (new Set(capPools.map((pool) => pool.id)).size !== capPools.length) throw new RewardServiceError('STORE_CORRUPT', 'duplicate cap pool id');
   if (new Set(eventRewardLedger.map((record) => record.idempotencyKey)).size !== eventRewardLedger.length) throw new RewardServiceError('STORE_CORRUPT', 'duplicate event reward ledger idempotency key');
   if (new Set(eventRewardReversals.map((record) => record.idempotencyKey)).size !== eventRewardReversals.length) throw new RewardServiceError('STORE_CORRUPT', 'duplicate event reward reversal idempotency key');
-  return { schemaVersion: 2, cards: item.cards.map(validateCard), snapshots: item.snapshots.map(validateSnapshot), rules: item.rules.map(validateRule), transactions, campaigns, switchEnrollments, cardSwitches, capPools, rewardComponents, merchants, evidence, factCandidates, paymentRoutes, paymentCapabilities, paymentAccounts, valuationSnapshots, fxPolicies, fxObservations, eventRewardSchemaVersion: 1, eventRewardLedger, eventRewardReversals, eventRewardCapUsage };
+  return { schemaVersion: 2, cards: item.cards.map(validateCard), snapshots: item.snapshots.map(validateSnapshot), rules: item.rules.map(validateRule), transactions, campaigns, switchEnrollments, cardSwitches, capPools, rewardComponents, merchants, evidence, factCandidates, paymentRoutes, paymentCapabilities, paymentAccounts, valuationSnapshots, eventRewardSchemaVersion: 1, eventRewardLedger, eventRewardReversals, eventRewardCapUsage };
 }
 
 export function validatePaymentRouteRecord(value: unknown): PaymentRouteRecord {
@@ -868,9 +802,8 @@ function validateRewardComponentRecord(value: unknown, index: number): RewardCom
 
 export function validateToolArgs(name: string, value: unknown): Record<string, unknown> {
   const args = object(value, 'tool arguments');
-  if (name === 'recommend' && args.transaction === undefined && args.kind === undefined) return { ...validateRecommendationIntent(args) };
-  if (name === 'recommendation_preflight' && args.transaction === undefined) return { ...validateRecommendationIntent(args) };
-  const allowed: Record<string, string[]> = { register_card: ['card', 'fxPolicyRequirement'], list_cards: ['limit', 'page', 'projection'], upsert_offer: ['snapshot', 'rule', 'confirmation', 'capPools', 'merchant', 'fxPolicyRequirement'], upsert_fx_policy: ['policy'], list_fx_policies: [], upsert_fx_observation: ['observation'], list_fx_observations: [], recommend: ['transaction', 'cardIds', 'merchant', 'context', 'limit', 'page', 'projection', 'kind', 'payment_path'], recommendation_preflight: ['transaction', 'context'], upsert_payment_route: ['route', 'fxPolicyRequirement'], list_payment_routes: ['limit', 'page', 'projection'], upsert_payment_capability: ['capability'], list_payment_capabilities: [], register_payment_account: ['account'], list_payment_accounts: ['limit', 'page', 'projection'], recommend_payment_paths_v1: ['amount', 'merchant', 'mcc', 'country', 'channel', 'paymentMethod', 'asOf', 'routeIds', 'limit', 'eligibilityFacts'], record_transaction: ['transaction'], record_event_reward: ['event', 'sourceEvents', 'rule', 'chainRule', 'candidate', 'idempotencyKey'], record_event_reward_v1: ['event', 'candidate', 'idempotencyKey'], record_event_reward_v2: ['event', 'sourceEvents', 'rule', 'chainRule', 'candidate', 'idempotencyKey'], reverse_event_reward: ['event', 'idempotencyKey'], reverse_event_reward_v1: ['event', 'idempotencyKey'], remaining_caps: ['cardId', 'asOf', 'limit', 'page', 'projection'], calculate_reward: ['rule', 'transaction', 'context'], rank_cards: ['cards', 'rules', 'transaction', 'context'], get_user_benefit_status: ['kind', 'cardId', 'asOfUtc', 'projection'], upsert_user_benefit_status: ['input'], resolve_merchant: ['rawQuery', 'country', 'market', 'mcc', 'channel'], search_active_offers: ['rawQuery', 'cardId', 'canonicalMerchantId', 'country', 'market', 'mcc', 'channel', 'asOf', 'limit', 'page', 'projection'] };
+  if (name === 'recommend') return { ...validateRecommendationIntent(args) };
+  const allowed: Record<string, string[]> = { register_card: ['card'], list_cards: ['limit', 'page', 'projection'], upsert_offer: ['snapshot', 'rule', 'confirmation', 'capPools', 'merchant'], upsert_payment_route: ['route'], list_payment_routes: ['limit', 'page', 'projection'], upsert_payment_capability: ['capability'], list_payment_capabilities: [], register_payment_account: ['account'], list_payment_accounts: ['limit', 'page', 'projection'], record_transaction: ['transaction'], record_event_reward: ['event', 'sourceEvents', 'rule', 'chainRule', 'candidate', 'idempotencyKey'], reverse_event_reward: ['event', 'idempotencyKey'], remaining_caps: ['cardId', 'asOf', 'limit', 'page', 'projection'], calculate_reward: ['rule', 'transaction', 'context'], get_user_benefit_status: ['kind', 'cardId', 'asOfUtc', 'projection'], upsert_user_benefit_status: ['input'], resolve_merchant: ['rawQuery', 'country', 'market', 'mcc', 'channel'], search_active_offers: ['rawQuery', 'cardId', 'canonicalMerchantId', 'country', 'market', 'mcc', 'channel', 'asOf', 'limit', 'page', 'projection'] };
   if (!allowed[name]) throw new RewardServiceError('TOOL_NOT_FOUND', `unknown tool: ${name}`);
   keys(args, allowed[name], `tool ${name}`);
   return args;
@@ -878,7 +811,7 @@ export function validateToolArgs(name: string, value: unknown): Record<string, u
 
 export function validateRecommendationIntent(value: unknown): RecommendationIntent {
   const input = object(value, 'recommend intent');
-  keys(input, ['merchant', 'amount', 'country', 'market', 'channel', 'paymentMethod', 'occurredAt', 'cardIds', 'routeIds', 'limit', 'page', 'cursor', 'resultVersion', 'fx', 'fxObservation', 'routeFacts'], 'recommend intent');
+  keys(input, ['merchant', 'amount', 'country', 'market', 'channel', 'paymentMethod', 'occurredAt', 'cardIds', 'routeIds', 'limit', 'page', 'cursor', 'resultVersion', 'fx', 'routeFacts', 'eligibilityFacts'], 'recommend intent');
   let merchant: RecommendationIntent['merchant'];
   if (typeof input.merchant === 'string') merchant = requiredString(input.merchant, 'merchant');
   else {
@@ -905,7 +838,6 @@ export function validateRecommendationIntent(value: unknown): RecommendationInte
     ...(input.cursor === undefined ? {} : { cursor: requiredString(input.cursor, 'cursor') }),
     ...(input.resultVersion === undefined ? {} : { resultVersion: requiredString(input.resultVersion, 'resultVersion') }),
     ...(input.fx === undefined ? {} : { fx: validateFxSnapshot(input.fx, 'recommend fx') }),
-    ...(input.fxObservation === undefined ? {} : { fxObservation: validateFxSnapshot(input.fxObservation, 'recommend fxObservation') }),
     ...(input.routeFacts === undefined ? {} : { routeFacts: (() => {
       if (!Array.isArray(input.routeFacts)) throw new RewardServiceError('INVALID_INPUT', 'routeFacts must be an array');
       if (input.routeFacts.length > 128) throw new RewardServiceError('INVALID_INPUT', 'routeFacts must contain at most 128 entries');
@@ -913,6 +845,11 @@ export function validateRecommendationIntent(value: unknown): RecommendationInte
       const scopes = facts.map((fact) => `${fact.routeId}|${fact.edgeId ?? '*'}`);
       if (new Set(scopes).size !== scopes.length) throw new RewardServiceError('INVALID_INPUT', 'routeFacts contains duplicate route/edge scope');
       return facts;
+    })() }),
+    ...(input.eligibilityFacts === undefined ? {} : { eligibilityFacts: (() => {
+      if (!Array.isArray(input.eligibilityFacts)) throw new RewardServiceError('INVALID_INPUT', 'eligibilityFacts must be an array');
+      if (input.eligibilityFacts.length > 128) throw new RewardServiceError('INVALID_INPUT', 'eligibilityFacts must contain at most 128 entries');
+      return input.eligibilityFacts.map(validateEligibilityFact);
     })() }),
   };
 }

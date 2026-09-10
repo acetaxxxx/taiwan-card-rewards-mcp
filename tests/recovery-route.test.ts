@@ -55,8 +55,8 @@ describe('payment-route FX recovery', () => {
     expect(recovered.requiredActions.some((candidate) => candidate.fxResolutionRequest)).toBe(false);
     expect(store.read()).toEqual(before);
 
-    const reference = service.recommendIntent({ ...intent, routeFacts: undefined, fxObservation: { id: 'bot-reference', baseCurrency: 'USD', quoteCurrency: 'TWD', ratePpm: 32_000_000, capturedAt: at, provider: 'Bank of Taiwan', rateType: 'spot_selling', sourceUrl: 'https://rate.bot.com.tw/xrt?Lang=zh-TW', contentHash: 'bot-reference' } });
-    expect(reference.candidates[0]?.fxEstimate).toEqual(expect.objectContaining({ status: 'reference_estimate', provider: 'Bank of Taiwan' }));
+    const reference = service.recommendIntent({ ...intent, routeFacts: undefined, fx: { id: 'bot-reference', baseCurrency: 'USD', quoteCurrency: 'TWD', ratePpm: 32_000_000, capturedAt: at, provider: 'Bank of Taiwan', rateType: 'spot_selling', sourceUrl: 'https://rate.bot.com.tw/xrt?Lang=zh-TW', contentHash: 'bot-reference' } });
+    expect(reference.candidates[0]?.fxEstimate).toEqual(expect.objectContaining({ status: 'estimated_fallback', provider: 'Bank of Taiwan' }));
     expect(reference.candidates[0]?.netSpend).toEqual({ amountMinor: 1220, currency: 'TWD' });
   });
 });

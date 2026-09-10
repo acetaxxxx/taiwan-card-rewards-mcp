@@ -7,6 +7,7 @@ import {
   FileStore,
   FX_USER_QUESTION,
   RewardServiceError,
+  buildFxResolutionRequest,
 } from '../src/index.js';
 import type {
   CardDescriptor,
@@ -69,29 +70,17 @@ describe('Track B: FX Resolution & Provenance Freeze', () => {
   });
 
   describe('Vertical Slice 1: Fail-Closed fx_missing and Actionable FxResolutionRequest on Public Seams', () => {
-    it('preflightRecommendation: produces actionable FxResolutionRequest for planned cross-currency transaction', () => {
-      const plannedTx: TransactionTuple = {
-        cardId: 'card-jpy-rewards',
-        kind: 'purchase',
-        mode: 'planned',
-        occurredAt: '2026-09-01T12:00:00Z',
-        amount: { amountMinor: 100000, currency: 'JPY' }, // 1000 JPY
-      };
-
-      const preflight = service.preflightRecommendation(plannedTx);
-      expect(preflight.ready).toBe(false);
-      expect(preflight.fxResolutionRequest).toBeDefined();
-
-      const fxReq = preflight.fxResolutionRequest!;
+    it('buildFxResolutionRequest: produces an actionable request for a planned cross-currency transaction', () => {
+      const fxReq = buildFxResolutionRequest({
+        transaction: { amount: { amountMinor: 100000, currency: 'JPY' }, occurredAt: '2026-09-01T12:00:00Z', mode: 'planned' },
+        rules: [ruleJpy],
+        card: cardJpy,
+      });
       expect(fxReq.baseCurrency).toBe('JPY');
       expect(fxReq.quoteCurrency).toBe('TWD');
       expect(fxReq.transactionKind).toBe('planned');
       expect(fxReq.conversionOwner).toBe('card_scheme');
       expect(fxReq.retryAction).toBe('query_approved_fx_source');
-
-      const fxDiag = preflight.diagnostics.find((d) => d.code === 'fx_missing');
-      expect(fxDiag).toBeDefined();
-      expect(fxDiag?.retryAction).toBe('query_approved_fx_source');
     });
 
     it('recordTransaction: fails closed with fx_missing when cross-currency purchase lacks FX observation and writes NO half-baked records', () => {
@@ -160,87 +149,57 @@ describe('Track B: FX Resolution & Provenance Freeze', () => {
   });
 
   describe('Vertical Slice 2: Policy Matrix, Atomic Ingestion, Provenance Freeze & Workflow Verification', () => {
-    describe('Policy Matrix on public preflightRecommendation seam', () => {
+    describe('Policy Matrix via buildFxResolutionRequest', () => {
       it('maps card network / direct card to card_scheme', () => {
-        const preflight = service.preflightRecommendation({
-          cardId: 'card-jpy-rewards',
-          kind: 'purchase',
-          mode: 'actual',
-          occurredAt: '2026-09-01T12:00:00Z',
-          amount: { amountMinor: 100000, currency: 'JPY' },
-          routeContext: { transactionCurrency: 'JPY', conversionOwner: 'card_network' },
+        const fxReq = buildFxResolutionRequest({
+          transaction: { amount: { amountMinor: 100000, currency: 'JPY' }, occurredAt: '2026-09-01T12:00:00Z', mode: 'actual', routeContext: { transactionCurrency: 'JPY', conversionOwner: 'card_network' } },
         });
-        expect(preflight.fxResolutionRequest?.conversionOwner).toBe('card_scheme');
-        expect(preflight.fxResolutionRequest?.suggestedRateTypes).toEqual(['card_scheme']);
+        expect(fxReq.conversionOwner).toBe('card_scheme');
+        expect(fxReq.suggestedRateTypes).toEqual(['card_scheme']);
       });
 
       it('maps bank / issuer to cash_selling', () => {
-        const preflight = service.preflightRecommendation({
-          cardId: 'card-jpy-rewards',
-          kind: 'purchase',
-          mode: 'actual',
-          occurredAt: '2026-09-01T12:00:00Z',
-          amount: { amountMinor: 100000, currency: 'JPY' },
-          routeContext: { transactionCurrency: 'JPY', conversionOwner: 'issuer' },
+        const fxReq = buildFxResolutionRequest({
+          transaction: { amount: { amountMinor: 100000, currency: 'JPY' }, occurredAt: '2026-09-01T12:00:00Z', mode: 'actual', routeContext: { transactionCurrency: 'JPY', conversionOwner: 'issuer' } },
         });
-        expect(preflight.fxResolutionRequest?.conversionOwner).toBe('issuer');
-        expect(preflight.fxResolutionRequest?.suggestedRateTypes).toEqual(['cash_selling']);
+        expect(fxReq.conversionOwner).toBe('issuer');
+        expect(fxReq.suggestedRateTypes).toEqual(['cash_selling']);
       });
 
       it('maps wallet to spot_selling and mid_market', () => {
-        const preflight = service.preflightRecommendation({
-          cardId: 'card-jpy-rewards',
-          kind: 'purchase',
-          mode: 'planned',
-          occurredAt: '2026-09-01T12:00:00Z',
-          amount: { amountMinor: 100000, currency: 'JPY' },
-          route: { kind: 'wallet' },
+        const fxReq = buildFxResolutionRequest({
+          transaction: { amount: { amountMinor: 100000, currency: 'JPY' }, occurredAt: '2026-09-01T12:00:00Z', mode: 'planned', route: { kind: 'wallet' } },
         });
-        expect(preflight.fxResolutionRequest?.conversionOwner).toBe('wallet');
-        expect(preflight.fxResolutionRequest?.suggestedRateTypes).toEqual(['spot_selling', 'mid_market']);
+        expect(fxReq.conversionOwner).toBe('wallet');
+        expect(fxReq.suggestedRateTypes).toEqual(['spot_selling', 'mid_market']);
       });
 
       it('maps DCC to merchant_dcc with spot/cash selling', () => {
-        const preflight = service.preflightRecommendation({
-          cardId: 'card-jpy-rewards',
-          kind: 'purchase',
-          mode: 'actual',
-          occurredAt: '2026-09-01T12:00:00Z',
-          amount: { amountMinor: 100000, currency: 'JPY' },
-          routeContext: { transactionCurrency: 'JPY', dcc: true },
+        const fxReq = buildFxResolutionRequest({
+          transaction: { amount: { amountMinor: 100000, currency: 'JPY' }, occurredAt: '2026-09-01T12:00:00Z', mode: 'actual', routeContext: { transactionCurrency: 'JPY', dcc: true } },
         });
-        expect(preflight.fxResolutionRequest?.conversionOwner).toBe('merchant_dcc');
-        expect(preflight.fxResolutionRequest?.suggestedRateTypes).toEqual(['spot_selling', 'cash_selling']);
+        expect(fxReq.conversionOwner).toBe('merchant_dcc');
+        expect(fxReq.suggestedRateTypes).toEqual(['spot_selling', 'cash_selling']);
       });
 
       it('handles unknown conversionOwner: planned uses estimate; actual prompts single user question', () => {
         // Planned estimate: mid_market / spot_selling, no user question
-        const plannedPreflight = service.preflightRecommendation({
-          cardId: 'card-jpy-rewards',
-          kind: 'purchase',
-          mode: 'planned',
-          occurredAt: '2026-09-01T12:00:00Z',
-          amount: { amountMinor: 100000, currency: 'JPY' },
-          routeContext: { transactionCurrency: 'JPY', conversionOwner: 'unknown' },
+        const plannedReq = buildFxResolutionRequest({
+          transaction: { amount: { amountMinor: 100000, currency: 'JPY' }, occurredAt: '2026-09-01T12:00:00Z', mode: 'planned', routeContext: { transactionCurrency: 'JPY', conversionOwner: 'unknown' } },
         });
-        expect(plannedPreflight.fxResolutionRequest?.conversionOwner).toBe('unknown');
-        expect(plannedPreflight.fxResolutionRequest?.suggestedRateTypes).toEqual(['mid_market', 'spot_selling']);
-        expect(plannedPreflight.fxResolutionRequest?.retryAction).toBe('query_approved_fx_source');
-        expect(plannedPreflight.fxResolutionRequest?.userQuestion).toBeUndefined();
+        expect(plannedReq.conversionOwner).toBe('unknown');
+        expect(plannedReq.suggestedRateTypes).toEqual(['mid_market', 'spot_selling']);
+        expect(plannedReq.retryAction).toBe('query_approved_fx_source');
+        expect(plannedReq.userQuestion).toBeUndefined();
 
         // Actual settlement: prompt user with single clear question
-        const actualPreflight = service.preflightRecommendation({
-          cardId: 'card-jpy-rewards',
-          kind: 'purchase',
-          mode: 'actual',
-          occurredAt: '2026-09-01T12:00:00Z',
-          amount: { amountMinor: 100000, currency: 'JPY' },
-          routeContext: { transactionCurrency: 'JPY', conversionOwner: 'unknown' },
+        const actualReq = buildFxResolutionRequest({
+          transaction: { amount: { amountMinor: 100000, currency: 'JPY' }, occurredAt: '2026-09-01T12:00:00Z', mode: 'actual', routeContext: { transactionCurrency: 'JPY', conversionOwner: 'unknown' } },
         });
-        expect(actualPreflight.fxResolutionRequest?.conversionOwner).toBe('unknown');
-        expect(actualPreflight.fxResolutionRequest?.suggestedRateTypes).toEqual(['card_scheme', 'cash_selling']);
-        expect(actualPreflight.fxResolutionRequest?.retryAction).toBe('ask_user');
-        expect(actualPreflight.fxResolutionRequest?.userQuestion).toBe(FX_USER_QUESTION);
+        expect(actualReq.conversionOwner).toBe('unknown');
+        expect(actualReq.suggestedRateTypes).toEqual(['card_scheme', 'cash_selling']);
+        expect(actualReq.retryAction).toBe('ask_user');
+        expect(actualReq.userQuestion).toBe(FX_USER_QUESTION);
       });
     });
 
@@ -376,61 +335,6 @@ describe('Track B: FX Resolution & Provenance Freeze', () => {
         expect(refundRecord?.appliedFx?.snapshotId).toBe('fx-jpy-initial');
         expect(refundRecord?.appliedFx?.ratePpm).toBe(215000);
         expect(refundRecord?.transaction.fx?.ratePpm).toBe(215000);
-      });
-    });
-
-    describe('Preflight Diagnostics for FX Stale and Conflict Evidence', () => {
-      it('flags fx_conflict when evidence reviewState is conflict', () => {
-        const conflictEvidence: EvidenceRecord = {
-          id: 'ev-fx-conflict',
-          requirementId: 'fx:JPY:TWD',
-          sourceSnapshotId: 'snap-jpy-1',
-          url: 'https://bank.example.com/fx',
-          extractedFacts: [],
-          reviewState: 'conflict',
-          observedAt: '2026-09-01T00:00:00Z',
-        };
-        service.store.update((s) => {
-          s.evidence.push(conflictEvidence);
-        });
-
-        const preflight = service.preflightRecommendation({
-          cardId: 'card-jpy-rewards',
-          kind: 'purchase',
-          mode: 'actual',
-          occurredAt: '2026-09-01T12:00:00Z',
-          amount: { amountMinor: 100000, currency: 'JPY' },
-        });
-        const conflictDiag = preflight.diagnostics.find((d) => d.code === 'fx_conflict');
-        expect(conflictDiag).toBeDefined();
-        expect(conflictDiag?.retryAction).toBe('submit_evidence');
-      });
-
-      it('flags fx_stale when evidence refreshAfter has expired', () => {
-        const staleEvidence: EvidenceRecord = {
-          id: 'ev-fx-stale',
-          requirementId: 'fx:JPY:TWD',
-          sourceSnapshotId: 'snap-jpy-1',
-          url: 'https://bank.example.com/fx',
-          extractedFacts: [],
-          reviewState: 'accepted',
-          observedAt: '2026-08-01T00:00:00Z',
-          refreshAfter: '2026-08-02T00:00:00Z', // Expired as of 2026-09-01
-        };
-        service.store.update((s) => {
-          s.evidence.push(staleEvidence);
-        });
-
-        const preflight = service.preflightRecommendation({
-          cardId: 'card-jpy-rewards',
-          kind: 'purchase',
-          mode: 'actual',
-          occurredAt: '2026-09-01T12:00:00Z',
-          amount: { amountMinor: 100000, currency: 'JPY' },
-        });
-        const staleDiag = preflight.diagnostics.find((d) => d.code === 'fx_stale');
-        expect(staleDiag).toBeDefined();
-        expect(staleDiag?.retryAction).toBe('refresh_external_data');
       });
     });
 
