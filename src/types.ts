@@ -606,6 +606,7 @@ export interface RecommendationIntent {
   cardIds?: readonly string[];
   routeIds?: readonly string[];
   limit?: number;
+  cursor?: string;
   fx?: FxSnapshot;
   routeFacts?: readonly { routeId: string; edgeId?: string; fx: FxSnapshot }[];
 }
@@ -646,6 +647,10 @@ export interface RecommendationIntentResult {
   evaluatedAt: string;
   fxResolutionRequest?: FxResolutionRequest;
   fxResolutionRequests?: readonly FxResolutionRequest[];
+  pageSize: number;
+  hasMore: boolean;
+  nextCursor?: string;
+  resultVersion: string;
 }
 
 export interface PaymentPathRequest {
@@ -663,6 +668,8 @@ export interface PaymentPathRequest {
   maxBranchesPerNode?: number;
   eligibilityFacts?: readonly EligibilityFact[] | undefined;
   routeFacts?: readonly { routeId: string; edgeId?: string; fx: FxSnapshot }[] | undefined;
+  /** Internal continuation mode used by the merchant-first intent engine. */
+  continuation?: boolean | undefined;
 }
 export interface PaymentPathNode { id: string; kind: string; displayName: string; }
 export interface PaymentPathEventEligibility { status: 'ready' | 'unknown' | 'no_match' | 'needs_facts'; reasons: readonly string[]; }

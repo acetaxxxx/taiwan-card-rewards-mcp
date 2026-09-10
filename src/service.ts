@@ -704,7 +704,28 @@ export class RewardService {
     const country = input.country ?? details.country;
     const market = input.market ?? details.market;
     const state = this.store.read();
-    const evaluatedAt = input.occurredAt ?? nowIso();
+    let cursorOffset = 0;
+    let cursorEvaluatedAt: string | undefined;
+    let cursorVersion: string | undefined;
+    if (input.cursor !== undefined) {
+      try {
+        const decoded = JSON.parse(Buffer.from(input.cursor, 'base64url').toString('utf8')) as { v?: number; offset?: number; evaluatedAt?: string; resultVersion?: string };
+        const offset = decoded.offset;
+        if (decoded.v !== 1 || !Number.isSafeInteger(offset) || typeof offset !== 'number' || offset < 0 || typeof decoded.evaluatedAt !== 'string' || typeof decoded.resultVersion !== 'string') throw new Error('invalid cursor');
+        cursorOffset = offset;
+        cursorEvaluatedAt = decoded.evaluatedAt;
+        cursorVersion = decoded.resultVersion;
+      } catch {
+        throw new RewardServiceError('INVALID_INPUT', 'cursor is invalid; restart the recommendation');
+      }
+    }
+    const evaluatedAt = input.occurredAt ?? cursorEvaluatedAt ?? nowIso();
+    const resultVersion = crypto.createHash('sha256').update(JSON.stringify({
+      state,
+      intent: { ...input, cursor: undefined },
+      evaluatedAt,
+    })).digest('hex').slice(0, 16);
+    if (cursorVersion !== undefined && cursorVersion !== resultVersion) throw new RewardServiceError('INVALID_INPUT', 'recommendation resultVersion changed; restart the recommendation');
     const resolution = this.resolveMerchant(rawMerchant, {
       ...(country ? { country } : {}), ...(market ? { market } : {}),
       ...(input.channel ? { channel: input.channel } : {}),
@@ -804,7 +825,7 @@ export class RewardService {
         ...(country ? { country } : {}), ...(input.channel ? { channel: input.channel } : {}),
         ...(input.paymentMethod ? { paymentMethod: input.paymentMethod } : {}),
         ...(input.routeFacts ? { routeFacts: input.routeFacts } : {}),
-        routeIds: routes.map(route => route.id), limit: 20,
+        routeIds: routes.map(route => route.id), limit: 128, continuation: true,
       });
       for (const path of result.candidates) {
         const cardId = path.fundingSource.kind === 'credit_card' ? path.fundingSource.cardId : undefined;
@@ -851,7 +872,7 @@ export class RewardService {
         pathTruncated ||= blocked.reason.includes('truncated_by_bound');
         addAction({ id: `route:${blocked.routeId}:${blocked.reason}`, action: 'review_payment_route', owner: 'agent', path: `routes.${blocked.routeId}`, requiredFacts: [blocked.reason], candidateIds: [blocked.routeId], submission: { tool: 'upsert_payment_route', field: 'route' }, completionCondition: 'repeat recommend after the route has current accepted evidence' });
       }
-      pathTruncated ||= result.candidates.length >= 20;
+      pathTruncated ||= result.candidates.length >= 128;
     } else {
       for (const route of routes) {
         const cardId = route.funding.kind === 'credit_card' ? route.funding.cardId : undefined;
@@ -885,13 +906,18 @@ export class RewardService {
     candidates.sort((a, b) => Number(b.status === 'ready') - Number(a.status === 'ready') ||
       (a.reward?.currency === b.reward?.currency ? (b.reward?.amountMinor ?? 0) - (a.reward?.amountMinor ?? 0) : 0) ||
       a.id.localeCompare(b.id));
+    const pageSize = input.limit!;
+    const page = candidates.slice(cursorOffset, cursorOffset + pageSize);
+    const hasMore = cursorOffset + page.length < candidates.length;
+    const nextCursor = hasMore ? Buffer.from(JSON.stringify({ v: 1, offset: cursorOffset + page.length, evaluatedAt, resultVersion })).toString('base64url') : undefined;
     return {
-      status, candidates: candidates.slice(0, input.limit), requiredActions: actions, evaluatedAt,
+      status, candidates: page, requiredActions: actions, evaluatedAt,
       ...(fxResolutionRequest ? { fxResolutionRequest } : {}),
       ...(fxResolutionRequests.length ? { fxResolutionRequests } : {}),
+      pageSize, hasMore, ...(nextCursor ? { nextCursor } : {}), resultVersion,
       coverage: { scope: 'registered cards and payment routes; route acceptance requires evidence',
-        discoveredCount: candidates.length, bounded: pathTruncated || candidates.length > input.limit!,
-        notes: ['not a market-wide catalog', 'planned calls do not consume caps', 'path exploration is bounded; complete continuation is not yet available'] },
+        discoveredCount: candidates.length, bounded: pathTruncated,
+        notes: ['not a market-wide catalog', 'planned calls do not consume caps', ...(pathTruncated ? ['path exploration reached a declared resource bound'] : ['all currently discovered candidates are available through continuation'])] },
     };
   }
 
@@ -916,7 +942,8 @@ export class RewardService {
     const asOf = input.asOf ?? nowIso();
     if (Number.isNaN(Date.parse(asOf))) throw new RewardServiceError('INVALID_INPUT', 'payment path asOf is invalid');
     const eligibilityFacts: readonly EligibilityFact[] = (input.eligibilityFacts ?? []).map(validateEligibilityFact);
-    if (input.limit !== undefined && (!Number.isSafeInteger(input.limit) || input.limit < 1 || input.limit > 20)) throw new RewardServiceError('INVALID_INPUT', 'payment path limit must be 1..20');
+    const maxCandidates = input.continuation ? 128 : 20;
+    if (input.limit !== undefined && (!Number.isSafeInteger(input.limit) || input.limit < 1 || input.limit > maxCandidates)) throw new RewardServiceError('INVALID_INPUT', `payment path limit must be 1..${maxCandidates}`);
     const maxHops = input.maxHops ?? 6; const maxEvents = input.maxEvents ?? 4; const maxBranchesPerNode = input.maxBranchesPerNode ?? 8;
     if (![maxHops, maxEvents, maxBranchesPerNode].every((value) => Number.isSafeInteger(value) && value >= 1 && value <= 20)) throw new RewardServiceError('INVALID_INPUT', 'payment path bounds are invalid');
     const state = this.store.read();
@@ -1001,7 +1028,7 @@ export class RewardService {
       const starts = route.nodes.filter((node) => node.kind === 'funding_source').map((node) => node.id).sort();
       const paths: PathOption[] = [];
       const visit = (nodeId: string, seen: Set<string>, path: NonNullable<PaymentRouteRecord['edges']>[number][]) => {
-        if (path.length > maxHops || path.length >= maxEvents || paths.length >= (input.limit ?? 20)) { if (path.length > maxHops) branchBlocked.push({ routeId: route.id, reason: `truncated_by_bound:maxHops=${maxHops}` }); if (path.length >= maxEvents) branchBlocked.push({ routeId: route.id, reason: `truncated_by_bound:maxEvents=${maxEvents}` }); if (paths.length >= (input.limit ?? 20)) branchBlocked.push({ routeId: route.id, reason: 'truncated_by_bound:maxCandidates' }); return; }
+        if (path.length > maxHops || path.length >= maxEvents || paths.length >= (input.limit ?? maxCandidates)) { if (path.length > maxHops) branchBlocked.push({ routeId: route.id, reason: `truncated_by_bound:maxHops=${maxHops}` }); if (path.length >= maxEvents) branchBlocked.push({ routeId: route.id, reason: `truncated_by_bound:maxEvents=${maxEvents}` }); if (paths.length >= (input.limit ?? maxCandidates)) branchBlocked.push({ routeId: route.id, reason: 'truncated_by_bound:maxCandidates' }); return; }
         const node = route.nodes?.find((candidate) => candidate.id === nodeId);
         if (node?.kind === 'merchant' && path.length) { paths.push({ route, pathEdges: path }); return; }
         for (const edge of adjacency.get(nodeId) ?? []) { if (seen.has(edge.toNodeId)) { branchBlocked.push({ routeId: route.id, reason: `cycle branch blocked at edge ${edge.edgeId}` }); continue; } visit(edge.toNodeId, new Set([...seen, edge.toNodeId]), [...path, edge]); }

@@ -101,7 +101,7 @@ describe("MCP Contract and Agent Boundary", () => {
     expect(recommend.oneOf).toHaveLength(3);
     const intentBranch = recommend.oneOf.find((branch: any) => branch.properties?.merchant && !branch.properties?.transaction);
     expect(intentBranch.required).toContain("merchant");
-    expect(intentBranch.properties.limit.maximum).toBe(20);
+    expect(intentBranch.properties.limit.maximum).toBe(128);
     const cardBranch = recommend.oneOf.find((branch: any) => branch.properties?.transaction);
     expect(cardBranch.properties.transaction.required).not.toContain("cardId");
     expect(cardBranch.properties.cardIds.items.type).toBe("string");

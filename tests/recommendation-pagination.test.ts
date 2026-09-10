@@ -46,4 +46,44 @@ describe('bounded recommendation pagination', () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  it('continues through the complete intent candidate set with a stable cursor', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'card-rewards-intent-page-'));
+    const store = new FileStore({ dataDir: dir });
+    try {
+      const service = new RewardService(store, 'user');
+      for (let index = 0; index < 31; index += 1) {
+        const id = `card-${String(index).padStart(2, '0')}`;
+        service.registerCard({ id, issuer: 'Bank', productName: `Card ${index}` });
+        service.upsertOffer(source, { id: `rule-${id}`, cardId: id, version: '1', sourceSnapshotId: source.id, status: 'active', validFrom: '2026-01-01T00:00:00Z', settlementCurrency: 'TWD', match: {}, reward: { kind: 'percentage', rateBps: 100 } });
+      }
+
+      const first = service.recommendIntent({ merchant: 'Shop', amount: transaction.amount, occurredAt: transaction.occurredAt });
+      expect(first.pageSize).toBe(10);
+      expect(first.candidates).toHaveLength(10);
+      expect(first.hasMore).toBe(true);
+      expect(first.nextCursor).toBeTypeOf('string');
+      expect(first.coverage.bounded).toBe(false);
+
+      const second = service.recommendIntent({ merchant: 'Shop', amount: transaction.amount, occurredAt: transaction.occurredAt, cursor: first.nextCursor });
+      expect(second.resultVersion).toBe(first.resultVersion);
+      expect(second.candidates).toHaveLength(10);
+      expect(new Set([...first.candidates, ...second.candidates].map((candidate) => candidate.id)).size).toBe(20);
+
+      const third = service.recommendIntent({ merchant: 'Shop', amount: transaction.amount, occurredAt: transaction.occurredAt, cursor: second.nextCursor });
+      expect(third.candidates).toHaveLength(10);
+      expect(third.hasMore).toBe(true);
+      const fourth = service.recommendIntent({ merchant: 'Shop', amount: transaction.amount, occurredAt: transaction.occurredAt, cursor: third.nextCursor });
+      expect(fourth.candidates).toHaveLength(1);
+      expect(fourth.hasMore).toBe(false);
+      expect(fourth.nextCursor).toBeUndefined();
+      expect(new Set([...first.candidates, ...second.candidates, ...third.candidates, ...fourth.candidates].map((candidate) => candidate.id)).size).toBe(31);
+
+      service.registerCard({ id: 'card-new', issuer: 'Bank', productName: 'New Card' });
+      expect(() => service.recommendIntent({ merchant: 'Shop', amount: transaction.amount, occurredAt: transaction.occurredAt, cursor: first.nextCursor })).toThrow(/resultVersion changed/);
+    } finally {
+      store.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });

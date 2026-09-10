@@ -810,7 +810,7 @@ export function validateToolArgs(name: string, value: unknown): Record<string, u
 
 export function validateRecommendationIntent(value: unknown): RecommendationIntent {
   const input = object(value, 'recommend intent');
-  keys(input, ['merchant', 'amount', 'country', 'market', 'channel', 'paymentMethod', 'occurredAt', 'cardIds', 'routeIds', 'limit', 'fx', 'routeFacts'], 'recommend intent');
+  keys(input, ['merchant', 'amount', 'country', 'market', 'channel', 'paymentMethod', 'occurredAt', 'cardIds', 'routeIds', 'limit', 'cursor', 'fx', 'routeFacts'], 'recommend intent');
   let merchant: RecommendationIntent['merchant'];
   if (typeof input.merchant === 'string') merchant = requiredString(input.merchant, 'merchant');
   else {
@@ -822,7 +822,7 @@ export function validateRecommendationIntent(value: unknown): RecommendationInte
     for (const field of ['country', 'market']) if (input[field] !== undefined && fields[field] !== undefined && input[field] !== fields[field]) throw new RewardServiceError('INVALID_INPUT', `conflicting merchant ${field}`);
   }
   const limit = input.limit === undefined ? 10 : safeInt(input.limit, 'limit', 1);
-  if (limit > 20) throw new RewardServiceError('INVALID_INPUT', 'limit must be 1..20');
+  if (limit > 128) throw new RewardServiceError('INVALID_INPUT', 'limit must be 1..128');
   return {
     merchant, limit,
     ...(input.amount === undefined ? {} : { amount: validateMoney(input.amount, 'amount') }),
@@ -833,6 +833,7 @@ export function validateRecommendationIntent(value: unknown): RecommendationInte
     ...(input.occurredAt === undefined ? {} : { occurredAt: iso(input.occurredAt, 'occurredAt') }),
     ...(input.cardIds === undefined ? {} : { cardIds: list(input.cardIds, 'cardIds')! }),
     ...(input.routeIds === undefined ? {} : { routeIds: list(input.routeIds, 'routeIds')! }),
+    ...(input.cursor === undefined ? {} : { cursor: requiredString(input.cursor, 'cursor') }),
     ...(input.fx === undefined ? {} : { fx: validateFxSnapshot(input.fx, 'recommend fx') }),
     ...(input.routeFacts === undefined ? {} : { routeFacts: (() => {
       if (!Array.isArray(input.routeFacts)) throw new RewardServiceError('INVALID_INPUT', 'routeFacts must be an array');
