@@ -101,9 +101,9 @@ Agent 在建立優惠規則前，執行雙軌資料查找：
 
 在提交優惠前，Agent 必須執行 **Merchant Identity Gate**，針對商家狀態採不同入庫路徑：
 
-### 5.1 已解析既有商家入庫路徑 (Resolved Merchant + Confirmation)
+### 5.1 已解析既有商家入庫路徑 (Resolved Merchant)
 對特定網購商家呼叫 `resolve_merchant`，取得工具回傳之權威 ID `mch_01J8Y7A9B0C1D2E3F4G5H6J7K8`（**注意**：此 ID 必須嚴格來自 `resolve_merchant` 之輸出，Agent 絕不可自行編造或猜測 `mch_<ULID>`）。
-取得使用者確認後，攜帶 `confirmation` 提交 `active` 規則：
+官方證據一致時可直接提交 `active` 規則；只有來源衝突、商家歧義或使用者表示不可用時才詢問或標記失敗。以下保留 `confirmation` 作為需要確認時的相容欄位範例：
 
 ```json
 {

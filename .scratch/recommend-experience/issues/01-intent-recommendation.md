@@ -1,6 +1,6 @@
 # 01: 用消費意圖取得持卡與已登記付款路徑候選
 
-Status: ready-for-agent
+Status: ready-for-human
 
 **Blocked by:** None (can start immediately).
 

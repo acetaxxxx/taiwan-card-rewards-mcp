@@ -39,7 +39,7 @@
 正常入口是 merchant-first intent：`merchant` 必填，其餘消費條件與 `cardIds`／
 `routeIds` 篩選皆可省略。省略篩選時由 MCP 讀取目前 user state；回應使用 typed
 candidate envelope，並帶狀態、required actions 與 bounded coverage。這個入口不
-要求先呼叫任何 list tool 或 `recommendation_preflight`。
+正常 merchant-first 流程不要求先呼叫任何 list tool 或 `recommendation_preflight`。
 
 跨路徑報價可暫時以 `routeFacts: [{"routeId":"route_illustrative","edgeId":"edge_illustrative","fx":{...}}]` 提供；同一 route/edge scope 不可重複。需要重用時使用 `upsert_fx_observation`，並保留 `sourceKind` 與 route/edge scope。
 

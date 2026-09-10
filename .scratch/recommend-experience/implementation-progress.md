@@ -7,7 +7,7 @@ Implementation changes are committed incrementally on `enhance-user-exp`; the br
 | Ticket | Progress | Evidence / next check |
 | --- | --- | --- |
 | 01 | Implemented and integrated | Public merchant-only entry, unified candidates/rule terms, three-route fixture, read-only and legacy checks; covered by the current full suite |
-| 02 | Implemented and verified | Candidate-scoped recovery actions, multi-target/stale FX diagnostics, route-edge facts, source/scope metadata, intent preflight parity, and read-only retry; `npm run build`, `npm run typecheck`, and full suite passed (49 files / 208 tests) |
+| 02 | Implemented and verified | Candidate-scoped recovery actions, multi-target/stale FX diagnostics, route-edge facts, source/scope metadata, intent preflight parity, and read-only retry; current full suite passed (51 files / 236 tests) |
 | 03 | Implemented and verified | FX policy typed ingestion/evidence gate, candidate-scoped `research_fx_policy` actions, and optional missing-policy requirements on card/offer/route ingestion are covered by public schema, dispatcher, service, and tests |
 | 04 | Implemented and verified | Scoped FX observation persistence/reuse, direct-card isolation, exact edge-over-route selection, policy rate compatibility, refresh actions, and read-only retry are covered by targeted and full tests |
 | 05 | Implemented and verified | Public reference/stale/unavailable output, policy freshness windows, fallback source, route FX status, merchant-first net-spend projection, research fields for estimate windows, and multi-route fee/FX ranking are covered by targeted and full tests |
