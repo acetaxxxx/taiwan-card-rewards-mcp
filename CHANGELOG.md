@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.11.3
+
+- Align package and server release metadata with the `v0.11.3` tag.
+
 ## 0.11.1
 
 - Fix bounded list projections used by Aion agents: `list_cards`, `list_payment_accounts`, and `list_payment_routes` now accept the documented `limit` range up to 50.
