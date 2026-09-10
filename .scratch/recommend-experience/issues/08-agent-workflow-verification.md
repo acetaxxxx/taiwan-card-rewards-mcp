@@ -32,3 +32,5 @@ Status: ready-for-human
 ## Comments
 
 使用者已核可八票拆分；補充要求為具體 FX 查詢來源／回填契約，以及多路徑與各層優惠比較。僅在前置票完成後開始實作。
+
+目前 repo 內的 deterministic public-contract、public MCP 呼叫、文件一致性與完整測試均已驗證；尚缺指定低推理成本模型的實際 Agent trace。此項不能以 Vitest 或較強模型代替，需在配置模型執行器/API 後補跑直接推薦、FX 補件、refresh／保存／重算、分頁探索與來源失敗停止軌跡。
