@@ -434,11 +434,18 @@ export class RewardService {
     const marketMerchantIds = input.market
       ? new Set(state.merchants.filter((merchant) => merchant.operatingMarkets?.includes(input.market!.toUpperCase())).map((merchant) => merchant.canonicalId))
       : undefined;
-    const offers = state.rules.filter((rule) => {
-      if (rule.status !== 'active' || (input.cardId && rule.cardId !== input.cardId)) return false;
-      if (rule.ownerUser !== undefined && rule.ownerUser !== this.metadataUser) return false;
+    const isVisibleActiveOffer = (rule: OfferRuleVersion): boolean => {
       const source = state.snapshots.find((snapshot) => snapshot.id === rule.sourceSnapshotId);
-      if (!source || (rule.trustBasis !== 'user_confirmed' && !source.verified) || Date.parse(rule.validFrom) > Date.parse(asOf) || (rule.validTo && Date.parse(rule.validTo) < Date.parse(asOf))) return false;
+      const isTrusted = rule.trustBasis === 'user_confirmed' || source?.verified === true;
+      const isCurrent = Date.parse(rule.validFrom) <= Date.parse(asOf)
+        && (!rule.validTo || Date.parse(rule.validTo) >= Date.parse(asOf));
+      return rule.status === 'active'
+        && (rule.ownerUser === undefined || rule.ownerUser === this.metadataUser)
+        && Boolean(source && isTrusted && isCurrent);
+    };
+    const offers = state.rules.filter((rule) => {
+      if (!isVisibleActiveOffer(rule)) return false;
+      if (input.cardId && rule.cardId !== input.cardId) return false;
       if (input.channel && rule.match.channels?.length && !rule.match.channels.includes(input.channel)) return false;
       if (input.country && rule.match.countries?.length && !rule.match.countries.includes(input.country)) return false;
       if (input.mcc && rule.match.mccs?.length && !rule.match.mccs.includes(input.mcc)) return false;

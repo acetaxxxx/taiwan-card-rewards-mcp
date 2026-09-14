@@ -545,7 +545,38 @@ export function validateRule(value: unknown): OfferRuleVersion {
   const routeSelector = item.routeSelector === undefined ? undefined : validatePaymentRouteSelector(item.routeSelector);
   const cardId = item.cardId === undefined ? undefined : requiredString(item.cardId, 'rule.cardId', true);
   if (cardId === undefined && (!componentKind || componentKind === 'card_issuer')) throw new RewardServiceError('INVALID_INPUT', 'non-card rules require an explicit componentKind');
-  return { id: requiredString(item.id, 'rule.id', true), ...(cardId === undefined ? {} : { cardId }), version: requiredString(item.version, 'rule.version'), sourceSnapshotId: requiredString(item.sourceSnapshotId, 'rule.sourceSnapshotId', true), ...(item.ownerUser === undefined ? {} : { ownerUser: requiredString(item.ownerUser, 'rule.ownerUser', true) }), ...(trustBasis ? { trustBasis: trustBasis as OfferRuleVersion['trustBasis'] } : {}), ...(item.familyId === undefined ? {} : { familyId: requiredString(item.familyId, 'rule.familyId', true) }), ...(item.supersedesRuleId === undefined ? {} : { supersedesRuleId: requiredString(item.supersedesRuleId, 'rule.supersedesRuleId', true) }), ...(supersessionReason ? { supersessionReason: supersessionReason as OfferRuleVersion['supersessionReason'] } : {}), status: status as OfferRuleVersion['status'], validFrom, ...(validTo ? { validTo } : {}), settlementCurrency: requiredString(item.settlementCurrency, 'rule.settlementCurrency', true).toUpperCase(), match: validateMatch(item.match), ...(predicate ? { predicate } : {}), ...(requires?.length ? { requires } : {}), reward, ...(capPoolRefs ? { capPoolRefs } : {}), ...(componentKind ? { componentKind: componentKind as OfferRuleVersion['componentKind'] } : {}), ...(sponsor === undefined ? {} : { sponsor }), ...(benefitGroup === undefined ? {} : { benefitGroup }), ...(item.useSettlementAmount === undefined ? {} : { useSettlementAmount: item.useSettlementAmount }), ...(stacking ? { stacking: stacking as OfferRuleVersion['stacking'] } : {}), ...(confirmation ? { confirmation } : {}), ...(combination ? { combination } : {}), ...(item.routeId === undefined ? {} : { routeId: requiredString(item.routeId, 'rule.routeId', true) }), ...(routeSelector ? { routeSelector } : {}), ...(eventRule ? { eventRule } : {}), ...(eventChainRule ? { eventChainRule } : {}) };
+  const rule: OfferRuleVersion = {
+    id: requiredString(item.id, 'rule.id', true),
+    version: requiredString(item.version, 'rule.version'),
+    sourceSnapshotId: requiredString(item.sourceSnapshotId, 'rule.sourceSnapshotId', true),
+    status: status as OfferRuleVersion['status'],
+    validFrom,
+    settlementCurrency: requiredString(item.settlementCurrency, 'rule.settlementCurrency', true).toUpperCase(),
+    match: validateMatch(item.match),
+    reward,
+  };
+  if (cardId) rule.cardId = cardId;
+  if (item.ownerUser !== undefined) rule.ownerUser = requiredString(item.ownerUser, 'rule.ownerUser', true);
+  if (trustBasis) rule.trustBasis = trustBasis as OfferRuleVersion['trustBasis'];
+  if (item.familyId !== undefined) rule.familyId = requiredString(item.familyId, 'rule.familyId', true);
+  if (item.supersedesRuleId !== undefined) rule.supersedesRuleId = requiredString(item.supersedesRuleId, 'rule.supersedesRuleId', true);
+  if (supersessionReason) rule.supersessionReason = supersessionReason as OfferRuleVersion['supersessionReason'];
+  if (validTo) rule.validTo = validTo;
+  if (predicate) rule.predicate = predicate;
+  if (requires?.length) rule.requires = requires;
+  if (capPoolRefs) rule.capPoolRefs = capPoolRefs;
+  if (componentKind) rule.componentKind = componentKind as OfferRuleVersion['componentKind'];
+  if (sponsor !== undefined) rule.sponsor = sponsor;
+  if (benefitGroup !== undefined) rule.benefitGroup = benefitGroup;
+  if (item.useSettlementAmount !== undefined) rule.useSettlementAmount = item.useSettlementAmount;
+  if (stacking) rule.stacking = stacking as OfferRuleVersion['stacking'];
+  if (confirmation) rule.confirmation = confirmation;
+  if (combination) rule.combination = combination;
+  if (item.routeId !== undefined) rule.routeId = requiredString(item.routeId, 'rule.routeId', true);
+  if (routeSelector) rule.routeSelector = routeSelector;
+  if (eventRule) rule.eventRule = eventRule;
+  if (eventChainRule) rule.eventChainRule = eventChainRule;
+  return rule;
 }
 
 export function validateCapPool(value: unknown): CapPoolDefinition {
