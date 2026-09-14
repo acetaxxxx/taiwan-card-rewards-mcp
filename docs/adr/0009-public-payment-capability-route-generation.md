@@ -2,6 +2,8 @@
 
 **Status**: Accepted
 
+> [ADR 0010](0010-user-confirmed-offers-transaction-chronology-and-offer-driven-routes.md) 補充：Offer Route Selector 可提供產生候選的約束；Payment Capability 仍只表達付款路徑是否可能形成，兩者不可混淆。
+
 Public `PaymentCapabilityRecord` and user-owned funding facts are separate bounded contexts: capability records describe evidence-backed provider transitions, while cards and accounts describe private ownership or binding. Planned recommendations may deterministically combine an active capability with matching user funding into an ephemeral `PaymentRouteRecord`-shaped candidate whose identity is `generated_<capability-id>_<funding-id>`; it is never written to durable `paymentRoutes`. Generation is valid only while the capability, its accepted official evidence, transition set, validity window, and funding fact remain current, so capability status/evidence changes or funding removal naturally invalidate the candidate without rewriting history. A missing funding fact produces a capability-scoped binding action rather than an inferred route.
 
 ## Consequences

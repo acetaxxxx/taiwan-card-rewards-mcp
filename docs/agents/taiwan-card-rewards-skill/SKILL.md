@@ -32,6 +32,8 @@ description: 協助試算、比較與記錄台灣信用卡回饋；路由至 can
 商家消費意圖以 [`workflows/recommendation-intent.md`](workflows/recommendation-intent.md) 為準，required actions 的逐項處理見 [`workflows/preflight-and-required-actions.md`](workflows/preflight-and-required-actions.md)；支付 capability 生成與 ownership 以 [ADR 0009](../../adr/0009-public-payment-capability-route-generation.md) 為準。schema 與 19-tool 清單以
 [`references/mcp-tools.md`](references/mcp-tools.md) 為準。
 
+私有 `user_confirmed` 優惠、`occurredAt`/`recordedAt`、以及由 Offer Route Selector 驅動的候選生成，以 [ADR 0010](../../adr/0010-user-confirmed-offers-transaction-chronology-and-offer-driven-routes.md) 為目標語意；在對應 public contract 完成前，不得假設新增欄位或工具已可呼叫。
+
 ## 三個必讀入口
 
 - [`references/mcp-tools.md`](references/mcp-tools.md)：canonical 19-tool contract、closed input union、event/route/capability schema。

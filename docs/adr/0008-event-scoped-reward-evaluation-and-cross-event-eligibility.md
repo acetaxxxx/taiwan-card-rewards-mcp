@@ -1,6 +1,6 @@
 # ADR 0008: Event-scoped reward evaluation and cross-event eligibility
 
-**Status**: Proposed
+**Status**: Accepted as the target model; [ADR 0010](0010-user-confirmed-offers-transaction-chronology-and-offer-driven-routes.md) defines Transaction as the public record and query surface to which event rewards are linked.
 
 **Date**: 2026-09-07
 

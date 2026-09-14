@@ -205,6 +205,7 @@ _Avoid_: opaque route rule, route ID as policy
 
 **Payment Route Selector**:
 A reusable declarative condition over Route Nodes and Route Transitions that an Offer Rule can use to match one node, one transition, or a complete route pattern. A selector may require a conjunction of roles without requiring every matching route to share one generated route ID.
+When offer terms name eligible payment services or acceptance networks, the selector carries that explicit allowlist as provider or app identifiers. Provider identifiers are open data values, not a hard-coded product enum.
 _Avoid_: hard-coded route name, combination-specific enum
 
 **Payment Capability**:
@@ -212,6 +213,8 @@ An evidence-backed public ability of a payment service, acceptance network, or
 funding rail to participate in a stated market, channel, and transition. It
 describes what may be possible; it is not a user's Held Card, Payment Account,
 or a concrete Payment Route.
+It determines whether a payment path can be discovered; it does not determine
+whether a particular Offer Rule rewards that path.
 _Avoid_: assumed acceptance, user binding, generated route identity
 
 ## Transactions and accounting
@@ -249,6 +252,18 @@ _Avoid_: official evidence, verified rule, guaranteed loophole
 A proposed or hypothetical spend used to evaluate a possible reward without
 altering the user's reward accounting.
 _Avoid_: pending ledger entry, reserved cap
+
+**Occurred At**:
+The time when a Transaction actually happened, as supplied or confirmed by the
+user. It is the default basis for offer validity, caps, FX applicability, and
+travel-history queries, even when the Transaction is recorded later.
+_Avoid_: MCP write time, conversation timestamp
+
+**Recorded At**:
+The time when the MCP accepted a Transaction record. It is an immutable audit
+fact for later entry and is never substituted for Occurred At in reward
+calculation.
+_Avoid_: transaction date, inferred purchase time
 
 **Recorded Purchase**:
 An actual settled or otherwise accepted spend that is written to the user's
