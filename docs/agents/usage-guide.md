@@ -112,8 +112,9 @@ For the merchant-first recommendation shape, follow [`recommendation-intent.md`]
 1. **Official Web Sources**: The Agent or UI retrieves official bank pages using its own approved browsing or ingestion path, then supplies an unverified structured source snapshot with provenance and content fingerprint. The MCP does not retrieve web content.
 2. **Flyers, App Screenshots & OCR**: Perform image/PDF processing **outside the MCP**. Extract declarative rule fields and assemble a candidate `OfferSourceSnapshot` with `sourceType: "user_input"` and `provenance`.
 3. **Candidate Activation (`upsert_offer`)**:
-   - Rules created from unverified inputs or images remain in `status: "candidate"` and will fail the Calculation Trust Gate (`needs_review`).
-   - To activate a candidate rule, present the extracted summary to the human user. Upon confirmation, invoke `upsert_offer` supplying the `confirmation` object:
+   - Rules created from unverified inputs or images remain in `status: "candidate"` until the user confirms the proposed terms.
+   - A user-confirmed rule is private to that user and returned with `trustBasis: "user_confirmed"`; it is usable for that user's recommendation but is never presented as issuer-verified or shared with other users.
+   - To activate a candidate rule, present the extracted summary to the human user. Upon confirmation, invoke `upsert_offer` supplying the `confirmation` object with `trustBasis: "user_confirmed"`:
      ```json
      {
        "snapshot": { "id": "snap-01", "url": "https://official.bank.com/offer" },
@@ -121,7 +122,8 @@ For the merchant-first recommendation shape, follow [`recommendation-intent.md`]
        "confirmation": {
          "confirmedAt": "2026-08-31T00:00:00Z",
          "confirmedBy": "user",
-         "sourceReference": "https://official.bank.com/offer",
+       "trustBasis": "user_confirmed",
+       "sourceReference": "使用者於對話確認的條款摘要",
          "offerPeriod": { "validFrom": "2026-01-01T00:00:00Z" },
          "rewardUnit": "TWD",
          "rewardConditionsSummary": "Japan in-store transactions",

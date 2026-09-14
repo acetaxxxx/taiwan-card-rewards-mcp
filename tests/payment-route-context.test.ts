@@ -6,4 +6,16 @@ describe('payment route and FX mechanism context', () => {
     const transaction = { cardId: 'c1', kind: 'purchase' as const, mode: 'planned' as const, occurredAt: '2026-09-05T00:00:00Z', amount: { amountMinor: 1000, currency: 'USD' }, routeContext: { merchantId: 'm1', walletProviderId: 'wallet', paymentMethod: 'wallet', intermediateProviderId: 'provider', cardNetwork: 'visa', issuer: 'bank', fundingSource: 'card', transactionCurrency: 'USD', settlementCurrency: 'TWD', billingCurrency: 'TWD', conversionOwner: 'card_network', rateType: 'card_scheme' as const, conversionTiming: 'clearing' as const, foreignTransactionFee: { amountMinor: 20, currency: 'TWD' }, markup: { amountMinor: 5, currency: 'TWD' }, serviceFee: { amountMinor: 2, currency: 'TWD' }, dcc: false } };
     expect(validateTransaction(transaction).routeContext).toEqual(transaction.routeContext);
   });
+
+  it.each(['card_scheme', 'merchant_dcc'] as const)('accepts the public %s conversion owner', (conversionOwner) => {
+    const transaction = {
+      kind: 'purchase' as const,
+      mode: 'planned' as const,
+      occurredAt: '2026-09-05T00:00:00Z',
+      amount: { amountMinor: 1000, currency: 'USD' },
+      funding: { kind: 'cash' as const },
+      routeContext: { transactionCurrency: 'USD', conversionOwner },
+    };
+    expect(validateTransaction(transaction).routeContext?.conversionOwner).toBe(conversionOwner);
+  });
 });
