@@ -327,9 +327,31 @@ export interface OfferRuleVersion {
   capPoolRefs?: readonly string[] | undefined;
   /** Optional exact PaymentRoute binding; absent means the legacy generic rule. */
   routeId?: string | undefined;
+  /** Optional reusable Payment Route Selector over route roles, transitions, and allowlists */
+  routeSelector?: PaymentRouteSelector | undefined;
   /** Optional recommendation-time event eligibility; exactly one may be supplied. */
   eventRule?: PaymentEventRule | undefined;
   eventChainRule?: PaymentEventChainRule | undefined;
+}
+
+export interface PaymentRouteSelector {
+  /** Open provider or consumerApp allowlist for payment services (e.g. ['line_pay', 'jko_pay', 'taishin_pay_plus']) */
+  paymentServices?: readonly string[] | undefined;
+  paymentServiceAllowlist?: readonly string[] | undefined;
+  /** Open provider allowlist for merchant acceptance networks (e.g. ['paypay', 'twqr']) */
+  acceptanceNetworks?: readonly string[] | undefined;
+  acceptanceNetworkAllowlist?: readonly string[] | undefined;
+  /** Allowed funding kinds (e.g. ['credit_card', 'account', 'cash']) */
+  fundingKinds?: readonly ('credit_card' | 'account' | 'cash')[] | undefined;
+  /** Node roles required by the route */
+  nodeRoles?: readonly PaymentPathNodeRole[] | undefined;
+  /** Route transitions required by the route */
+  transitions?: readonly PaymentPathTransition[] | undefined;
+  /** Route transitions forbidden by the route */
+  excludedTransitions?: readonly PaymentPathTransition[] | undefined;
+  /** Optional validity window for this selector */
+  validFrom?: string | undefined;
+  validTo?: string | undefined;
 }
 
 export interface FxSnapshot {

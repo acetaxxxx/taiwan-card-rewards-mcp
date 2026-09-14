@@ -22,6 +22,8 @@ import type {
   EventRewardLedgerRecord,
   EventRewardReversalRecord,
   AppliedFxRate,
+  PaymentRouteSelector,
+  PaymentRouteRecord,
 } from './types.js';
 import { RewardServiceError } from './errors.js';
 import type { LedgerStore } from './store.js';
@@ -98,6 +100,124 @@ export function matchPaymentEventChain(rule: PaymentEventChainRule, target: Paym
   if (sourceTime > targetTime) return { status: 'no_match', reasons: ['funded_by source occurs after target event'] };
   if (targetTime - sourceTime > rule.windowSeconds * 1000) return { status: 'no_match', reasons: ['funded_by source is outside the eligibility window'] };
   return { status: 'matched', reasons: [] };
+}
+
+/** Evaluates whether an evidenced payment route satisfies an offer's PaymentRouteSelector constraints. */
+export function matchPaymentRouteSelector(
+  selector: PaymentRouteSelector,
+  route: PaymentRouteRecord,
+  asOf?: string,
+): { matched: boolean; reasons: readonly string[] } {
+  if (asOf) {
+    const asOfTime = Date.parse(asOf);
+    if (Number.isFinite(asOfTime)) {
+      if (selector.validFrom && Date.parse(selector.validFrom) > asOfTime) {
+        return { matched: false, reasons: ['route selector is not yet effective'] };
+      }
+      if (selector.validTo && Date.parse(selector.validTo) < asOfTime) {
+        return { matched: false, reasons: ['route selector is expired'] };
+      }
+    }
+  }
+
+  if (selector.fundingKinds?.length) {
+    if (!selector.fundingKinds.includes(route.funding.kind)) {
+      return { matched: false, reasons: [`route funding kind ${route.funding.kind} is not in selector fundingKinds`] };
+    }
+  }
+
+  const serviceAllowlist = selector.paymentServiceAllowlist ?? selector.paymentServices;
+  if (serviceAllowlist !== undefined) {
+    if (serviceAllowlist.length === 0) {
+      return { matched: false, reasons: ['payment service allowlist is empty'] };
+    }
+    const routeServices = new Set<string>();
+    for (const layer of route.layers) {
+      if (['payment_provider', 'wallet', 'consumer_app', 'intermediate_provider'].includes(layer.kind)) {
+        if (layer.providerId) routeServices.add(layer.providerId.toLowerCase());
+        if (layer.appId) routeServices.add(layer.appId.toLowerCase());
+        if (layer.displayName) routeServices.add(layer.displayName.toLowerCase());
+      }
+    }
+    for (const node of route.nodes ?? []) {
+      if (['payment_service', 'wallet_balance'].includes(node.kind)) {
+        if (node.id) routeServices.add(node.id.toLowerCase());
+        if (node.displayName) routeServices.add(node.displayName.toLowerCase());
+      }
+    }
+    const matchedService = serviceAllowlist.some((s) => {
+      const target = s.toLowerCase();
+      return routeServices.has(target) || [...routeServices].some((r) => r.includes(target) || target.includes(r));
+    });
+    if (!matchedService) {
+      return { matched: false, reasons: ['route payment service is not in selector allowlist'] };
+    }
+  }
+
+  const networkAllowlist = selector.acceptanceNetworkAllowlist ?? selector.acceptanceNetworks;
+  if (networkAllowlist !== undefined) {
+    if (networkAllowlist.length === 0) {
+      return { matched: false, reasons: ['acceptance network allowlist is empty'] };
+    }
+    const routeNetworks = new Set<string>();
+    for (const layer of route.layers) {
+      if (['merchant_acceptance', 'interoperability_scheme', 'card_network'].includes(layer.kind)) {
+        if (layer.providerId) routeNetworks.add(layer.providerId.toLowerCase());
+        if (layer.displayName) routeNetworks.add(layer.displayName.toLowerCase());
+      }
+    }
+    for (const node of route.nodes ?? []) {
+      if (node.kind === 'acceptance_network') {
+        if (node.id) routeNetworks.add(node.id.toLowerCase());
+        if (node.displayName) routeNetworks.add(node.displayName.toLowerCase());
+      }
+    }
+    const matchedNetwork = networkAllowlist.some((n) => {
+      const target = n.toLowerCase();
+      return routeNetworks.has(target) || [...routeNetworks].some((r) => r.includes(target) || target.includes(r));
+    });
+    if (!matchedNetwork) {
+      return { matched: false, reasons: ['route acceptance network is not in selector allowlist'] };
+    }
+  }
+
+  if (selector.nodeRoles?.length) {
+    const presentRoles = new Set<string>();
+    if (route.funding) presentRoles.add('funding_source');
+    for (const node of route.nodes ?? []) {
+      presentRoles.add(node.kind);
+    }
+    for (const layer of route.layers) {
+      if (['payment_provider', 'consumer_app', 'intermediate_provider'].includes(layer.kind)) presentRoles.add('payment_service');
+      if (['merchant_acceptance', 'interoperability_scheme'].includes(layer.kind)) presentRoles.add('acceptance_network');
+      if (layer.kind === 'wallet') presentRoles.add('wallet_balance');
+    }
+    for (const requiredRole of selector.nodeRoles) {
+      if (!presentRoles.has(requiredRole)) {
+        return { matched: false, reasons: [`route is missing required node role: ${requiredRole}`] };
+      }
+    }
+  }
+
+  if (selector.transitions?.length) {
+    const routeTransitions = new Set((route.edges ?? []).map((e) => e.transition));
+    for (const requiredTransition of selector.transitions) {
+      if (!routeTransitions.has(requiredTransition)) {
+        return { matched: false, reasons: [`route is missing required transition: ${requiredTransition}`] };
+      }
+    }
+  }
+
+  if (selector.excludedTransitions?.length) {
+    const routeTransitions = new Set((route.edges ?? []).map((e) => e.transition));
+    for (const excluded of selector.excludedTransitions) {
+      if (routeTransitions.has(excluded)) {
+        return { matched: false, reasons: [`route contains excluded transition: ${excluded}`] };
+      }
+    }
+  }
+
+  return { matched: true, reasons: [] };
 }
 
 /** Turns known eligibility into an unpersisted candidate; amount calculation is deliberately separate. */
@@ -475,7 +595,7 @@ export function evaluateOffer(
   const base = { status: 'no_match' as EvaluationStatus, cardId: tx.cardId, transaction: tx, unknownReasons: [] as string[] };
   const inputErrors = invalidActual(tx);
   if (inputErrors.length) return { ...base, status: 'unknown', unknownReasons: inputErrors };
-  if (rule.cardId !== tx.cardId) return base;
+  if (rule.cardId !== undefined && rule.cardId !== tx.cardId) return base;
   if (tx.routeId !== undefined) {
     if (rule.routeId !== undefined && tx.routeId !== rule.routeId) return base;
     const route = context.paymentRoutes?.find((candidate) => candidate.id === tx.routeId);
@@ -487,12 +607,18 @@ export function evaluateOffer(
       const stale = route.status === 'stale' || startsInFuture || ended;
       return { ...base, status: stale ? 'stale' : 'needs_review', ruleId: rule.id, unknownReasons: [`payment route is ${route.status}${startsInFuture || ended ? ' outside its validity window' : ''}`], diagnostics: [diagnostic(stale ? 'stale_rule' : 'needs_review', 'transaction.routeId', ['active current payment route'], 'refresh_or_resolve_payment_route')] };
     }
-    if (route.funding.kind === 'credit_card' && route.funding.cardId !== undefined && route.funding.cardId !== tx.cardId) return base;
+    if (route.funding.kind === 'credit_card' && route.funding.cardId !== undefined && tx.cardId && route.funding.cardId !== tx.cardId) return base;
     if (rule.componentKind === 'card_issuer') {
       if (route.funding.kind !== 'credit_card') return base;
       if (route.funding.cardId === undefined) return { ...base, status: 'unknown', ruleId: rule.id, unknownReasons: ['credit-card funding card identity is not registered'], diagnostics: [diagnostic('missing_required_fact', 'paymentRoute.funding.cardId', ['registered card identity'], 'register_payment_route')] };
     }
-  } else if (rule.routeId !== undefined) {
+    if (rule.routeSelector !== undefined) {
+      const selectorMatch = matchPaymentRouteSelector(rule.routeSelector, route, evaluationNow);
+      if (!selectorMatch.matched) {
+        return { ...base, status: 'no_match', ruleId: rule.id, unknownReasons: [...selectorMatch.reasons] };
+      }
+    }
+  } else if (rule.routeId !== undefined || rule.routeSelector !== undefined) {
     return base;
   }
   if (rule.eventRule !== undefined || rule.eventChainRule !== undefined) {

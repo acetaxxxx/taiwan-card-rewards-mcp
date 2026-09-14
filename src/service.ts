@@ -1,6 +1,6 @@
 import * as crypto from 'node:crypto';
 import { type LedgerStore, type RecordedTransaction, type StoredState } from './store.js';
-import { EventRewardLedger, convertMinor, createPaymentEventRewardCandidate, decidePaymentEventRewards, evaluateOffer, evaluatePredicate, matchPaymentEvent, matchPaymentEventChain, rankCards, resolveCyclePeriodKey } from './evaluator.js';
+import { EventRewardLedger, convertMinor, createPaymentEventRewardCandidate, decidePaymentEventRewards, evaluateOffer, evaluatePredicate, matchPaymentEvent, matchPaymentEventChain, matchPaymentRouteSelector, rankCards, resolveCyclePeriodKey } from './evaluator.js';
 import type { CardDescriptor, CardSwitchInput, CardSwitchProjection, CardSwitchStatus, CapPeriod, CapPoolDefinition, EvaluationContext, MerchantIdentity, MerchantResolution, Money, OfferConfirmation, OfferRuleVersion, OfferSourceSnapshot, RewardBreakdown, RewardComponentRecord, TransactionTuple, UserBenefitInput, UserBenefitStatus, EvidenceRecord, PaymentRouteRecord, PaymentCapabilityRecord, PaymentAccountRecord, EventRewardLedgerRecord, EventRewardReversalRecord, PaymentPathRequest, PaymentPathRecommendation, PaymentPathCandidate, PaymentPathEvent, EligibilityFact, RewardValuationSnapshot, FxResolutionRequest, AppliedFxRate, RecommendationIntent, RecommendationIntentResult, IntentCandidate, FxSnapshot } from './types.js';
 import type { StartupConfig } from './startup.js';
 import { RewardServiceError } from './errors.js';
@@ -717,39 +717,84 @@ export class RewardService {
         const fundingOptions: PaymentRouteRecord['funding'][] = [];
         if (capability.fundingKinds.includes('credit_card')) for (const card of cards) fundingOptions.push({ kind: 'credit_card', cardId: card.id });
         if (capability.fundingKinds.includes('account')) for (const account of state.paymentAccounts.filter((candidate) => candidate.ownerUser === this.metadataUser && candidate.status === 'active')) fundingOptions.push({ kind: 'account', subtype: account.kind, accountId: account.id });
+        if (capability.fundingKinds.includes('cash')) fundingOptions.push({ kind: 'cash' });
         for (const funding of fundingOptions) {
           if (input.routeIds !== undefined) continue;
-          const requiredTransitions = funding.kind === 'credit_card' ? ['wallet_top_up', 'wallet_debit', 'merchant_settlement'] as const : funding.kind === 'account' ? ['account_debit', 'wallet_debit', 'merchant_settlement'] as const : [];
-          if (!requiredTransitions.every((transition) => capability.transitions.includes(transition))) continue;
           const seed = funding.kind === 'credit_card' ? funding.cardId! : funding.kind === 'account' ? funding.accountId! : funding.kind;
           const providerNode = { id: 'service', kind: 'payment_service' as const, displayName: capability.consumerAppId ?? capability.providerId };
           const acceptanceNode = { id: 'acceptance', kind: 'acceptance_network' as const, displayName: capability.acceptanceProviderId ?? 'acceptance network' };
           const walletNode = { id: 'wallet', kind: 'wallet_balance' as const, displayName: capability.providerId };
-          const nodes = [
-            { id: 'funding', kind: 'funding_source' as const, displayName: seed },
-            walletNode,
-            providerNode, acceptanceNode, { id: 'merchant', kind: 'merchant' as const, displayName: rawMerchant },
-          ];
           const evidenceIds = capability.evidenceIds;
-          const edges = funding.kind === 'credit_card'
-            ? [{ edgeId: 'fund', fromNodeId: 'funding', toNodeId: 'wallet', transition: 'wallet_top_up' as const, evidenceIds }, { edgeId: 'pay', fromNodeId: 'wallet', toNodeId: 'acceptance', transition: 'wallet_debit' as const, evidenceIds }, { edgeId: 'settle', fromNodeId: 'acceptance', toNodeId: 'merchant', transition: 'merchant_settlement' as const, evidenceIds }]
-            : [{ edgeId: 'debit', fromNodeId: 'funding', toNodeId: 'wallet', transition: 'account_debit' as const, evidenceIds }, { edgeId: 'pay', fromNodeId: 'wallet', toNodeId: 'acceptance', transition: 'wallet_debit' as const, evidenceIds }, { edgeId: 'settle', fromNodeId: 'acceptance', toNodeId: 'merchant', transition: 'merchant_settlement' as const, evidenceIds }];
           const sourceUrl = capability.sourceUrl ?? state.evidence.find((evidence) => evidence.id === evidenceIds[0])?.sourceUrl;
-          generatedRoutes.push({ id: `generated_${capability.id}_${seed}`, status: 'active', layers: [{ kind: 'merchant_acceptance', providerId: capability.acceptanceProviderId ?? capability.providerId }, ...(capability.consumerAppId ? [{ kind: 'consumer_app' as const, appId: capability.consumerAppId }] : []), { kind: 'payment_provider', providerId: capability.providerId }], funding, ...(sourceUrl ? { sourceUrl } : {}), observedAt: capability.observedAt, ...(capability.validFrom ? { validFrom: capability.validFrom } : {}), ...(capability.validTo ? { validTo: capability.validTo } : {}), authority: 'wallet', confidence: 'high', evidenceIds, idempotencyKey: `generated:${capability.id}:${seed}`, nodes, edges });
-          generatedCapabilityIds.add(capability.id);
+          const layers = [{ kind: 'merchant_acceptance' as const, providerId: capability.acceptanceProviderId ?? capability.providerId }, ...(capability.consumerAppId ? [{ kind: 'consumer_app' as const, appId: capability.consumerAppId }] : []), { kind: 'payment_provider' as const, providerId: capability.providerId }];
+
+          if (funding.kind === 'credit_card') {
+            const supportsTopUp = capability.transitions.includes('wallet_top_up') && capability.transitions.includes('wallet_debit') && capability.transitions.includes('merchant_settlement');
+            const supportsDirectAuth = capability.transitions.includes('card_authorization') && capability.transitions.includes('merchant_settlement');
+            if (supportsTopUp) {
+              const nodes = [{ id: 'funding', kind: 'funding_source' as const, displayName: seed }, walletNode, providerNode, acceptanceNode, { id: 'merchant', kind: 'merchant' as const, displayName: rawMerchant }];
+              const edges = [{ edgeId: 'fund', fromNodeId: 'funding', toNodeId: 'wallet', transition: 'wallet_top_up' as const, evidenceIds }, { edgeId: 'pay', fromNodeId: 'wallet', toNodeId: 'acceptance', transition: 'wallet_debit' as const, evidenceIds }, { edgeId: 'settle', fromNodeId: 'acceptance', toNodeId: 'merchant', transition: 'merchant_settlement' as const, evidenceIds }];
+              const id = supportsDirectAuth ? `generated_${capability.id}_${seed}_topup` : `generated_${capability.id}_${seed}`;
+              generatedRoutes.push({ id, status: 'active', layers, funding, ...(sourceUrl ? { sourceUrl } : {}), observedAt: capability.observedAt, ...(capability.validFrom ? { validFrom: capability.validFrom } : {}), ...(capability.validTo ? { validTo: capability.validTo } : {}), authority: 'wallet', confidence: 'high', evidenceIds, idempotencyKey: `generated:${capability.id}:${seed}:topup`, nodes, edges });
+              generatedCapabilityIds.add(capability.id);
+            }
+            if (supportsDirectAuth) {
+              const nodes = [{ id: 'funding', kind: 'funding_source' as const, displayName: seed }, providerNode, acceptanceNode, { id: 'merchant', kind: 'merchant' as const, displayName: rawMerchant }];
+              const edges = capability.transitions.includes('service_to_acceptance')
+                ? [{ edgeId: 'auth', fromNodeId: 'funding', toNodeId: 'service', transition: 'card_authorization' as const, evidenceIds }, { edgeId: 'route', fromNodeId: 'service', toNodeId: 'acceptance', transition: 'service_to_acceptance' as const, evidenceIds }, { edgeId: 'settle', fromNodeId: 'acceptance', toNodeId: 'merchant', transition: 'merchant_settlement' as const, evidenceIds }]
+                : [{ edgeId: 'auth', fromNodeId: 'funding', toNodeId: 'service', transition: 'card_authorization' as const, evidenceIds }, { edgeId: 'settle', fromNodeId: 'service', toNodeId: 'merchant', transition: 'merchant_settlement' as const, evidenceIds }];
+              const id = supportsTopUp ? `generated_${capability.id}_${seed}_direct` : `generated_${capability.id}_${seed}`;
+              generatedRoutes.push({ id, status: 'active', layers, funding, ...(sourceUrl ? { sourceUrl } : {}), observedAt: capability.observedAt, ...(capability.validFrom ? { validFrom: capability.validFrom } : {}), ...(capability.validTo ? { validTo: capability.validTo } : {}), authority: 'wallet', confidence: 'high', evidenceIds, idempotencyKey: `generated:${capability.id}:${seed}:direct`, nodes, edges });
+              generatedCapabilityIds.add(capability.id);
+            }
+          }
+
+          if (funding.kind === 'account') {
+            const supportsWallet = capability.transitions.includes('wallet_debit') && (capability.transitions.includes('account_debit') || capability.transitions.includes('wallet_top_up')) && capability.transitions.includes('merchant_settlement');
+            const supportsDirectDebit = capability.transitions.includes('account_debit') && !capability.transitions.includes('wallet_debit') && capability.transitions.includes('merchant_settlement');
+            if (supportsWallet) {
+              const nodes = [{ id: 'funding', kind: 'funding_source' as const, displayName: seed }, walletNode, providerNode, acceptanceNode, { id: 'merchant', kind: 'merchant' as const, displayName: rawMerchant }];
+              const edges = [{ edgeId: 'debit', fromNodeId: 'funding', toNodeId: 'wallet', transition: 'account_debit' as const, evidenceIds }, { edgeId: 'pay', fromNodeId: 'wallet', toNodeId: 'acceptance', transition: 'wallet_debit' as const, evidenceIds }, { edgeId: 'settle', fromNodeId: 'acceptance', toNodeId: 'merchant', transition: 'merchant_settlement' as const, evidenceIds }];
+              generatedRoutes.push({ id: `generated_${capability.id}_${seed}`, status: 'active', layers, funding, ...(sourceUrl ? { sourceUrl } : {}), observedAt: capability.observedAt, ...(capability.validFrom ? { validFrom: capability.validFrom } : {}), ...(capability.validTo ? { validTo: capability.validTo } : {}), authority: 'wallet', confidence: 'high', evidenceIds, idempotencyKey: `generated:${capability.id}:${seed}`, nodes, edges });
+              generatedCapabilityIds.add(capability.id);
+            } else if (supportsDirectDebit) {
+              const nodes = [{ id: 'funding', kind: 'funding_source' as const, displayName: seed }, providerNode, acceptanceNode, { id: 'merchant', kind: 'merchant' as const, displayName: rawMerchant }];
+              const edges = capability.transitions.includes('service_to_acceptance')
+                ? [{ edgeId: 'debit', fromNodeId: 'funding', toNodeId: 'service', transition: 'account_debit' as const, evidenceIds }, { edgeId: 'route', fromNodeId: 'service', toNodeId: 'acceptance', transition: 'service_to_acceptance' as const, evidenceIds }, { edgeId: 'settle', fromNodeId: 'acceptance', toNodeId: 'merchant', transition: 'merchant_settlement' as const, evidenceIds }]
+                : [{ edgeId: 'debit', fromNodeId: 'funding', toNodeId: 'service', transition: 'account_debit' as const, evidenceIds }, { edgeId: 'settle', fromNodeId: 'service', toNodeId: 'merchant', transition: 'merchant_settlement' as const, evidenceIds }];
+              generatedRoutes.push({ id: `generated_${capability.id}_${seed}`, status: 'active', layers, funding, ...(sourceUrl ? { sourceUrl } : {}), observedAt: capability.observedAt, ...(capability.validFrom ? { validFrom: capability.validFrom } : {}), ...(capability.validTo ? { validTo: capability.validTo } : {}), authority: 'wallet', confidence: 'high', evidenceIds, idempotencyKey: `generated:${capability.id}:${seed}`, nodes, edges });
+              generatedCapabilityIds.add(capability.id);
+            }
+          }
+
+          if (funding.kind === 'cash') {
+            if (capability.transitions.includes('direct_settlement')) {
+              const nodes = [{ id: 'funding', kind: 'funding_source' as const, displayName: 'cash' }, { id: 'merchant', kind: 'merchant' as const, displayName: rawMerchant }];
+              const edges = [{ edgeId: 'settle', fromNodeId: 'funding', toNodeId: 'merchant', transition: 'direct_settlement' as const, evidenceIds }];
+              const cashLayers = [{ kind: 'merchant_acceptance' as const, providerId: capability.acceptanceProviderId ?? capability.providerId }];
+              generatedRoutes.push({ id: `generated_${capability.id}_cash`, status: 'active', layers: cashLayers, funding, ...(sourceUrl ? { sourceUrl } : {}), observedAt: capability.observedAt, ...(capability.validFrom ? { validFrom: capability.validFrom } : {}), ...(capability.validTo ? { validTo: capability.validTo } : {}), authority: 'wallet', confidence: 'high', evidenceIds, idempotencyKey: `generated:${capability.id}:cash`, nodes, edges });
+              generatedCapabilityIds.add(capability.id);
+            }
+          }
         }
         if (!generatedCapabilityIds.has(capability.id)) {
-          const fundingKind = capability.fundingKinds[0]!;
+          const fundingKind = capability.fundingKinds.find((k) => k !== 'cash') ?? capability.fundingKinds[0]!;
           addAction({ id: `capability:${capability.id}`, action: 'bind_payment_method', owner: 'user', path: `paymentCapabilities.${capability.id}`, requiredFacts: capability.fundingKinds.map((kind) => `held ${kind}`), candidateIds: [], submission: fundingKind === 'credit_card' ? { tool: 'register_card', field: 'card' } : { tool: 'register_payment_account', field: 'account' }, completionCondition: `repeat recommend after registering or binding a ${fundingKind} supported by this payment capability` });
         }
       }
     }
     const routes = [...registeredRoutes, ...generatedRoutes];
-    const applicable = (cardId?: string, routeId?: string) => state.rules.filter(rule =>
-      rule.status !== 'superseded' &&
-      (rule.ownerUser === undefined || rule.ownerUser === this.metadataUser) &&
-      (rule.cardId === undefined || rule.cardId === cardId) &&
-      (rule.routeId === undefined || rule.routeId === routeId)).filter((rule, index, rules) => {
+    const applicable = (cardId?: string, routeId?: string, route?: PaymentRouteRecord) => state.rules.filter(rule => {
+      if (rule.status === 'superseded') return false;
+      if (rule.ownerUser !== undefined && rule.ownerUser !== this.metadataUser) return false;
+      if (rule.cardId !== undefined && rule.cardId !== cardId) return false;
+      if (rule.routeId !== undefined && rule.routeId !== routeId) return false;
+      if (rule.routeSelector !== undefined) {
+        if (!route) return false;
+        if (!matchPaymentRouteSelector(rule.routeSelector, route, evaluatedAt).matched) return false;
+      }
+      return true;
+    }).filter((rule, index, rules) => {
         if (!rule.familyId) return true;
         const family = rules.filter(candidate => candidate.familyId === rule.familyId && candidate.status === 'active');
         const latest = family.at(-1);
@@ -841,14 +886,17 @@ export class RewardService {
       });
       for (const path of result.candidates) {
         const cardId = path.fundingSource.kind === 'credit_card' ? path.fundingSource.cardId : undefined;
-        const rules = applicable(cardId, path.routeId);
+        const route = routes.find((candidate) => candidate.id === path.routeId);
+        const rules = applicable(cardId, path.routeId, route);
         const projected = rules.map(rule => {
           const matched = path.matchedRules.find(item => item.ruleId === rule.id && item.ruleVersion === rule.version);
           const summary = projectRule(rule);
           return matched ? { ...summary, status: 'matched' as const, reward: matched.reward, reasons: [] } : summary;
         });
-        const supported = path.status === 'ready' && path.matchedRules.length > 0 &&
+        const hasRewards = path.matchedRules.length > 0 &&
           path.matchedRules.every(rule => rule.reward.currency === transaction.amount.currency);
+        const supported = path.status === 'ready' && hasRewards;
+        const readyNoReward = path.status === 'ready' && path.matchedRules.length === 0;
         const fxCostEvents = path.events.filter((event) => [event.fee, event.markup, event.foreignTransactionFee, event.dcc?.selected ? event.dcc.fee : undefined]
           .some((cost) => cost !== undefined && cost.currency !== transaction.amount.currency));
         const fxEstimate = fxCostEvents.length === 0 ? undefined : fxCostEvents.every((event) => {
@@ -861,12 +909,18 @@ export class RewardService {
           const fallback = input.fx?.id === observation.id;
           return { status: stale ? 'stale_estimate' as const : fallback ? 'estimated_fallback' as const : 'estimated' as const, provider: observation.provider, capturedAt: observation.capturedAt, ...(observation.sourceUrl ? { sourceUrl: observation.sourceUrl } : {}), assumption: stale ? 'using a route FX snapshot beyond its freshness window; refresh before relying on the value' : fallback ? 'using the Agent-supplied fx snapshot as a general currency-pair fallback, not an exact per-edge fact; route policy and final settlement cost remain unconfirmed' : 'using the route or edge FX snapshot for foreign-currency costs' };
         })() : { status: 'unavailable' as const, assumption: 'foreign-currency route costs cannot be compared without a matching route or edge FX snapshot' };
+        const candidateStatus = supported || readyNoReward ? 'ready' : path.status === 'blocked' ? 'blocked' : 'unknown';
+        const netSpend = supported && path.netValue
+          ? { amountMinor: transaction.amount.amountMinor - path.netValue.amountMinor, currency: transaction.amount.currency }
+          : readyNoReward
+          ? (path.netValue ? { amountMinor: transaction.amount.amountMinor - path.netValue.amountMinor, currency: transaction.amount.currency } : transaction.amount)
+          : undefined;
         candidates.push({
           id: path.id, kind: 'payment_path', routeId: path.routeId, fundingSource: path.fundingSource,
           nodes: path.nodes, events: path.events,
-          status: supported ? 'ready' : path.status === 'blocked' ? 'blocked' : 'unknown',
+          status: candidateStatus,
           matchedRules: projected, ...(supported ? { reward: path.cappedReward } : {}),
-          ...(supported && path.netValue ? { netSpend: { amountMinor: transaction.amount.amountMinor - path.netValue.amountMinor, currency: transaction.amount.currency } } : {}),
+          ...(netSpend ? { netSpend } : {}),
           ...(fxEstimate ? { fxEstimate } : {}),
           exclusionReasons: path.exclusionReasons,
         });
@@ -905,7 +959,7 @@ export class RewardService {
         candidates.push({
           id: `route:${route.id}`, kind: 'payment_path', routeId: route.id, fundingSource: route.funding,
           nodes: route.nodes ?? route.layers.map((layer, index) => ({ id: `layer:${index}`, kind: layer.kind, displayName: layer.displayName ?? layer.providerId ?? layer.kind })),
-          events: [], status: 'unknown', matchedRules: applicable(cardId, route.id).map(rule => projectRule(rule)),
+          events: [], status: 'unknown', matchedRules: applicable(cardId, route.id, route).map(rule => projectRule(rule)),
           exclusionReasons: ['route acceptance, evidence and amount require evaluation'],
         });
       }
@@ -1013,7 +1067,7 @@ export class RewardService {
         const to = route.nodes?.find((node) => node.id === edge.toNodeId);
         const fromRole = from?.kind;
         const toRole = to?.kind;
-        const legal = edge.transition === 'wallet_top_up' ? fromRole === 'funding_source' && toRole === 'wallet_balance' : edge.transition === 'account_debit' ? fromRole === 'funding_source' && ['wallet_balance', 'merchant'].includes(toRole ?? '') : edge.transition === 'wallet_debit' ? fromRole === 'wallet_balance' && ['payment_service', 'acceptance_network', 'merchant'].includes(toRole ?? '') : edge.transition === 'service_to_acceptance' ? fromRole === 'payment_service' && toRole === 'acceptance_network' : edge.transition === 'merchant_settlement' ? ['wallet_balance', 'payment_service', 'acceptance_network'].includes(fromRole ?? '') && toRole === 'merchant' : edge.transition === 'direct_settlement' ? fromRole === 'funding_source' && toRole === 'merchant' : edge.transition === 'card_authorization' ? fromRole === 'funding_source' && ['acceptance_network', 'merchant'].includes(toRole ?? '') : edge.transition === 'split_tender' ? ['funding_source', 'wallet_balance'].includes(fromRole ?? '') && toRole === 'merchant' : false;
+        const legal = edge.transition === 'wallet_top_up' ? fromRole === 'funding_source' && toRole === 'wallet_balance' : edge.transition === 'account_debit' ? fromRole === 'funding_source' && ['wallet_balance', 'payment_service', 'merchant'].includes(toRole ?? '') : edge.transition === 'wallet_debit' ? fromRole === 'wallet_balance' && ['payment_service', 'acceptance_network', 'merchant'].includes(toRole ?? '') : edge.transition === 'service_to_acceptance' ? fromRole === 'payment_service' && toRole === 'acceptance_network' : edge.transition === 'merchant_settlement' ? ['wallet_balance', 'payment_service', 'acceptance_network'].includes(fromRole ?? '') && toRole === 'merchant' : edge.transition === 'direct_settlement' ? fromRole === 'funding_source' && toRole === 'merchant' : edge.transition === 'card_authorization' ? fromRole === 'funding_source' && ['payment_service', 'acceptance_network', 'merchant'].includes(toRole ?? '') : edge.transition === 'split_tender' ? ['funding_source', 'wallet_balance'].includes(fromRole ?? '') && toRole === 'merchant' : false;
         const directionIsAdmissible = edge.direction !== 'inbound';
         return legal && directionIsAdmissible && edge.provenance !== 'model_fixture' && edge.evidenceIds.length > 0 && (!edge.validFrom || Date.parse(edge.validFrom) <= Date.parse(asOf)) && (!edge.validTo || Date.parse(edge.validTo) >= Date.parse(asOf));
       };
@@ -1038,7 +1092,8 @@ export class RewardService {
       const pathEdges = selectedEdges;
       const events: PaymentPathEvent[] = pathEdges?.length
         ? pathEdges.map((edge) => {
-          const kind = edge.transition === 'wallet_top_up' || edge.transition === 'account_debit' ? 'top_up' as const : 'purchase' as const;
+          const toNode = route.nodes?.find((n) => n.id === edge.toNodeId);
+          const kind = (edge.transition === 'wallet_top_up' || (edge.transition === 'account_debit' && (!toNode || toNode.kind === 'wallet_balance'))) ? 'top_up' as const : 'purchase' as const;
           return {
             kind,
             fromNodeId: edge.fromNodeId,
@@ -1076,6 +1131,10 @@ export class RewardService {
         if (event.kind === 'top_up' && event.amount === undefined) return;
         for (const rule of state.rules) {
           if (rule.status !== 'active' || !rule.eventRule || !rule.componentKind || (rule.routeId !== undefined && rule.routeId !== route.id)) continue;
+          if (rule.routeSelector !== undefined) {
+            const selectorMatch = matchPaymentRouteSelector(rule.routeSelector, route, asOf);
+            if (!selectorMatch.matched) continue;
+          }
           if (plannedRewards.some((item) => item.ruleId === rule.id && item.reward !== undefined)) continue;
           const match = matchPaymentEvent(rule.eventRule, plannedEvent);
           if (match.status !== 'matched') {
@@ -1116,7 +1175,13 @@ export class RewardService {
       const transaction: TransactionTuple = { cardId: route.funding.kind === 'credit_card' ? (route.funding.cardId ?? '') : '', routeId: route.id, kind: 'purchase', mode: 'planned', occurredAt: asOf, amount: input.amount, ...(input.merchant === undefined ? {} : { merchant: input.merchant }), ...(input.mcc === undefined ? {} : { mcc: input.mcc }), ...(input.country === undefined ? {} : { country: input.country }), ...(input.channel === undefined ? {} : { channel: input.channel }), ...(input.paymentMethod === undefined ? {} : { paymentMethod: input.paymentMethod }) };
       const card = state.cards.find((candidate) => candidate.id === transaction.cardId);
       const hasPlannedTopUp = events.some((event) => event.kind === 'top_up');
-      const evaluations = card && !hasPlannedTopUp ? state.rules.filter((rule) => rule.cardId === card.id).map((rule) => ({ rule, result: evaluateOffer(rule, transaction, this.context(state, asOf, transaction)) })).filter(({ result }) => result.status === 'ok') : [];
+      const evalContext = { ...this.context(state, asOf, transaction), paymentRoutes: visibleRoutes };
+      const evaluations = (!hasPlannedTopUp)
+        ? state.rules
+            .filter((rule) => (card && rule.cardId === card.id) || (rule.cardId === undefined && rule.componentKind && rule.componentKind !== 'card_issuer'))
+            .map((rule) => ({ rule, result: evaluateOffer(rule, transaction, evalContext) }))
+            .filter(({ result }) => result.status === 'ok')
+        : [];
       const ranking = evaluations.length ? evaluations[0]?.result : undefined;
       const zero = { amountMinor: 0, currency: input.amount.currency };
       const rewardGroups = new Map<string, typeof plannedRewards>();

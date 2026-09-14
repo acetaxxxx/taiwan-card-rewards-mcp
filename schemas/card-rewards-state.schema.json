@@ -62,10 +62,25 @@
       "type": "object", "additionalProperties": false, "required": ["confirmedAt", "confirmedBy", "sourceReference", "offerPeriod", "rewardUnit"],
       "properties": { "confirmedAt": { "$ref": "#/$defs/dateTime" }, "confirmedBy": { "type": "string", "minLength": 1 }, "sourceReference": { "type": "string", "minLength": 1 }, "offerPeriod": { "type": "object", "additionalProperties": false, "required": ["validFrom"], "properties": { "validFrom": { "$ref": "#/$defs/dateTime" }, "validTo": { "$ref": "#/$defs/dateTime" } } }, "rewardUnit": { "$ref": "#/$defs/currency" }, "rewardConditionsSummary": { "type": "string" }, "capSummary": { "type": "string" } }
     },
+    "paymentRouteSelector": {
+      "type": "object", "additionalProperties": false,
+      "properties": {
+        "paymentServices": { "type": "array", "items": { "type": "string" } },
+        "paymentServiceAllowlist": { "type": "array", "items": { "type": "string" } },
+        "acceptanceNetworks": { "type": "array", "items": { "type": "string" } },
+        "acceptanceNetworkAllowlist": { "type": "array", "items": { "type": "string" } },
+        "fundingKinds": { "type": "array", "items": { "enum": ["credit_card", "account", "cash"] } },
+        "nodeRoles": { "type": "array", "items": { "enum": ["funding_source", "wallet_balance", "payment_service", "acceptance_network", "merchant"] } },
+        "transitions": { "type": "array", "items": { "enum": ["card_authorization", "account_debit", "wallet_top_up", "wallet_debit", "service_to_acceptance", "merchant_settlement", "direct_settlement", "split_tender"] } },
+        "excludedTransitions": { "type": "array", "items": { "enum": ["card_authorization", "account_debit", "wallet_top_up", "wallet_debit", "service_to_acceptance", "merchant_settlement", "direct_settlement", "split_tender"] } },
+        "validFrom": { "$ref": "#/$defs/dateTime" },
+        "validTo": { "$ref": "#/$defs/dateTime" }
+      }
+    },
     "rule": {
       "type": "object", "additionalProperties": false, "required": ["id", "cardId", "version", "sourceSnapshotId", "status", "validFrom", "settlementCurrency", "match", "reward"],
       "properties": {
-        "id": { "$ref": "#/$defs/id" }, "cardId": { "$ref": "#/$defs/id" }, "version": { "type": "string", "minLength": 1 }, "sourceSnapshotId": { "$ref": "#/$defs/id" },
+        "id": { "$ref": "#/$defs/id" }, "cardId": { "$ref": "#/$defs/id" }, "routeId": { "$ref": "#/$defs/id" }, "routeSelector": { "$ref": "#/$defs/paymentRouteSelector" }, "version": { "type": "string", "minLength": 1 }, "sourceSnapshotId": { "$ref": "#/$defs/id" },
         "status": { "enum": ["candidate", "active", "stale", "superseded", "needs_review", "unknown"] }, "validFrom": { "$ref": "#/$defs/dateTime" }, "validTo": { "$ref": "#/$defs/dateTime" }, "settlementCurrency": { "$ref": "#/$defs/currency" },
         "match": { "type": "object", "additionalProperties": false, "properties": { "merchants": { "type": "array", "items": { "$ref": "#/$defs/id" } }, "mccs": { "type": "array", "items": { "$ref": "#/$defs/id" } }, "countries": { "type": "array", "items": { "$ref": "#/$defs/id" } }, "channels": { "type": "array", "items": { "$ref": "#/$defs/id" } }, "paymentMethods": { "type": "array", "items": { "$ref": "#/$defs/id" } } },
         "predicate": { "$ref": "#/$defs/predicate" }, "requires": { "type": "array", "uniqueItems": true, "items": { "enum": ["source_verified", "user_confirmation"] } },

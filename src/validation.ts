@@ -1,4 +1,4 @@
-import type { CardDescriptor, CardProduct, CapPeriod, CapPoolDefinition, CardSwitchCampaign, CardSwitchConfirmation, CardSwitchInput, CardSwitchEnrollment, CardSwitchProjection, EligibilityFact, EvaluationContext, FxSnapshot, HeldCard, MerchantIdentity, MerchantProvenance, Money, OfferConfirmation, OfferProvenance, OfferRuleVersion, OfferSourceSnapshot, Predicate, PredicateValue, RewardBreakdown, RewardSpec, RuleMatch, TransactionTuple, PaymentRouteKind, RewardComponentKind, RewardComponentRecord, PaymentRouteContext, PaymentRouteRecord, PaymentCapabilityRecord, PaymentAccountRecord, PaymentEvent, PaymentEventKind, PaymentEventRule, PaymentEventChainRule, EventRewardLedgerRecord, EventRewardReversalRecord, EventRewardCapUsageRecord, PaymentEventRewardCandidate, PaymentEventRewardCandidateInput, PaymentEventMatch, RewardValuationSnapshot } from './types.js';
+import type { CardDescriptor, CardProduct, CapPeriod, CapPoolDefinition, CardSwitchCampaign, CardSwitchConfirmation, CardSwitchInput, CardSwitchEnrollment, CardSwitchProjection, EligibilityFact, EvaluationContext, FxSnapshot, HeldCard, MerchantIdentity, MerchantProvenance, Money, OfferConfirmation, OfferProvenance, OfferRuleVersion, OfferSourceSnapshot, Predicate, PredicateValue, RewardBreakdown, RewardSpec, RuleMatch, TransactionTuple, PaymentRouteKind, RewardComponentKind, RewardComponentRecord, PaymentRouteContext, PaymentRouteRecord, PaymentCapabilityRecord, PaymentAccountRecord, PaymentEvent, PaymentEventKind, PaymentEventRule, PaymentEventChainRule, EventRewardLedgerRecord, EventRewardReversalRecord, EventRewardCapUsageRecord, PaymentEventRewardCandidate, PaymentEventRewardCandidateInput, PaymentEventMatch, RewardValuationSnapshot, PaymentRouteSelector } from './types.js';
 import type { StoredState } from './store.js';
 import type { EvidenceRecord, FactCandidate } from './types.js';
 import { RewardServiceError } from './errors.js';
@@ -393,9 +393,91 @@ export function validateConfirmation(value: unknown): OfferConfirmation {
   };
 }
 
+export function validatePaymentRouteSelector(value: unknown): PaymentRouteSelector {
+  const item = object(value, 'routeSelector');
+  keys(item, [
+    'paymentServices', 'paymentServiceAllowlist',
+    'acceptanceNetworks', 'acceptanceNetworkAllowlist',
+    'fundingKinds', 'nodeRoles', 'transitions', 'excludedTransitions',
+    'validFrom', 'validTo',
+  ], 'routeSelector');
+
+  const rawServices = item.paymentServiceAllowlist ?? item.paymentServices;
+  const paymentServices = rawServices === undefined ? undefined : (Array.isArray(rawServices) ? rawServices.map((s) => requiredString(s, 'routeSelector paymentService', true)) : (() => { throw new RewardServiceError('INVALID_INPUT', 'routeSelector paymentServices must be an array'); })());
+
+  const rawAcceptance = item.acceptanceNetworkAllowlist ?? item.acceptanceNetworks;
+  const acceptanceNetworks = rawAcceptance === undefined ? undefined : (Array.isArray(rawAcceptance) ? rawAcceptance.map((s) => requiredString(s, 'routeSelector acceptanceNetwork', true)) : (() => { throw new RewardServiceError('INVALID_INPUT', 'routeSelector acceptanceNetworks must be an array'); })());
+
+  let fundingKinds: PaymentRouteSelector['fundingKinds'];
+  if (item.fundingKinds !== undefined) {
+    if (!Array.isArray(item.fundingKinds) || item.fundingKinds.length === 0 || item.fundingKinds.length > 3) {
+      throw new RewardServiceError('INVALID_INPUT', 'routeSelector fundingKinds must be a non-empty array of at most 3 items');
+    }
+    for (const kind of item.fundingKinds) {
+      if (!['credit_card', 'account', 'cash'].includes(kind)) {
+        throw new RewardServiceError('INVALID_INPUT', `routeSelector fundingKind is invalid: ${kind}`);
+      }
+    }
+    fundingKinds = item.fundingKinds as PaymentRouteSelector['fundingKinds'];
+  }
+
+  let nodeRoles: PaymentRouteSelector['nodeRoles'];
+  if (item.nodeRoles !== undefined) {
+    if (!Array.isArray(item.nodeRoles)) throw new RewardServiceError('INVALID_INPUT', 'routeSelector nodeRoles must be an array');
+    for (const role of item.nodeRoles) {
+      if (!['funding_source', 'wallet_balance', 'payment_service', 'acceptance_network', 'merchant'].includes(role)) {
+        throw new RewardServiceError('INVALID_INPUT', `routeSelector nodeRole is invalid: ${role}`);
+      }
+    }
+    nodeRoles = item.nodeRoles as PaymentRouteSelector['nodeRoles'];
+  }
+
+  let transitions: PaymentRouteSelector['transitions'];
+  if (item.transitions !== undefined) {
+    if (!Array.isArray(item.transitions)) throw new RewardServiceError('INVALID_INPUT', 'routeSelector transitions must be an array');
+    for (const t of item.transitions) {
+      if (!['card_authorization', 'account_debit', 'wallet_top_up', 'wallet_debit', 'service_to_acceptance', 'merchant_settlement', 'direct_settlement', 'split_tender'].includes(t)) {
+        throw new RewardServiceError('INVALID_INPUT', `routeSelector transition is invalid: ${t}`);
+      }
+    }
+    transitions = item.transitions as PaymentRouteSelector['transitions'];
+  }
+
+  let excludedTransitions: PaymentRouteSelector['excludedTransitions'];
+  if (item.excludedTransitions !== undefined) {
+    if (!Array.isArray(item.excludedTransitions)) throw new RewardServiceError('INVALID_INPUT', 'routeSelector excludedTransitions must be an array');
+    for (const t of item.excludedTransitions) {
+      if (!['card_authorization', 'account_debit', 'wallet_top_up', 'wallet_debit', 'service_to_acceptance', 'merchant_settlement', 'direct_settlement', 'split_tender'].includes(t)) {
+        throw new RewardServiceError('INVALID_INPUT', `routeSelector excludedTransition is invalid: ${t}`);
+      }
+    }
+    excludedTransitions = item.excludedTransitions as PaymentRouteSelector['excludedTransitions'];
+  }
+
+  const validFrom = optionalString(item.validFrom, 'routeSelector.validFrom');
+  if (validFrom && (!Number.isFinite(Date.parse(validFrom)) || !validFrom.includes('T'))) {
+    throw new RewardServiceError('INVALID_INPUT', 'routeSelector.validFrom must be an ISO date-time');
+  }
+  const validTo = optionalString(item.validTo, 'routeSelector.validTo');
+  if (validTo && (!Number.isFinite(Date.parse(validTo)) || !validTo.includes('T'))) {
+    throw new RewardServiceError('INVALID_INPUT', 'routeSelector.validTo must be an ISO date-time');
+  }
+
+  return {
+    ...(paymentServices ? { paymentServices, paymentServiceAllowlist: paymentServices } : {}),
+    ...(acceptanceNetworks ? { acceptanceNetworks, acceptanceNetworkAllowlist: acceptanceNetworks } : {}),
+    ...(fundingKinds ? { fundingKinds } : {}),
+    ...(nodeRoles ? { nodeRoles } : {}),
+    ...(transitions ? { transitions } : {}),
+    ...(excludedTransitions ? { excludedTransitions } : {}),
+    ...(validFrom ? { validFrom } : {}),
+    ...(validTo ? { validTo } : {}),
+  };
+}
+
 export function validateRule(value: unknown): OfferRuleVersion {
   const item = object(value, 'rule');
-  keys(item, ['id', 'cardId', 'version', 'sourceSnapshotId', 'ownerUser', 'trustBasis', 'familyId', 'supersedesRuleId', 'supersessionReason', 'status', 'validFrom', 'validTo', 'settlementCurrency', 'match', 'predicate', 'requires', 'reward', 'capPoolRefs', 'confirmation', 'combination', 'componentKind', 'sponsor', 'benefitGroup', 'useSettlementAmount', 'stacking', 'routeId', 'eventRule', 'eventChainRule'], 'rule');
+  keys(item, ['id', 'cardId', 'version', 'sourceSnapshotId', 'ownerUser', 'trustBasis', 'familyId', 'supersedesRuleId', 'supersessionReason', 'status', 'validFrom', 'validTo', 'settlementCurrency', 'match', 'predicate', 'requires', 'reward', 'capPoolRefs', 'confirmation', 'combination', 'componentKind', 'sponsor', 'benefitGroup', 'useSettlementAmount', 'stacking', 'routeId', 'routeSelector', 'eventRule', 'eventChainRule'], 'rule');
   const status = requiredString(item.status, 'rule.status');
   if (!['candidate', 'active', 'stale', 'superseded', 'needs_review', 'unknown'].includes(status)) throw new RewardServiceError('INVALID_INPUT', 'rule.status is invalid');
   const rewardItem = object(item.reward, 'rule.reward');
@@ -445,9 +527,10 @@ export function validateRule(value: unknown): OfferRuleVersion {
   if (item.eventRule !== undefined && item.eventChainRule !== undefined) throw new RewardServiceError('INVALID_INPUT', 'rule.eventRule and rule.eventChainRule are mutually exclusive');
   const eventRule = item.eventRule === undefined ? undefined : validatePaymentEventRule(item.eventRule);
   const eventChainRule = item.eventChainRule === undefined ? undefined : validatePaymentEventChainRule(item.eventChainRule);
+  const routeSelector = item.routeSelector === undefined ? undefined : validatePaymentRouteSelector(item.routeSelector);
   const cardId = item.cardId === undefined ? undefined : requiredString(item.cardId, 'rule.cardId', true);
   if (cardId === undefined && (!componentKind || componentKind === 'card_issuer')) throw new RewardServiceError('INVALID_INPUT', 'non-card rules require an explicit componentKind');
-  return { id: requiredString(item.id, 'rule.id', true), ...(cardId === undefined ? {} : { cardId }), version: requiredString(item.version, 'rule.version'), sourceSnapshotId: requiredString(item.sourceSnapshotId, 'rule.sourceSnapshotId', true), ...(item.ownerUser === undefined ? {} : { ownerUser: requiredString(item.ownerUser, 'rule.ownerUser', true) }), ...(trustBasis ? { trustBasis: trustBasis as OfferRuleVersion['trustBasis'] } : {}), ...(item.familyId === undefined ? {} : { familyId: requiredString(item.familyId, 'rule.familyId', true) }), ...(item.supersedesRuleId === undefined ? {} : { supersedesRuleId: requiredString(item.supersedesRuleId, 'rule.supersedesRuleId', true) }), ...(supersessionReason ? { supersessionReason: supersessionReason as OfferRuleVersion['supersessionReason'] } : {}), status: status as OfferRuleVersion['status'], validFrom, ...(validTo ? { validTo } : {}), settlementCurrency: requiredString(item.settlementCurrency, 'rule.settlementCurrency', true).toUpperCase(), match: validateMatch(item.match), ...(predicate ? { predicate } : {}), ...(requires?.length ? { requires } : {}), reward, ...(capPoolRefs ? { capPoolRefs } : {}), ...(componentKind ? { componentKind: componentKind as OfferRuleVersion['componentKind'] } : {}), ...(sponsor === undefined ? {} : { sponsor }), ...(benefitGroup === undefined ? {} : { benefitGroup }), ...(item.useSettlementAmount === undefined ? {} : { useSettlementAmount: item.useSettlementAmount }), ...(stacking ? { stacking: stacking as OfferRuleVersion['stacking'] } : {}), ...(confirmation ? { confirmation } : {}), ...(combination ? { combination } : {}), ...(item.routeId === undefined ? {} : { routeId: requiredString(item.routeId, 'rule.routeId', true) }), ...(eventRule ? { eventRule } : {}), ...(eventChainRule ? { eventChainRule } : {}) };
+  return { id: requiredString(item.id, 'rule.id', true), ...(cardId === undefined ? {} : { cardId }), version: requiredString(item.version, 'rule.version'), sourceSnapshotId: requiredString(item.sourceSnapshotId, 'rule.sourceSnapshotId', true), ...(item.ownerUser === undefined ? {} : { ownerUser: requiredString(item.ownerUser, 'rule.ownerUser', true) }), ...(trustBasis ? { trustBasis: trustBasis as OfferRuleVersion['trustBasis'] } : {}), ...(item.familyId === undefined ? {} : { familyId: requiredString(item.familyId, 'rule.familyId', true) }), ...(item.supersedesRuleId === undefined ? {} : { supersedesRuleId: requiredString(item.supersedesRuleId, 'rule.supersedesRuleId', true) }), ...(supersessionReason ? { supersessionReason: supersessionReason as OfferRuleVersion['supersessionReason'] } : {}), status: status as OfferRuleVersion['status'], validFrom, ...(validTo ? { validTo } : {}), settlementCurrency: requiredString(item.settlementCurrency, 'rule.settlementCurrency', true).toUpperCase(), match: validateMatch(item.match), ...(predicate ? { predicate } : {}), ...(requires?.length ? { requires } : {}), reward, ...(capPoolRefs ? { capPoolRefs } : {}), ...(componentKind ? { componentKind: componentKind as OfferRuleVersion['componentKind'] } : {}), ...(sponsor === undefined ? {} : { sponsor }), ...(benefitGroup === undefined ? {} : { benefitGroup }), ...(item.useSettlementAmount === undefined ? {} : { useSettlementAmount: item.useSettlementAmount }), ...(stacking ? { stacking: stacking as OfferRuleVersion['stacking'] } : {}), ...(confirmation ? { confirmation } : {}), ...(combination ? { combination } : {}), ...(item.routeId === undefined ? {} : { routeId: requiredString(item.routeId, 'rule.routeId', true) }), ...(routeSelector ? { routeSelector } : {}), ...(eventRule ? { eventRule } : {}), ...(eventChainRule ? { eventChainRule } : {}) };
 }
 
 export function validateCapPool(value: unknown): CapPoolDefinition {
