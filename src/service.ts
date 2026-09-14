@@ -1,12 +1,12 @@
 import * as crypto from 'node:crypto';
 import { type LedgerStore, type RecordedTransaction, type StoredState, contentHash } from './store.js';
 import { EventRewardLedger, convertMinor, createPaymentEventRewardCandidate, decidePaymentEventRewards, evaluateOffer, evaluatePredicate, matchPaymentEvent, matchPaymentEventChain, matchPaymentRouteSelector, rankCards, resolveCyclePeriodKey } from './evaluator.js';
-import type { CardDescriptor, CardSwitchInput, CardSwitchProjection, CardSwitchStatus, CapPeriod, CapPoolDefinition, EvaluationContext, MerchantIdentity, MerchantResolution, Money, OfferConfirmation, OfferRuleVersion, OfferSourceSnapshot, RewardBreakdown, RewardComponentRecord, TransactionTuple, UserBenefitInput, UserBenefitStatus, EvidenceRecord, PaymentRouteRecord, PaymentCapabilityRecord, PaymentAccountRecord, EventRewardLedgerRecord, EventRewardReversalRecord, PaymentPathRequest, PaymentPathRecommendation, PaymentPathCandidate, PaymentPathEvent, EligibilityFact, RewardValuationSnapshot, FxResolutionRequest, AppliedFxRate, RecommendationIntent, RecommendationIntentResult, IntentCandidate, FxSnapshot, ListTransactionsOptions, ListTransactionsResult, TransactionSummaryItem, TransactionDetailItem, FundingInstrument, TransactionListItem } from './types.js';
+import type { CardDescriptor, CardSwitchInput, CardSwitchProjection, CardSwitchStatus, CapPeriod, CapPoolDefinition, EvaluationContext, MerchantIdentity, MerchantResolution, Money, OfferConfirmation, OfferRuleVersion, OfferSourceSnapshot, RewardBreakdown, RewardComponentRecord, TransactionTuple, UserBenefitInput, UserBenefitStatus, EvidenceRecord, PaymentRouteRecord, PaymentCapabilityRecord, PaymentAccountRecord, EventRewardLedgerRecord, EventRewardReversalRecord, PaymentPathRequest, PaymentPathRecommendation, PaymentPathCandidate, PaymentPathEvent, EligibilityFact, RewardValuationSnapshot, FxResolutionRequest, FxEvaluationContext, AppliedFxRate, RecommendationIntent, RecommendationIntentResult, IntentCandidate, FxSnapshot, ListTransactionsOptions, ListTransactionsResult, TransactionSummaryItem, TransactionDetailItem, FundingInstrument, TransactionListItem } from './types.js';
 import type { StartupConfig } from './startup.js';
 import { RewardServiceError } from './errors.js';
 import { validateCard, validateCapPool, validateConfirmation, validateEligibilityFact, validateMerchant, validateRecommendationTransaction, validateRule, validateSnapshot, validateTransaction, validateEvidence, validateFactCandidate, validatePaymentRouteRecord, validatePaymentCapability, validatePaymentAccountRecord, validateEventRewardInput, validatePaymentEvent, validatePaymentEventChainRule, validatePaymentEventRule, validateRewardValuationSnapshot, validateListTransactionsOptions } from './validation.js';
 import { cardSwitchStatus, projectionFromInput } from './card-switch.js';
-import { buildFxResolutionRequest, freezeAppliedFxRate, deriveConversionOwner } from './fx.js';
+import { buildFxResolutionRequest, freezeAppliedFxRate, deriveConversionOwner, isFxFresh, isFxCompatible, getFxScopeSpecificity, findBestMatchingFx } from './fx.js';
 import { validateRecommendationIntent } from './validation.js';
 import { projectPage } from './projections.js';
 
@@ -837,19 +837,35 @@ export class RewardService {
     const fxRequests = new Map<string, { request: FxResolutionRequest; candidateIds: Set<string>; diagnostic: string }>();
     const registerFxRequest = (request: FxResolutionRequest, candidateId: string, diagnostic: string) => {
       const scope: NonNullable<FxResolutionRequest['scope']> = request.scope ?? { kind: 'public_reference' };
-      const key = [diagnostic, request.baseCurrency, request.quoteCurrency, request.conversionOwner ?? 'unknown', request.purpose ?? '', scope.routeId ?? '', scope.edgeId ?? '', scope.cardId ?? '', scope.issuer ?? ''].join('|');
+      const schemeKey = request.cardScheme ?? scope.cardScheme ?? '';
+      const key = [diagnostic, request.baseCurrency, request.quoteCurrency, request.conversionOwner ?? 'unknown', schemeKey, request.purpose ?? '', scope.routeId ?? '', scope.edgeId ?? '', scope.cardId ?? '', scope.issuer ?? ''].join('|');
       const existing = fxRequests.get(key);
       if (existing) existing.candidateIds.add(candidateId);
       else fxRequests.set(key, { request, candidateIds: new Set([candidateId]), diagnostic });
       fxResolutionRequest ??= request;
     };
+    const allSuppliedFx: FxSnapshot[] = [
+      ...(input.fx ? [input.fx] : []),
+      ...(input.routeFacts?.map((f) => f.fx) ?? []),
+    ];
     if (input.routeIds === undefined) for (const card of cards) {
       const rules = applicable(card.id);
       const ruleQuote = transaction ? rules.find((rule) => rule.settlementCurrency.toUpperCase() !== transaction.amount.currency.toUpperCase())?.settlementCurrency : undefined;
-      const applicableFx = transaction?.fx &&
-        (!transaction.fx.cardIdScope || transaction.fx.cardIdScope === card.id) &&
-        (!transaction.fx.issuerScope || transaction.fx.issuerScope === card.issuer)
-        ? transaction.fx : undefined;
+      const targetCurrency = (ruleQuote ?? (card.country === 'TW' ? 'TWD' : 'TWD')).toUpperCase();
+      const isCrossCurrency = Boolean(transaction && transaction.amount.currency.toUpperCase() !== targetCurrency);
+
+      const cardContext: FxEvaluationContext = {
+        baseCurrency: transaction ? transaction.amount.currency : 'TWD',
+        quoteCurrency: targetCurrency,
+        conversionOwner: 'card_scheme',
+        rateType: 'card_scheme',
+        cardScheme: card.network,
+        cardId: card.id,
+        issuer: card.issuer,
+        asOf: evaluatedAt,
+        requireFresh: false,
+      };
+      const applicableFx = isCrossCurrency ? findBestMatchingFx(allSuppliedFx, cardContext) : undefined;
       const tx = transaction ? { ...transaction, cardId: card.id, route: { kind: 'direct_card' as const }, ...(applicableFx ? { fx: applicableFx } : { fx: undefined }) } : undefined;
       const evaluations = rules.map(rule => ({ rule, result: tx ? evaluateOffer(rule, tx, context) : undefined }));
       const projected = evaluations.map(({ rule, result }) => projectRule(rule, result));
@@ -860,12 +876,32 @@ export class RewardService {
           if (!['fx_missing', 'fx_stale', 'fx_pair_mismatch', 'fx_scope_mismatch'].includes(diagnostic.code)) continue;
           const request = buildFxResolutionRequest({
             transaction: tx, rules: [rule], card,
-            scope: { kind: 'card', cardId: card.id, issuer: card.issuer },
+            cardScheme: card.network,
+            scope: { kind: 'card_scheme', ...(card.network ? { cardScheme: card.network } : {}) },
             submission: { tool: 'recommend', field: 'fx' },
           });
           registerFxRequest(request, `card:${card.id}`, diagnostic.code);
         }
       }
+      const fxEst = (() => {
+        if (!isCrossCurrency) return undefined;
+        if (!applicableFx) {
+          return { status: 'unavailable' as const, assumption: 'no fx snapshot was supplied for this foreign-currency rule; the Agent must fetch a current rate and supply it inline before an estimate can be calculated' };
+        }
+        const stale = !isFxFresh(applicableFx, evaluatedAt);
+        const fallback = input.fx?.id === applicableFx.id && (!applicableFx.cardIdScope && !applicableFx.issuerScope && !applicableFx.cardScheme);
+        return {
+          status: stale ? 'stale_estimate' as const : fallback ? 'estimated_fallback' as const : 'estimated' as const,
+          provider: applicableFx.provider,
+          capturedAt: applicableFx.capturedAt,
+          ...(applicableFx.sourceUrl ? { sourceUrl: applicableFx.sourceUrl } : {}),
+          assumption: stale
+            ? 'using an expired fx snapshot beyond its freshness window; refresh before relying on the value'
+            : fallback
+            ? 'using the Agent-supplied fx snapshot as a general currency-pair fallback, not an exact card scheme quote'
+            : 'using the card scheme exchange rate for planned estimate',
+        };
+      })();
       candidates.push({
         id: `card:${card.id}`, kind: 'direct_card', cardId: card.id,
         fundingSource: { kind: 'credit_card', cardId: card.id },
@@ -875,7 +911,7 @@ export class RewardService {
         matchedRules: projected,
         ...(row?.status === 'ok' && row.cappedReward ? { reward: row.cappedReward } : {}),
         ...(row?.status === 'ok' && row.cappedReward && row.cappedReward.currency === transaction?.amount.currency ? { netSpend: { amountMinor: Math.max(0, (transaction?.amount.amountMinor ?? 0) - row.cappedReward.amountMinor), currency: transaction.amount.currency } } : {}),
-        ...(!applicableFx && ruleQuote ? { fxEstimate: { status: 'unavailable' as const, assumption: 'no fx snapshot was supplied for this foreign-currency rule; the Agent must fetch a current rate and supply it inline before an estimate can be calculated' } } : {}),
+        ...(fxEst ? { fxEstimate: fxEst } : {}),
         exclusionReasons: row?.unknownReasons ?? (!rules.length ? ['no known offer rules'] : []),
       });
     }
@@ -883,12 +919,34 @@ export class RewardService {
     if (transaction && this.metadataUser) {
       const routeFactMap = new Map<string, { routeId: string; edgeId?: string; fx: FxSnapshot }>();
       for (const fact of input.routeFacts ?? []) routeFactMap.set(`${fact.routeId}|${fact.edgeId ?? '*'}`, fact);
-      if (input.fx) for (const route of routes) for (const edge of route.edges ?? []) {
-        const costs = [edge.fee, edge.markup, edge.foreignTransactionFee, edge.dcc?.selected ? edge.dcc.fee : undefined]
-          .filter((cost): cost is Money => cost !== undefined && cost.currency !== transaction.amount.currency);
-        if (costs.some((cost) => cost.currency === input.fx!.baseCurrency && input.fx!.quoteCurrency === transaction.amount.currency)) {
-          const key = `${route.id}|${edge.edgeId}`;
-          if (!routeFactMap.has(key)) routeFactMap.set(key, { routeId: route.id, edgeId: edge.edgeId, fx: input.fx });
+      if (input.fx) for (const route of routes) {
+        const fundingCardId = route.funding.kind === 'credit_card' ? route.funding.cardId : undefined;
+        const card = fundingCardId ? state.cards.find((candidate) => candidate.id === fundingCardId) : undefined;
+        for (const edge of route.edges ?? []) {
+          const costs = [edge.fee, edge.markup, edge.foreignTransactionFee, edge.dcc?.selected ? edge.dcc.fee : undefined]
+            .filter((cost): cost is Money => cost !== undefined && cost.currency !== transaction.amount.currency);
+          for (const cost of costs) {
+            const edgeContext: FxEvaluationContext = {
+              baseCurrency: cost.currency,
+              quoteCurrency: transaction.amount.currency,
+              conversionOwner: edge.dcc?.selected ? 'merchant_dcc'
+                : edge.transition === 'card_authorization' ? 'card_scheme'
+                : edge.transition === 'account_debit' ? 'issuer'
+                : edge.transition === 'wallet_top_up' || edge.transition === 'wallet_debit' ? 'wallet'
+                : deriveConversionOwner({ route, card }),
+              cardScheme: card?.network,
+              cardId: card?.id,
+              issuer: card?.issuer,
+              routeId: route.id,
+              edgeId: edge.edgeId,
+              asOf: evaluatedAt,
+              requireFresh: false,
+            };
+            if (isFxCompatible({ snapshot: input.fx, context: edgeContext })) {
+              const key = `${route.id}|${edge.edgeId}`;
+              if (!routeFactMap.has(key)) routeFactMap.set(key, { routeId: route.id, edgeId: edge.edgeId, fx: input.fx });
+            }
+          }
         }
       }
       const result = this.recommendPaymentPaths({
@@ -919,13 +977,13 @@ export class RewardService {
             .filter((cost): cost is Money => cost !== undefined && cost.currency !== transaction.amount.currency);
           return costs.every((cost) => event.fx?.baseCurrency === cost.currency && event.fx.quoteCurrency === transaction.amount.currency);
         }) ? (() => {
-          const stale = fxCostEvents.some((event) => Math.abs(Date.parse(evaluatedAt) - Date.parse(event.fx!.capturedAt)) > (event.fx!.maxAgeSeconds ?? 7 * 24 * 3600) * 1000);
+          const stale = fxCostEvents.some((event) => !isFxFresh(event.fx!, evaluatedAt));
           const observation = fxCostEvents[0]!.fx!;
-          const fallback = input.fx?.id === observation.id;
+          const fallback = input.fx?.id === observation.id && (!observation.edgeIdScope && !observation.routeIdScope && !observation.cardIdScope && !observation.cardScheme);
           return { status: stale ? 'stale_estimate' as const : fallback ? 'estimated_fallback' as const : 'estimated' as const, provider: observation.provider, capturedAt: observation.capturedAt, ...(observation.sourceUrl ? { sourceUrl: observation.sourceUrl } : {}), assumption: stale ? 'using a route FX snapshot beyond its freshness window; refresh before relying on the value' : fallback ? 'using the Agent-supplied fx snapshot as a general currency-pair fallback, not an exact per-edge fact; route policy and final settlement cost remain unconfirmed' : 'using the route or edge FX snapshot for foreign-currency costs' };
         })() : { status: 'unavailable' as const, assumption: 'foreign-currency route costs cannot be compared without a matching route or edge FX snapshot' };
         const candidateStatus = supported || readyNoReward ? 'ready' : path.status === 'blocked' ? 'blocked' : 'unknown';
-        const netSpend = supported && path.netValue
+        const netSpend = (supported || readyNoReward || path.status === 'blocked') && path.netValue
           ? { amountMinor: transaction.amount.amountMinor - path.netValue.amountMinor, currency: transaction.amount.currency }
           : readyNoReward
           ? (path.netValue ? { amountMinor: transaction.amount.amountMinor - path.netValue.amountMinor, currency: transaction.amount.currency } : transaction.amount)
@@ -947,13 +1005,14 @@ export class RewardService {
               .filter((value): value is Money => value !== undefined && value.currency !== transaction.amount.currency);
             for (const cost of costs) {
               const pairMatches = event.fx?.baseCurrency === cost.currency && event.fx.quoteCurrency === transaction.amount.currency;
-              const fresh = pairMatches && Math.abs(Date.parse(evaluatedAt) - Date.parse(event.fx!.capturedAt)) <= (event.fx!.maxAgeSeconds ?? 7 * 24 * 3600) * 1000;
+              const fresh = pairMatches && isFxFresh(event.fx!, evaluatedAt);
               if (fresh) continue;
               const edgeId = event.routeEdgeIds?.length === 1 ? event.routeEdgeIds[0] : undefined;
               const routeKind = route?.layers.some((layer) => layer.kind === 'wallet') ? 'wallet' as const : 'direct_card' as const;
               const request = buildFxResolutionRequest({
                 transaction: { amount: cost, occurredAt: evaluatedAt, mode: 'planned', route: { kind: routeKind } },
                 card, targetCurrency: transaction.amount.currency,
+                cardScheme: card?.network,
                 scope: edgeId ? { kind: 'route_edge', routeId: path.routeId, edgeId } : { kind: 'route', routeId: path.routeId },
                 submission: { tool: 'recommend', field: 'routeFacts' },
               });
@@ -998,9 +1057,19 @@ export class RewardService {
     const pending = candidates.some(candidate => candidate.status === 'unknown' || candidate.status === 'blocked');
     const status: RecommendationIntentResult['status'] = ready ? (actions.length || pending ? 'partial' : 'ready')
       : pending || actions.length ? 'needs_input' : 'no_match';
-    candidates.sort((a, b) => Number(b.status === 'ready') - Number(a.status === 'ready') ||
-      (a.reward?.currency === b.reward?.currency ? (b.reward?.amountMinor ?? 0) - (a.reward?.amountMinor ?? 0) : 0) ||
-      a.id.localeCompare(b.id));
+    candidates.sort((a, b) => {
+      const statusDiff = Number(b.status === 'ready') - Number(a.status === 'ready');
+      if (statusDiff !== 0) return statusDiff;
+      if (a.status === 'ready' && b.status === 'ready' && a.netSpend && b.netSpend && a.netSpend.currency === b.netSpend.currency) {
+        const netSpendDiff = a.netSpend.amountMinor - b.netSpend.amountMinor;
+        if (netSpendDiff !== 0) return netSpendDiff;
+      }
+      if (a.reward?.currency === b.reward?.currency) {
+        const rewardDiff = (b.reward?.amountMinor ?? 0) - (a.reward?.amountMinor ?? 0);
+        if (rewardDiff !== 0) return rewardDiff;
+      }
+      return a.id.localeCompare(b.id);
+    });
     const page = candidates.slice(cursorOffset, cursorOffset + pageSize);
     const hasMore = cursorOffset + page.length < candidates.length;
     const nextCursor = hasMore ? Buffer.from(JSON.stringify({ v: 1, offset: cursorOffset + page.length, evaluatedAt, resultVersion })).toString('base64url') : undefined;
@@ -1052,14 +1121,55 @@ export class RewardService {
         const requiredCurrencies = [edge.fee, edge.markup, edge.foreignTransactionFee, edge.dcc?.selected ? edge.dcc.fee : undefined]
           .filter((value): value is Money => value !== undefined && value.currency !== input.amount.currency)
           .map((value) => value.currency);
-        const fact = routeFacts.filter((candidate) => candidate.routeId === route.id &&
-          (candidate.edgeId === undefined || candidate.edgeId === edge.edgeId) &&
-          requiredCurrencies.includes(candidate.fx.baseCurrency) && candidate.fx.quoteCurrency === input.amount.currency &&
-          (!candidate.fx.cardIdScope || candidate.fx.cardIdScope === card?.id) &&
-          (!candidate.fx.issuerScope || candidate.fx.issuerScope === card?.issuer) &&
-          Math.abs(Date.parse(asOf) - Date.parse(candidate.fx.capturedAt)) <= (candidate.fx.maxAgeSeconds ?? 7 * 24 * 3600) * 1000)
-          .sort((a, b) => Number(Boolean(b.edgeId)) - Number(Boolean(a.edgeId)))[0];
-        return fact ? { ...edge, fx: fact.fx } : edge;
+        if (requiredCurrencies.length === 0) return edge;
+
+        const candidateFacts = routeFacts.filter((candidate) => candidate.routeId === route.id &&
+          (candidate.edgeId === undefined || candidate.edgeId === edge.edgeId));
+        const matchingSnapshots: FxSnapshot[] = [];
+        for (const reqCur of requiredCurrencies) {
+          const edgeContext: FxEvaluationContext = {
+            baseCurrency: reqCur,
+            quoteCurrency: input.amount.currency,
+            conversionOwner: edge.dcc?.selected ? 'merchant_dcc'
+              : edge.transition === 'card_authorization' ? 'card_scheme'
+              : edge.transition === 'account_debit' ? 'issuer'
+              : edge.transition === 'wallet_top_up' || edge.transition === 'wallet_debit' ? 'wallet'
+              : deriveConversionOwner({ route, card }),
+            cardScheme: card?.network,
+            cardId: card?.id,
+            issuer: card?.issuer,
+            routeId: route.id,
+            edgeId: edge.edgeId,
+            asOf,
+            requireFresh: false,
+          };
+          const compatible = candidateFacts.filter((c) => isFxCompatible({ snapshot: c.fx, context: edgeContext }));
+          if (compatible.length > 0) {
+            const asOfTime = Date.parse(asOf);
+            const sorted = [...compatible].sort((a, b) => {
+              const aSpec = (a.edgeId === edge.edgeId || a.fx.edgeIdScope === edge.edgeId) ? 5
+                : (a.fx.routeIdScope === route.id || a.routeId === route.id) ? 4
+                : (a.fx.cardIdScope && a.fx.cardIdScope === card?.id) ? 3
+                : (a.fx.issuerScope && a.fx.issuerScope === card?.issuer) ? 2
+                : 1;
+              const bSpec = (b.edgeId === edge.edgeId || b.fx.edgeIdScope === edge.edgeId) ? 5
+                : (b.fx.routeIdScope === route.id || b.routeId === route.id) ? 4
+                : (b.fx.cardIdScope && b.fx.cardIdScope === card?.id) ? 3
+                : (b.fx.issuerScope && b.fx.issuerScope === card?.issuer) ? 2
+                : 1;
+              if (bSpec !== aSpec) return bSpec - aSpec;
+              const aFresh = isFxFresh(a.fx, asOf);
+              const bFresh = isFxFresh(b.fx, asOf);
+              if (aFresh !== bFresh) return Number(bFresh) - Number(aFresh);
+              const aDist = Math.abs(asOfTime - Date.parse(a.fx.capturedAt));
+              const bDist = Math.abs(asOfTime - Date.parse(b.fx.capturedAt));
+              return aDist - bDist;
+            });
+            matchingSnapshots.push(sorted[0]!.fx);
+          }
+        }
+        const bestFact = matchingSnapshots[0];
+        return bestFact ? { ...edge, fx: bestFact } : edge;
       }) };
     });
     const routes = visibleRoutes.filter((route) => {
@@ -1284,10 +1394,10 @@ export class RewardService {
         if (!fx || fx.baseCurrency !== cost.currency || fx.quoteCurrency !== input.amount.currency) return undefined;
         return Math.floor(cost.amountMinor * fx.ratePpm / 1_000_000);
       };
-      const costValues = events.flatMap((event) => [event.fee, event.markup, event.foreignTransactionFee, event.dcc?.selected ? event.dcc.fee : undefined].filter((value): value is Money => value !== undefined).map((value) => ({ value, converted: convertCost(value, event.fx) })));
-      const feeMismatch = costValues.some((cost) => cost.converted === undefined);
-      const feeTotal = feeMismatch || costValues.length === 0 ? undefined : { amountMinor: costValues.reduce((total, cost) => total + cost.converted!, 0), currency: input.amount.currency };
-      const netValue = feeMismatch || nativeUnitMismatch ? undefined : { amountMinor: cappedReward.amountMinor - (feeTotal?.amountMinor ?? 0), currency: input.amount.currency };
+      const costValues = events.flatMap((event) => [event.fee, event.markup, event.foreignTransactionFee, event.dcc?.selected ? event.dcc.fee : undefined].filter((value): value is Money => value !== undefined).map((value) => ({ value, converted: convertCost(value, event.fx), isStale: event.fx ? !isFxFresh(event.fx, asOf) : false })));
+      const feeMismatch = costValues.some((cost) => cost.converted === undefined || cost.isStale);
+      const feeTotal = costValues.some((cost) => cost.converted === undefined) || costValues.length === 0 ? undefined : { amountMinor: costValues.reduce((total, cost) => total + cost.converted!, 0), currency: input.amount.currency };
+      const netValue = (costValues.some((cost) => cost.converted === undefined) || nativeUnitMismatch) ? undefined : { amountMinor: cappedReward.amountMinor - (feeTotal?.amountMinor ?? 0), currency: input.amount.currency };
       const blocked = stackingAmbiguous || feeMismatch || nativeUnitMismatch;
       const pathEvidence = [...new Set(events.flatMap((event) => event.evidenceIds ?? []))].map((id) => state.evidence.find((candidate) => candidate.id === id)).filter((evidence): evidence is NonNullable<typeof evidence> => evidence !== undefined);
       const evidenceTier = pathEvidence.length === 0 ? 0 : Math.min(...pathEvidence.map((evidence) => evidence.sourceType === 'official' && evidence.reviewState === 'accepted' ? 3 : evidence.sourceType === 'trusted_secondary' && evidence.reviewState === 'accepted' ? 2 : evidence.sourceType === 'community' && evidence.reviewState === 'accepted' ? 1 : 0));
@@ -1390,6 +1500,47 @@ export class RewardService {
       }
       if (transaction.mode === 'actual' && transaction.fx.rateType === 'mid_market') {
         throw new RewardServiceError('NEEDS_REVIEW', 'mid_market rate cannot be used for actual transaction settlement; use card_scheme or cash_selling rate');
+      }
+      if (transaction.mode === 'actual' && !isFxFresh(transaction.fx, transaction.occurredAt)) {
+        const fxResolutionRequest = buildFxResolutionRequest({
+          transaction,
+          rules,
+          card,
+          cardScheme: card?.network,
+        });
+        throw new RewardServiceError('fx_stale', 'FX snapshot is stale for actual transaction settlement; refresh exchange rate', {
+          code: 'fx_stale',
+          path: 'transaction.fx.capturedAt',
+          requiredFacts: ['transaction.fx.capturedAt'],
+          retryAction: 'refresh_fx_snapshot',
+          fxResolutionRequest,
+        });
+      }
+      const actualContext: FxEvaluationContext = {
+        baseCurrency: transaction.amount.currency,
+        quoteCurrency: (transaction.routeContext?.settlementCurrency ?? (card?.country === 'TW' ? 'TWD' : 'TWD')),
+        conversionOwner: deriveConversionOwner({ routeContext: transaction.routeContext, route: transaction.route, card }),
+        cardScheme: card?.network,
+        cardId: card?.id,
+        issuer: card?.issuer,
+        routeId: transaction.routeId,
+        asOf: transaction.occurredAt,
+        requireFresh: true,
+      };
+      if (!isFxCompatible({ snapshot: transaction.fx, context: actualContext })) {
+        const fxResolutionRequest = buildFxResolutionRequest({
+          transaction,
+          rules,
+          card,
+          cardScheme: card?.network,
+        });
+        throw new RewardServiceError('NEEDS_REVIEW', 'supplied FX snapshot is incompatible with transaction clearing context', {
+          code: 'fx_conflict',
+          path: 'transaction.fx',
+          requiredFacts: ['transaction.fx'],
+          retryAction: fxResolutionRequest.retryAction,
+          fxResolutionRequest,
+        });
       }
       appliedFx = freezeAppliedFxRate(transaction.fx, nowIso(), deriveConversionOwner({ routeContext: transaction.routeContext, route: transaction.route, card }));
     }

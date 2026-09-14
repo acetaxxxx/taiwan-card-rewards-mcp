@@ -6,7 +6,7 @@ export type EvaluationStatus = 'ok' | 'no_match' | 'unknown' | 'needs_review' | 
 export type TransactionKind = 'purchase' | 'refund';
 export type TransactionMode = 'planned' | 'actual';
 export type PaymentRouteKind = 'direct_card' | 'wallet' | 'merchant_app';
-export type ConversionOwner = 'merchant' | 'wallet' | 'payment_provider' | 'card_network' | 'issuer' | 'bank' | 'acquirer' | 'unknown';
+export type ConversionOwner = 'merchant' | 'wallet' | 'payment_provider' | 'card_network' | 'issuer' | 'bank' | 'acquirer' | 'card_scheme' | 'merchant_dcc' | 'unknown';
 export type ConversionTiming = 'transaction' | 'clearing' | 'settlement' | 'posting';
 export interface PaymentRoute { kind: PaymentRouteKind; providerId?: string | undefined; appId?: string | undefined; displayName?: string | undefined; }
 export interface PaymentRouteContext {
@@ -374,6 +374,12 @@ export interface FxSnapshot {
   /** Optional scope restrictions for card-specific or issuer-specific quotes. */
   cardIdScope?: string | undefined;
   issuerScope?: string | undefined;
+  rateDirection?: 'base_to_quote' | 'quote_to_base' | undefined;
+  conversionOwner?: ConversionOwner | undefined;
+  conversionTiming?: ConversionTiming | undefined;
+  cardScheme?: string | undefined;
+  routeIdScope?: string | undefined;
+  edgeIdScope?: string | undefined;
 }
 
 export interface AppliedFxRate {
@@ -517,10 +523,27 @@ export interface FxResolutionRequest {
   sourceStatus?: 'known' | 'discovery_required';
   purpose?: 'path_quote' | 'policy_research' | 'reference_estimate';
   rateDirection?: 'base_to_quote';
-  scope?: { kind: 'public_reference' | 'card' | 'issuer' | 'route' | 'route_edge'; cardId?: string; issuer?: string; routeId?: string; edgeId?: string };
+  cardScheme?: string | undefined;
+  scope?: { kind: 'public_reference' | 'card' | 'issuer' | 'route' | 'route_edge' | 'card_scheme'; cardId?: string; issuer?: string; routeId?: string; edgeId?: string; cardScheme?: string };
   freshness?: { maxAgeSeconds?: number; targetTime?: string };
   requiredFields?: readonly string[];
   submission?: { tool: string; field: string };
+}
+
+export interface FxEvaluationContext {
+  baseCurrency: Currency;
+  quoteCurrency: Currency;
+  rateDirection?: 'base_to_quote' | 'quote_to_base' | undefined;
+  conversionOwner?: ConversionOwner | 'card_scheme' | 'issuer' | 'wallet' | 'merchant_dcc' | 'unknown' | undefined;
+  conversionTiming?: ConversionTiming | undefined;
+  rateType?: FxRateType | undefined;
+  cardScheme?: string | undefined;
+  cardId?: string | undefined;
+  issuer?: string | undefined;
+  routeId?: string | undefined;
+  edgeId?: string | undefined;
+  asOf?: string | undefined;
+  requireFresh?: boolean | undefined;
 }
 
 

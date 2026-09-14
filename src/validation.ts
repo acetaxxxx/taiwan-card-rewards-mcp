@@ -77,9 +77,18 @@ export function validateRewardValuationSnapshot(value: unknown): RewardValuation
 
 export function validateFxSnapshot(value: unknown, name: string): FxSnapshot {
   const item = object(value, name);
-  keys(item, ['id', 'baseCurrency', 'quoteCurrency', 'ratePpm', 'capturedAt', 'maxAgeSeconds', 'provider', 'rateType', 'sourceUrl', 'contentHash', 'cardIdScope', 'issuerScope'], name);
+  keys(item, ['id', 'baseCurrency', 'quoteCurrency', 'ratePpm', 'capturedAt', 'maxAgeSeconds', 'provider', 'rateType', 'sourceUrl', 'contentHash', 'cardIdScope', 'issuerScope', 'rateDirection', 'conversionOwner', 'conversionTiming', 'cardScheme', 'routeIdScope', 'edgeIdScope'], name);
   const rateType = requiredString(item.rateType, `${name}.rateType`);
   if (!['cash_selling', 'spot_selling', 'mid_market', 'card_scheme'].includes(rateType)) throw new RewardServiceError('INVALID_INPUT', `${name}.rateType is invalid`);
+  if (item.rateDirection !== undefined && !['base_to_quote', 'quote_to_base'].includes(String(item.rateDirection))) {
+    throw new RewardServiceError('INVALID_INPUT', `${name}.rateDirection is invalid`);
+  }
+  if (item.conversionOwner !== undefined && !['merchant', 'wallet', 'payment_provider', 'card_network', 'issuer', 'bank', 'acquirer', 'card_scheme', 'merchant_dcc', 'unknown'].includes(String(item.conversionOwner))) {
+    throw new RewardServiceError('INVALID_INPUT', `${name}.conversionOwner is invalid`);
+  }
+  if (item.conversionTiming !== undefined && !['transaction', 'clearing', 'settlement', 'posting'].includes(String(item.conversionTiming))) {
+    throw new RewardServiceError('INVALID_INPUT', `${name}.conversionTiming is invalid`);
+  }
   return {
     id: requiredString(item.id, `${name}.id`, true),
     baseCurrency: requiredString(item.baseCurrency, `${name}.baseCurrency`, true).toUpperCase(),
@@ -93,6 +102,12 @@ export function validateFxSnapshot(value: unknown, name: string): FxSnapshot {
     ...(item.contentHash === undefined ? {} : { contentHash: requiredString(item.contentHash, `${name}.contentHash`) }),
     ...(item.cardIdScope === undefined ? {} : { cardIdScope: requiredString(item.cardIdScope, `${name}.cardIdScope`, true) }),
     ...(item.issuerScope === undefined ? {} : { issuerScope: requiredString(item.issuerScope, `${name}.issuerScope`) }),
+    ...(item.rateDirection === undefined ? {} : { rateDirection: item.rateDirection as FxSnapshot['rateDirection'] }),
+    ...(item.conversionOwner === undefined ? {} : { conversionOwner: item.conversionOwner as FxSnapshot['conversionOwner'] }),
+    ...(item.conversionTiming === undefined ? {} : { conversionTiming: item.conversionTiming as FxSnapshot['conversionTiming'] }),
+    ...(item.cardScheme === undefined ? {} : { cardScheme: requiredString(item.cardScheme, `${name}.cardScheme`, true) }),
+    ...(item.routeIdScope === undefined ? {} : { routeIdScope: requiredString(item.routeIdScope, `${name}.routeIdScope`, true) }),
+    ...(item.edgeIdScope === undefined ? {} : { edgeIdScope: requiredString(item.edgeIdScope, `${name}.edgeIdScope`, true) }),
   };
 }
 export function validatePaymentCapability(value: unknown): PaymentCapabilityRecord {
