@@ -1,12 +1,12 @@
 ---
 name: taiwan-card-rewards-assistant
-description: 協助試算、比較與記錄台灣信用卡回饋；路由至 canonical 19-tool MCP contract。觸發分支：卡片與多層路徑推薦、公共支付能力、官方研究與證據、事件回饋/退款、錢包與外幣、權益狀態或帳本管理。
+description: 協助試算、比較與記錄台灣信用卡回饋；路由至 canonical 20-tool MCP contract。觸發分支：卡片與多層路徑推薦、公共支付能力、官方研究與證據、事件回饋/退款、錢包與外幣、權益狀態或帳本管理。
 ---
 
 # Taiwan Card Rewards Assistant
 
 這是 Agent 直接載入的入口。詳細 JSON schema、錯誤與合法 payload 在
-[`references/mcp-tools.md`](references/mcp-tools.md)；不要從舊文章推導欄位。
+[`references/mcp-tools.md`](references/mcp-tools.md)；不要從舊文章推導欄位。對於 Gemini 3.8 Flash Medium 等低推理模型，遵循 [Gemini Flash 指引](../gemini-flash-guidance.md) 的三層架構與最小合法 payload。
 
 ## 先守住的邊界
 
@@ -29,14 +29,14 @@ description: 協助試算、比較與記錄台灣信用卡回饋；路由至 can
 | event-scoped reward | `record_event_reward`；退款用 `reverse_event_reward` | exactly one event rule 或 `funded_by` chain；server 重算 eligibility；明確 stacking/cap 才可記帳 |
 | Gold/會員/自動扣繳 | `get_user_benefit_status`，用 authoritative evidence 建立 fact | Gold 是 eligibility fact，不是 payment-path node；evidence/valuation/FX/fee 不完整就 recovery 或 blocked |
 
-商家消費意圖以 [`workflows/recommendation-intent.md`](workflows/recommendation-intent.md) 為準，required actions 的逐項處理見 [`workflows/preflight-and-required-actions.md`](workflows/preflight-and-required-actions.md)；支付 capability 生成與 ownership 以 [ADR 0009](../../adr/0009-public-payment-capability-route-generation.md) 為準。schema 與 19-tool 清單以
+商家消費意圖以 [`workflows/recommendation-intent.md`](workflows/recommendation-intent.md) 為準，required actions 的逐項處理見 [`workflows/preflight-and-required-actions.md`](workflows/preflight-and-required-actions.md)；支付 capability 生成與 ownership 以 [ADR 0009](../../adr/0009-public-payment-capability-route-generation.md) 為準。schema 與 20-tool 清單以
 [`references/mcp-tools.md`](references/mcp-tools.md) 為準。
 
 私有 `user_confirmed` 優惠、`occurredAt`/`recordedAt`、以及由 Offer Route Selector 驅動的候選生成，以 [ADR 0010](../../adr/0010-user-confirmed-offers-transaction-chronology-and-offer-driven-routes.md) 為目標語意；在對應 public contract 完成前，不得假設新增欄位或工具已可呼叫。
 
 ## 三個必讀入口
 
-- [`references/mcp-tools.md`](references/mcp-tools.md)：canonical 19-tool contract、closed input union、event/route/capability schema。
+- [`references/mcp-tools.md`](references/mcp-tools.md)：canonical 20-tool contract、closed input union、event/route/capability schema。
 - [`references/mcp-tool-call-playbook.md`](references/mcp-tool-call-playbook.md)：實際 MCP 呼叫順序與合法 JSON 骨架。
 - [`workflows/payment-route-and-fx.md`](workflows/payment-route-and-fx.md) 與 [`workflows/event-reward-and-wallet-eligibility.md`](workflows/event-reward-and-wallet-eligibility.md)：多層路徑、planned events、跨事件資格與 fail-closed。
 

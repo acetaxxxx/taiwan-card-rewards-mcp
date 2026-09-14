@@ -86,6 +86,7 @@ response already carries every diagnostic an Agent needs.
 | `list_payment_capabilities` | Read-only | List public payment capabilities available for planned route generation. | `UNAUTHENTICATED`, `STORE_UNAVAILABLE` |
 | `register_payment_account` | Mutating | Register a wallet or linked bank account identity with evidence; never send credentials or account numbers. | `INVALID_CONFIRMATION`, `IDEMPOTENCY_CONFLICT`, `SENSITIVE_FIELD_FORBIDDEN` |
 | `list_payment_accounts` | Read-only | List user-scoped account identities before constructing payment routes. | `INVALID_INPUT`, `STORE_UNAVAILABLE` |
+| `list_transactions` | Read-only | List recorded actual transactions within an optional time range, sorted chronologically with stable pagination and summary/detail projections. | `INVALID_INPUT`, `PAYLOAD_TOO_LARGE`, `STORE_UNAVAILABLE` |
 | `search_active_offers` | Read-only | Search current active offers and return bounded canonical merchant/offer records; it never applies a reward. | `MISSING_REQUIRED_FACT`, `NOT_FOUND`, `STALE` |
 | `resolve_merchant` | Read-only | Validate an Agent-provided canonical merchant ID/name and return bounded merchant facts; it never interprets aliases or applies a reward. | `MERCHANT_AMBIGUOUS`, `MISSING_REQUIRED_FACT`, `NOT_FOUND` |
 | `record_transaction` | Mutating | Record an actual purchase (with `idempotencyKey`) or linked refund, updating durable cap usage. | `IDEMPOTENCY_CONFLICT`, `INVALID_REFUND`, `INSUFFICIENT_FACTS`, `NEEDS_REVIEW` |
@@ -98,6 +99,8 @@ response already carries every diagnostic an Agent needs.
 ---
 
 ## 4. Workflow Guidelines for AI Agents
+
+For lightweight or lower-reasoning models such as Gemini 3.8 Flash Medium, refer to the high-density [Gemini Flash Guidance](gemini-flash-guidance.md) for core invariants, high-risk decision tables, and minimal payloads.
 
 ### A. Card Management & Discovery
 1. For a recommendation, call `recommend` directly with the merchant-first intent. `list_cards` is for management, explicit inventory requests, or onboarding checks; it is not a normal recommendation prerequisite.

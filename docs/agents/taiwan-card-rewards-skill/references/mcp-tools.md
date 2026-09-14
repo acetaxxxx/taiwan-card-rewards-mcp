@@ -1,8 +1,8 @@
 # Canonical MCP tools
 
-這份 reference 對應目前 source contract 的公開 surface：19 個工具。工具名稱、closed input、enum 與 fail-closed errors 以 `src/mcp-contract.ts`、`src/validation.ts` 和 `src/cli.ts` 為準；版本 tag 是發佈管理資訊，不是 public tool name。
+這份 reference 對應目前 source contract 的公開 surface：20 個工具。工具名稱、closed input、enum 與 fail-closed errors 以 `src/mcp-contract.ts`、`src/validation.ts` 和 `src/cli.ts` 為準；版本 tag 是發佈管理資訊，不是 public tool name。
 
-## 19-tool matrix
+## 20-tool matrix
 
 | Tool | Read/write | 用途 |
 |---|---|---|
@@ -18,6 +18,7 @@
 | `register_payment_account` | write | 登記 wallet/linked bank account 的 opaque identity 與 evidence |
 | `list_payment_accounts` | read | 列出可供 route 引用的 account identity |
 | `record_transaction` | write | 寫入 actual purchase 或 linked refund、更新 cap usage |
+| `list_transactions` | read | 查詢歷史實際交易清單，支援 occurred_at 或 recorded_at 雙時間基準與分頁投影 |
 | `record_event_reward` | write | server 重新判斷 event-local rule 或 explicit `funded_by` chain 後記帳 |
 | `reverse_event_reward` | write | 依 explicit refund/reversal relation 反轉 event reward |
 | `remaining_caps` | read | 查詢 actual usage 後的 cap 餘額 |
