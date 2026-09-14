@@ -828,8 +828,9 @@ export function rankCards(
       const aGross = 'grossReward' in a ? a.grossReward?.amountMinor : undefined;
       const bGross = 'grossReward' in b ? b.grossReward?.amountMinor : undefined;
       const grossDifference = (bGross ?? -1) - (aGross ?? -1);
-      if (grossDifference !== 0) return grossDifference;
-      return a.cardId < b.cardId ? -1 : a.cardId > b.cardId ? 1 : 0;
+      const aId = a.cardId ?? '';
+      const bId = b.cardId ?? '';
+      return aId < bId ? -1 : aId > bId ? 1 : 0;
     })
     .slice(0, limit);
   return entries.map((entry, index) => ({ ...entry, rank: index + 1 }));

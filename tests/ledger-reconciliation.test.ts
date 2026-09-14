@@ -46,7 +46,7 @@ describe('purchase and refund reconciliation', () => {
     } finally { store.close(); rmSync(dir, { recursive: true, force: true }); }
   });
 
-  it('does not persist a transaction when reward evaluation is not ok', () => {
+  it('records transaction even when reward evaluation is unknown (non-blocking)', () => {
     const dir = mkdtempSync(join(tmpdir(), 'card-rewards-ledger-fail-closed-'));
     const store = new FileStore({ dataDir: dir });
     try {
@@ -54,8 +54,9 @@ describe('purchase and refund reconciliation', () => {
       service.registerCard({ id: 'c1', issuer: 'Bank', productName: 'Card' });
       service.upsertOffer(source, { ...rule, match: { channels: ['online'] } });
 
-      expect(() => service.recordTransaction(purchase('missing-channel', 10000))).toThrow(/INSUFFICIENT_FACTS|NEEDS_REVIEW/);
-      expect(store.read().transactions).toHaveLength(0);
+      const recorded = service.recordTransaction(purchase('missing-channel', 10000));
+      expect(recorded.status).toBe('unknown');
+      expect(store.read().transactions).toHaveLength(1);
     } finally { store.close(); rmSync(dir, { recursive: true, force: true }); }
   });
 });

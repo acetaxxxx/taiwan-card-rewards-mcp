@@ -1,3 +1,5 @@
+import type { PageInfo } from './projections.js';
+
 export type Currency = string;
 export type FxRateType = 'cash_selling' | 'spot_selling' | 'mid_market' | 'card_scheme';
 export type EvaluationStatus = 'ok' | 'no_match' | 'unknown' | 'needs_review' | 'stale';
@@ -411,7 +413,8 @@ export interface CycleWindow {
 export interface TransactionTuple {
   idempotencyKey?: string | undefined;
   routeId?: string | undefined;
-  cardId: string;
+  cardId?: string | undefined;
+  funding?: FundingInstrument | undefined;
   kind: TransactionKind;
   mode: TransactionMode;
   merchant?: string | undefined;
@@ -420,6 +423,7 @@ export interface TransactionTuple {
   channel?: string | undefined;
   paymentMethod?: string | undefined;
   occurredAt: string;
+  recordedAt?: string | undefined;
   amount: Money;
   fx?: FxSnapshot | undefined;
   refundOfId?: string | undefined;
@@ -431,7 +435,7 @@ export interface TransactionTuple {
 
 export interface RewardBreakdown {
   status: EvaluationStatus;
-  cardId: string;
+  cardId?: string | undefined;
   transaction: TransactionTuple;
   ruleId?: string | undefined;
   ruleVersion?: string | undefined;
@@ -443,6 +447,51 @@ export interface RewardBreakdown {
   unknownReasons: string[];
   diagnostics?: readonly Diagnostic[] | undefined;
   components?: readonly RewardComponent[] | undefined;
+}
+
+export type TransactionTimeBasis = 'occurred_at' | 'recorded_at';
+
+export interface ListTransactionsOptions {
+  startDate?: string | undefined;
+  endDate?: string | undefined;
+  timeBasis?: TransactionTimeBasis | undefined;
+  fundingKind?: 'credit_card' | 'account' | 'cash' | undefined;
+  cardId?: string | undefined;
+  limit?: number | undefined;
+  page?: number | undefined;
+  projection?: 'summary' | 'detail' | undefined;
+}
+
+export interface TransactionSummaryItem {
+  idempotencyKey?: string | undefined;
+  occurredAt: string;
+  recordedAt?: string | undefined;
+  kind: TransactionKind;
+  amount: Money;
+  funding: FundingInstrument;
+  cardId?: string | undefined;
+  merchant?: string | undefined;
+  channel?: string | undefined;
+  rewardStatus?: EvaluationStatus | undefined;
+  rewardAmount?: Money | undefined;
+  refundOfId?: string | undefined;
+}
+
+export interface TransactionDetailItem {
+  transaction: TransactionTuple;
+  reward: RewardBreakdown;
+  appliedFx?: AppliedFxRate | undefined;
+  capUsages?: readonly ComponentCapUsage[] | undefined;
+  components?: readonly RewardComponentRecord[] | undefined;
+  route?: PaymentRoute | PaymentRouteRecord | undefined;
+}
+
+export type TransactionListItem = TransactionSummaryItem | TransactionDetailItem;
+
+export interface ListTransactionsResult {
+  transactions: readonly TransactionListItem[];
+  items: readonly TransactionListItem[];
+  pageInfo: PageInfo;
 }
 
 export interface Diagnostic {

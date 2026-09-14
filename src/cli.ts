@@ -121,6 +121,7 @@ async function callTool(service: RewardService, params: Record<string, unknown>)
     case 'register_payment_account': return service.upsertPaymentAccount(args.account);
     case 'list_payment_accounts': return maybePaged([...service.listPaymentAccounts()], (item) => String((item as { id: string }).id), 50);
     case 'record_transaction': return service.recordTransaction(validateTransaction(args.transaction));
+    case 'list_transactions': return service.listTransactions(args);
     case 'record_event_reward': return service.recordValidatedEventReward(args);
     case 'reverse_event_reward': return service.reverseEventReward(args);
     case 'remaining_caps': return maybePaged(service.remainingCaps(String(args.cardId), typeof args.asOf === 'string' ? args.asOf : undefined), (item) => String((item as { usageKey: string }).usageKey));
