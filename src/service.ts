@@ -421,8 +421,9 @@ export class RewardService {
       : undefined;
     const offers = state.rules.filter((rule) => {
       if (rule.status !== 'active' || (input.cardId && rule.cardId !== input.cardId)) return false;
+      if (rule.ownerUser !== undefined && rule.ownerUser !== this.metadataUser) return false;
       const source = state.snapshots.find((snapshot) => snapshot.id === rule.sourceSnapshotId);
-      if (!source?.verified || Date.parse(rule.validFrom) > Date.parse(asOf) || (rule.validTo && Date.parse(rule.validTo) < Date.parse(asOf))) return false;
+      if (!source || (rule.trustBasis !== 'user_confirmed' && !source.verified) || Date.parse(rule.validFrom) > Date.parse(asOf) || (rule.validTo && Date.parse(rule.validTo) < Date.parse(asOf))) return false;
       if (input.channel && rule.match.channels?.length && !rule.match.channels.includes(input.channel)) return false;
       if (input.country && rule.match.countries?.length && !rule.match.countries.includes(input.country)) return false;
       if (input.mcc && rule.match.mccs?.length && !rule.match.mccs.includes(input.mcc)) return false;
@@ -521,16 +522,31 @@ export class RewardService {
     rule = validateRule(rule);
     if (merchantDraft?.provenance.sourceSnapshotId !== undefined && merchantDraft.provenance.sourceSnapshotId !== snapshot.id) throw new RewardServiceError('INVALID_OFFER', 'merchant provenance must reference the offer source snapshot');
     const incomingPools = (capPools ?? []).map((pool) => validateCapPool(pool));
+    if (snapshot.sourceType === 'user_input' && !this.metadataUser) throw new RewardServiceError('UNAUTHENTICATED', 'user-input offers require an authenticated user');
+    if (snapshot.sourceType === 'user_input' && this.metadataUser) {
+      rule = { ...rule, ownerUser: this.metadataUser, trustBasis: rule.trustBasis ?? 'user_confirmed' };
+      snapshot = { ...snapshot, ownerUser: this.metadataUser };
+    }
     const conf = confirmation
       ? validateConfirmation(confirmation)
       : (rule.confirmation ? validateConfirmation(rule.confirmation) : undefined);
 
+    if (snapshot.sourceType === 'user_input' && rule.status === 'active' && !conf) {
+      throw new RewardServiceError('INVALID_CONFIRMATION', 'user_input offers require explicit user confirmation before activation');
+    }
+
     if (conf) {
-      const sourceRef = conf.sourceReference.toLowerCase();
-      const snapshotUrl = snapshot.url.toLowerCase();
+      const trustBasis = conf.trustBasis ?? (snapshot.sourceType === 'user_input' ? 'user_confirmed' : 'official_verified');
+      if (trustBasis === 'user_confirmed') {
+        if (!this.metadataUser) throw new RewardServiceError('UNAUTHENTICATED', 'user-confirmed offers require an authenticated user');
+        if (snapshot.sourceType !== 'user_input') throw new RewardServiceError('INVALID_CONFIRMATION', 'user-confirmed offers require a user_input snapshot');
+        if (conf.confirmedBy !== this.metadataUser) throw new RewardServiceError('INVALID_CONFIRMATION', 'confirmation owner must match the authenticated user');
+      }
+      const sourceRef = conf.sourceReference?.toLowerCase();
+      const snapshotUrl = snapshot.url?.toLowerCase();
       const provUrl = snapshot.provenance?.sourceUrl?.toLowerCase();
       const provDesc = snapshot.provenance?.sourceDescription?.toLowerCase();
-      const matchesSource =
+      const matchesSource = !sourceRef || !snapshotUrl ? trustBasis === 'user_confirmed' :
         sourceRef === snapshotUrl ||
         snapshotUrl.includes(sourceRef) ||
         sourceRef.includes(snapshotUrl) ||
@@ -545,11 +561,12 @@ export class RewardService {
       ) {
         throw new RewardServiceError('INVALID_CONFIRMATION', 'confirmation rewardUnit does not match rule settlement currency');
       }
-      rule = { ...rule, status: 'active', confirmation: conf };
-      snapshot = { ...snapshot, verified: true };
+      rule = { ...rule, status: 'active', trustBasis, confirmation: conf, ...(trustBasis === 'user_confirmed' && this.metadataUser ? { ownerUser: this.metadataUser } : {}) };
+      if (trustBasis === 'user_confirmed' && this.metadataUser) snapshot = { ...snapshot, ownerUser: this.metadataUser };
+      if (trustBasis === 'official_verified') snapshot = { ...snapshot, verified: true };
     }
 
-    if (!snapshot.id || !snapshot.url || !snapshot.contentHash || !snapshot.parserVersion) throw new RewardServiceError('INVALID_OFFER', 'source snapshot metadata is incomplete');
+    if (!snapshot.id || !snapshot.contentHash || !snapshot.parserVersion || (snapshot.sourceType !== 'user_input' && !snapshot.url)) throw new RewardServiceError('INVALID_OFFER', 'source snapshot metadata is incomplete');
     if (rule.sourceSnapshotId !== snapshot.id || !rule.id || (!rule.cardId && (!rule.componentKind || rule.componentKind === 'card_issuer'))) throw new RewardServiceError('INVALID_OFFER', 'rule must reference its source snapshot and a card or non-card component');
     let onboardedMerchant: MerchantIdentity | undefined;
     let storedRule = rule;
@@ -572,6 +589,7 @@ export class RewardService {
       const existingSnapshot = state.snapshots.find((item) => item.id === snapshot.id);
       if (existingSnapshot) {
         if (
+          (existingSnapshot.ownerUser ?? undefined) !== (snapshot.ownerUser ?? undefined) ||
           existingSnapshot.url !== snapshot.url ||
           existingSnapshot.contentHash !== snapshot.contentHash ||
           existingSnapshot.parserVersion !== snapshot.parserVersion ||
@@ -580,10 +598,13 @@ export class RewardService {
           throw new RewardServiceError('INVALID_OFFER', 'cannot modify immutable source snapshot');
         }
       }
-      const existingRule = state.rules.find((item) => item.id === storedRule.id && item.version === storedRule.version);
+      const existingRule = state.rules.find((item) => item.id === storedRule.id && item.version === storedRule.version && (item.ownerUser ?? undefined) === (storedRule.ownerUser ?? undefined));
+      if (storedRule.ownerUser !== undefined && !existingRule && storedRule.supersedesRuleId === undefined && state.rules.some((item) => item.id === storedRule.id && item.ownerUser === storedRule.ownerUser && item.version !== storedRule.version)) {
+        throw new RewardServiceError('INVALID_OFFER', 'private rule version changes must reference supersedesRuleId');
+      }
       if (existingRule) {
-        const { confirmation: c1, status: s1, ...r1 } = existingRule;
-        const { confirmation: c2, status: s2, ...r2 } = storedRule;
+        const { confirmation: c1, status: s1, trustBasis: t1, ownerUser: o1, ...r1 } = existingRule;
+        const { confirmation: c2, status: s2, trustBasis: t2, ownerUser: o2, ...r2 } = storedRule;
         if (JSON.stringify(r1) !== JSON.stringify(r2)) {
           throw new RewardServiceError('INVALID_OFFER', 'cannot modify immutable rule version');
         }
@@ -591,9 +612,16 @@ export class RewardService {
       const snapshotIndex = state.snapshots.findIndex((item) => item.id === snapshot.id);
       if (snapshotIndex >= 0) state.snapshots[snapshotIndex] = snapshot;
       else state.snapshots.push(snapshot);
-      const ruleIndex = state.rules.findIndex((item) => item.id === storedRule.id);
+      const ruleIndex = state.rules.findIndex((item) => item.id === storedRule.id && item.version === storedRule.version && (item.ownerUser ?? undefined) === (storedRule.ownerUser ?? undefined));
       if (ruleIndex >= 0) state.rules[ruleIndex] = storedRule;
-      else state.rules.push(storedRule);
+      else {
+        if (storedRule.supersedesRuleId !== undefined) {
+          const predecessorIndex = state.rules.findIndex((item) => item.id === storedRule.supersedesRuleId && item.ownerUser === storedRule.ownerUser && item.status === 'active');
+          if (predecessorIndex < 0) throw new RewardServiceError('INVALID_OFFER', 'supersedesRuleId must reference an active rule owned by the same user');
+          state.rules[predecessorIndex] = { ...state.rules[predecessorIndex]!, status: 'superseded' };
+        }
+        state.rules.push(storedRule);
+      }
       if (onboardedMerchant && !state.merchants.some((item) => item.canonicalId === onboardedMerchant!.canonicalId)) state.merchants.push(onboardedMerchant);
     });
     return { snapshot, rule: storedRule, ...(onboardedMerchant ? { merchant: onboardedMerchant } : {}) };
@@ -605,6 +633,7 @@ export class RewardService {
     if (!rule) throw new RewardServiceError('RULE_NOT_FOUND', `rule ${ruleId} not found`);
     const snapshot = state.snapshots.find((item) => item.id === rule.sourceSnapshotId);
     if (!snapshot) throw new RewardServiceError('INVALID_CONFIRMATION', 'missing source snapshot for candidate rule');
+    if (rule.ownerUser !== undefined && rule.ownerUser !== this.metadataUser) throw new RewardServiceError('RULE_NOT_FOUND', `rule ${ruleId} not found`);
     const result = this.upsertOffer(snapshot, rule, confirmation);
     return result.rule;
   }
@@ -718,13 +747,23 @@ export class RewardService {
     const routes = [...registeredRoutes, ...generatedRoutes];
     const applicable = (cardId?: string, routeId?: string) => state.rules.filter(rule =>
       rule.status !== 'superseded' &&
+      (rule.ownerUser === undefined || rule.ownerUser === this.metadataUser) &&
       (rule.cardId === undefined || rule.cardId === cardId) &&
-      (rule.routeId === undefined || rule.routeId === routeId));
+      (rule.routeId === undefined || rule.routeId === routeId)).filter((rule, index, rules) => {
+        if (!rule.familyId) return true;
+        const family = rules.filter(candidate => candidate.familyId === rule.familyId && candidate.status === 'active');
+        const latest = family.at(-1);
+        return latest?.id === rule.id && latest.version === rule.version;
+      });
     const projectRule = (rule: OfferRuleVersion, result?: RewardBreakdown): IntentCandidate['matchedRules'][number] => ({
       ruleId: rule.id, ruleVersion: rule.version, component: rule.componentKind ?? 'card_issuer',
       sourceSnapshotId: rule.sourceSnapshotId,
       ...(state.snapshots.find(source => source.id === rule.sourceSnapshotId)?.url
         ? { sourceUrl: state.snapshots.find(source => source.id === rule.sourceSnapshotId)!.url } : {}),
+      ...(rule.trustBasis ? { trustBasis: rule.trustBasis } : {}),
+      ...(rule.ownerUser ? { ownerUser: rule.ownerUser } : {}),
+      ...(rule.confirmation?.confirmedAt ? { confirmedAt: rule.confirmation.confirmedAt } : {}),
+      ...(state.snapshots.find(source => source.id === rule.sourceSnapshotId)?.provenance?.sourceDescription ? { sourceSummary: state.snapshots.find(source => source.id === rule.sourceSnapshotId)!.provenance!.sourceDescription } : {}),
       validFrom: rule.validFrom, ...(rule.validTo ? { validTo: rule.validTo } : {}),
       conditions: rule.match, rewardTerms: rule.reward,
       ...(rule.combination ? { combination: rule.combination } : {}),

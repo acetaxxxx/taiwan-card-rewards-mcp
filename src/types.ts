@@ -224,7 +224,12 @@ export interface MerchantResolution {
 export interface OfferConfirmation {
   confirmedAt: string;
   confirmedBy: string;
-  sourceReference: string;
+  /** Official source reference when one exists; user confirmations may omit it. */
+  sourceReference?: string | undefined;
+  /** The authority that allowed this rule version to become active. */
+  trustBasis?: 'official_verified' | 'user_confirmed' | undefined;
+  /** Stable fingerprint of the terms the user reviewed and accepted. */
+  termsFingerprint?: string | undefined;
   offerPeriod: { validFrom: string; validTo?: string | undefined };
   rewardUnit: string;
   rewardConditionsSummary?: string | undefined;
@@ -233,7 +238,9 @@ export interface OfferConfirmation {
 
 export interface OfferSourceSnapshot {
   id: string;
-  url: string;
+  ownerUser?: string | undefined;
+  /** Public URL for official snapshots; omitted for a user attestation. */
+  url?: string | undefined;
   fetchedAt: string;
   contentHash: string;
   parserVersion: string;
@@ -294,6 +301,13 @@ export interface OfferRuleVersion {
   cardId?: string;
   version: string;
   sourceSnapshotId: string;
+  /** Public rules are unscoped; user-confirmed rules belong to one owner. */
+  ownerUser?: string | undefined;
+  trustBasis?: 'official_verified' | 'user_confirmed' | undefined;
+  /** Stable family key used to select one version without double counting. */
+  familyId?: string | undefined;
+  supersedesRuleId?: string | undefined;
+  supersessionReason?: 'user_correction' | 'user_revocation' | 'official_refresh' | undefined;
   status: 'candidate' | 'active' | 'stale' | 'superseded' | 'needs_review' | 'unknown';
   validFrom: string;
   validTo?: string | undefined;
@@ -625,7 +639,11 @@ export interface IntentRule {
   ruleVersion: string;
   component: RewardComponentKind;
   sourceSnapshotId: string;
-  sourceUrl?: string;
+  sourceUrl?: string | undefined;
+  trustBasis?: 'official_verified' | 'user_confirmed' | undefined;
+  ownerUser?: string | undefined;
+  confirmedAt?: string | undefined;
+  sourceSummary?: string | undefined;
   validFrom: string;
   validTo?: string;
   conditions: RuleMatch;

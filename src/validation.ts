@@ -281,11 +281,16 @@ export function validateProvenance(value: unknown): OfferProvenance {
 
 export function validateSnapshot(value: unknown): OfferSourceSnapshot {
   const item = object(value, 'snapshot');
-  keys(item, ['id', 'url', 'fetchedAt', 'contentHash', 'parserVersion', 'validFrom', 'validTo', 'excerpt', 'verified', 'sourceType', 'provenance'], 'snapshot');
-  const url = requiredString(item.url, 'snapshot.url');
-  let parsed: URL;
-  try { parsed = new URL(url); } catch { throw new RewardServiceError('INVALID_INPUT', 'snapshot.url must be a URL'); }
-  if (!['https:', 'http:'].includes(parsed.protocol) || parsed.username || parsed.password) throw new RewardServiceError('INVALID_INPUT', 'snapshot.url must be a public origin URL without credentials');
+  keys(item, ['id', 'ownerUser', 'url', 'fetchedAt', 'contentHash', 'parserVersion', 'validFrom', 'validTo', 'excerpt', 'verified', 'sourceType', 'provenance'], 'snapshot');
+  const sourceType = item.sourceType === undefined ? 'official' : requiredString(item.sourceType, 'snapshot.sourceType');
+  if (sourceType !== 'official' && sourceType !== 'user_input') throw new RewardServiceError('INVALID_INPUT', 'snapshot.sourceType is invalid');
+  const url = item.url === undefined ? undefined : requiredString(item.url, 'snapshot.url');
+  if (sourceType === 'official' && url === undefined) throw new RewardServiceError('INVALID_INPUT', 'official snapshot.url is required');
+  if (url !== undefined) {
+    let parsed: URL;
+    try { parsed = new URL(url); } catch { throw new RewardServiceError('INVALID_INPUT', 'snapshot.url must be a URL'); }
+    if (!['https:', 'http:'].includes(parsed.protocol) || parsed.username || parsed.password) throw new RewardServiceError('INVALID_INPUT', 'snapshot.url must be a public origin URL without credentials');
+  }
   const fetchedAt = requiredString(item.fetchedAt, 'snapshot.fetchedAt');
   if (!Number.isFinite(Date.parse(fetchedAt)) || !fetchedAt.includes('T')) throw new RewardServiceError('INVALID_INPUT', 'snapshot.fetchedAt must be an ISO date-time');
   const validFrom = optionalString(item.validFrom, 'snapshot.validFrom');
@@ -293,16 +298,13 @@ export function validateSnapshot(value: unknown): OfferSourceSnapshot {
   if (validFrom && (!Number.isFinite(Date.parse(validFrom)) || !validFrom.includes('T'))) throw new RewardServiceError('INVALID_INPUT', 'snapshot.validFrom must be an ISO date-time');
   if (validTo && (!Number.isFinite(Date.parse(validTo)) || !validTo.includes('T'))) throw new RewardServiceError('INVALID_INPUT', 'snapshot.validTo must be an ISO date-time');
   if (item.verified !== undefined && typeof item.verified !== 'boolean') throw new RewardServiceError('INVALID_INPUT', 'snapshot.verified must be boolean');
-  let sourceType: OfferSourceSnapshot['sourceType'];
-  if (item.sourceType !== undefined) {
-    const st = requiredString(item.sourceType, 'snapshot.sourceType');
-    if (st !== 'official' && st !== 'user_input') throw new RewardServiceError('INVALID_INPUT', 'snapshot.sourceType is invalid');
-    sourceType = st;
-  }
   const provenance = item.provenance !== undefined ? validateProvenance(item.provenance) : undefined;
+  if (sourceType === 'user_input' && provenance === undefined) throw new RewardServiceError('INVALID_INPUT', 'user_input snapshot requires provenance');
+  if (sourceType === 'user_input' && item.verified === true) throw new RewardServiceError('INVALID_INPUT', 'user_input snapshot cannot be verified as official');
   return {
     id: requiredString(item.id, 'snapshot.id', true),
-    url,
+    ...(item.ownerUser === undefined ? {} : { ownerUser: requiredString(item.ownerUser, 'snapshot.ownerUser', true) }),
+    ...(url === undefined ? {} : { url }),
     fetchedAt,
     contentHash: requiredString(item.contentHash, 'snapshot.contentHash'),
     parserVersion: requiredString(item.parserVersion, 'snapshot.parserVersion'),
@@ -310,7 +312,7 @@ export function validateSnapshot(value: unknown): OfferSourceSnapshot {
     ...(validTo ? { validTo } : {}),
     ...(item.excerpt === undefined ? {} : { excerpt: requiredString(item.excerpt, 'snapshot.excerpt') }),
     ...(item.verified === undefined ? {} : { verified: item.verified }),
-    ...(sourceType ? { sourceType } : {}),
+    sourceType,
     ...(provenance ? { provenance } : {}),
   };
 }
@@ -365,7 +367,7 @@ function validateMatch(value: unknown): RuleMatch {
 
 export function validateConfirmation(value: unknown): OfferConfirmation {
   const item = object(value, 'confirmation');
-  keys(item, ['confirmedAt', 'confirmedBy', 'sourceReference', 'offerPeriod', 'rewardUnit', 'rewardConditionsSummary', 'capSummary'], 'confirmation');
+  keys(item, ['confirmedAt', 'confirmedBy', 'sourceReference', 'trustBasis', 'termsFingerprint', 'offerPeriod', 'rewardUnit', 'rewardConditionsSummary', 'capSummary'], 'confirmation');
   const confirmedAt = requiredString(item.confirmedAt, 'confirmation.confirmedAt');
   if (!Number.isFinite(Date.parse(confirmedAt)) || !confirmedAt.includes('T')) throw new RewardServiceError('INVALID_INPUT', 'confirmation.confirmedAt must be an ISO date-time');
   const periodItem = object(item.offerPeriod, 'confirmation.offerPeriod');
@@ -374,10 +376,16 @@ export function validateConfirmation(value: unknown): OfferConfirmation {
   if (!Number.isFinite(Date.parse(validFrom)) || !validFrom.includes('T')) throw new RewardServiceError('INVALID_INPUT', 'confirmation.offerPeriod.validFrom must be an ISO date-time');
   const validTo = optionalString(periodItem.validTo, 'confirmation.offerPeriod.validTo');
   if (validTo && (!Number.isFinite(Date.parse(validTo)) || !validTo.includes('T'))) throw new RewardServiceError('INVALID_INPUT', 'confirmation.offerPeriod.validTo must be an ISO date-time');
+  const sourceReference = optionalString(item.sourceReference, 'confirmation.sourceReference');
+  const trustBasis = item.trustBasis === undefined ? (sourceReference ? 'official_verified' : 'user_confirmed') : requiredString(item.trustBasis, 'confirmation.trustBasis');
+  if (trustBasis !== 'official_verified' && trustBasis !== 'user_confirmed') throw new RewardServiceError('INVALID_INPUT', 'confirmation.trustBasis is invalid');
+  if (trustBasis === 'official_verified' && !sourceReference) throw new RewardServiceError('INVALID_CONFIRMATION', 'official confirmation requires sourceReference');
   return {
     confirmedAt,
     confirmedBy: requiredString(item.confirmedBy, 'confirmation.confirmedBy'),
-    sourceReference: requiredString(item.sourceReference, 'confirmation.sourceReference'),
+    ...(sourceReference ? { sourceReference } : {}),
+    ...((item.trustBasis !== undefined || !sourceReference) ? { trustBasis } : {}),
+    ...(optionalString(item.termsFingerprint, 'confirmation.termsFingerprint', true) ? { termsFingerprint: optionalString(item.termsFingerprint, 'confirmation.termsFingerprint', true) } : {}),
     offerPeriod: { validFrom, ...(validTo ? { validTo } : {}) },
     rewardUnit: requiredString(item.rewardUnit, 'confirmation.rewardUnit', true).toUpperCase(),
     ...(optionalString(item.rewardConditionsSummary, 'confirmation.rewardConditionsSummary') ? { rewardConditionsSummary: optionalString(item.rewardConditionsSummary, 'confirmation.rewardConditionsSummary') } : {}),
@@ -387,7 +395,7 @@ export function validateConfirmation(value: unknown): OfferConfirmation {
 
 export function validateRule(value: unknown): OfferRuleVersion {
   const item = object(value, 'rule');
-  keys(item, ['id', 'cardId', 'version', 'sourceSnapshotId', 'status', 'validFrom', 'validTo', 'settlementCurrency', 'match', 'predicate', 'requires', 'reward', 'capPoolRefs', 'confirmation', 'combination', 'componentKind', 'sponsor', 'benefitGroup', 'useSettlementAmount', 'stacking', 'routeId', 'eventRule', 'eventChainRule'], 'rule');
+  keys(item, ['id', 'cardId', 'version', 'sourceSnapshotId', 'ownerUser', 'trustBasis', 'familyId', 'supersedesRuleId', 'supersessionReason', 'status', 'validFrom', 'validTo', 'settlementCurrency', 'match', 'predicate', 'requires', 'reward', 'capPoolRefs', 'confirmation', 'combination', 'componentKind', 'sponsor', 'benefitGroup', 'useSettlementAmount', 'stacking', 'routeId', 'eventRule', 'eventChainRule'], 'rule');
   const status = requiredString(item.status, 'rule.status');
   if (!['candidate', 'active', 'stale', 'superseded', 'needs_review', 'unknown'].includes(status)) throw new RewardServiceError('INVALID_INPUT', 'rule.status is invalid');
   const rewardItem = object(item.reward, 'rule.reward');
@@ -410,6 +418,10 @@ export function validateRule(value: unknown): OfferRuleVersion {
     requires = [...new Set(item.requires)] as OfferRuleVersion['requires'];
   }
   const confirmation = item.confirmation !== undefined ? validateConfirmation(item.confirmation) : undefined;
+  const trustBasis = item.trustBasis === undefined ? confirmation?.trustBasis : requiredString(item.trustBasis, 'rule.trustBasis');
+  if (trustBasis !== undefined && trustBasis !== 'official_verified' && trustBasis !== 'user_confirmed') throw new RewardServiceError('INVALID_INPUT', 'rule.trustBasis is invalid');
+  const supersessionReason = item.supersessionReason === undefined ? undefined : requiredString(item.supersessionReason, 'rule.supersessionReason');
+  if (supersessionReason !== undefined && !['user_correction', 'user_revocation', 'official_refresh'].includes(supersessionReason)) throw new RewardServiceError('INVALID_INPUT', 'rule.supersessionReason is invalid');
   let combination: OfferRuleVersion['combination'];
   if (item.combination !== undefined) {
     const c = object(item.combination, 'rule.combination');
@@ -435,7 +447,7 @@ export function validateRule(value: unknown): OfferRuleVersion {
   const eventChainRule = item.eventChainRule === undefined ? undefined : validatePaymentEventChainRule(item.eventChainRule);
   const cardId = item.cardId === undefined ? undefined : requiredString(item.cardId, 'rule.cardId', true);
   if (cardId === undefined && (!componentKind || componentKind === 'card_issuer')) throw new RewardServiceError('INVALID_INPUT', 'non-card rules require an explicit componentKind');
-  return { id: requiredString(item.id, 'rule.id', true), ...(cardId === undefined ? {} : { cardId }), version: requiredString(item.version, 'rule.version'), sourceSnapshotId: requiredString(item.sourceSnapshotId, 'rule.sourceSnapshotId', true), status: status as OfferRuleVersion['status'], validFrom, ...(validTo ? { validTo } : {}), settlementCurrency: requiredString(item.settlementCurrency, 'rule.settlementCurrency', true).toUpperCase(), match: validateMatch(item.match), ...(predicate ? { predicate } : {}), ...(requires?.length ? { requires } : {}), reward, ...(capPoolRefs ? { capPoolRefs } : {}), ...(componentKind ? { componentKind: componentKind as OfferRuleVersion['componentKind'] } : {}), ...(sponsor === undefined ? {} : { sponsor }), ...(benefitGroup === undefined ? {} : { benefitGroup }), ...(item.useSettlementAmount === undefined ? {} : { useSettlementAmount: item.useSettlementAmount }), ...(stacking ? { stacking: stacking as OfferRuleVersion['stacking'] } : {}), ...(confirmation ? { confirmation } : {}), ...(combination ? { combination } : {}), ...(item.routeId === undefined ? {} : { routeId: requiredString(item.routeId, 'rule.routeId', true) }), ...(eventRule ? { eventRule } : {}), ...(eventChainRule ? { eventChainRule } : {}) };
+  return { id: requiredString(item.id, 'rule.id', true), ...(cardId === undefined ? {} : { cardId }), version: requiredString(item.version, 'rule.version'), sourceSnapshotId: requiredString(item.sourceSnapshotId, 'rule.sourceSnapshotId', true), ...(item.ownerUser === undefined ? {} : { ownerUser: requiredString(item.ownerUser, 'rule.ownerUser', true) }), ...(trustBasis ? { trustBasis: trustBasis as OfferRuleVersion['trustBasis'] } : {}), ...(item.familyId === undefined ? {} : { familyId: requiredString(item.familyId, 'rule.familyId', true) }), ...(item.supersedesRuleId === undefined ? {} : { supersedesRuleId: requiredString(item.supersedesRuleId, 'rule.supersedesRuleId', true) }), ...(supersessionReason ? { supersessionReason: supersessionReason as OfferRuleVersion['supersessionReason'] } : {}), status: status as OfferRuleVersion['status'], validFrom, ...(validTo ? { validTo } : {}), settlementCurrency: requiredString(item.settlementCurrency, 'rule.settlementCurrency', true).toUpperCase(), match: validateMatch(item.match), ...(predicate ? { predicate } : {}), ...(requires?.length ? { requires } : {}), reward, ...(capPoolRefs ? { capPoolRefs } : {}), ...(componentKind ? { componentKind: componentKind as OfferRuleVersion['componentKind'] } : {}), ...(sponsor === undefined ? {} : { sponsor }), ...(benefitGroup === undefined ? {} : { benefitGroup }), ...(item.useSettlementAmount === undefined ? {} : { useSettlementAmount: item.useSettlementAmount }), ...(stacking ? { stacking: stacking as OfferRuleVersion['stacking'] } : {}), ...(confirmation ? { confirmation } : {}), ...(combination ? { combination } : {}), ...(item.routeId === undefined ? {} : { routeId: requiredString(item.routeId, 'rule.routeId', true) }), ...(eventRule ? { eventRule } : {}), ...(eventChainRule ? { eventChainRule } : {}) };
 }
 
 export function validateCapPool(value: unknown): CapPoolDefinition {

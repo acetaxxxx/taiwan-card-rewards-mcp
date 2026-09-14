@@ -511,8 +511,8 @@ export function evaluateOffer(
   if (!source) {
     return { ...base, status: 'unknown', ruleId: rule.id, ruleVersion: rule.version, unknownReasons: ['missing offer source snapshot'], diagnostics: [diagnostic('source_untrusted', 'rule.sourceSnapshotId', ['source snapshot'], 'provide_verified_source_snapshot')] };
   }
-  if (rule.requires?.includes('source_verified') && source.verified !== true) trustReasons.push('source is not verified');
-  if (rule.requires?.includes('user_confirmation') && context.userConfirmed !== true) trustReasons.push('user confirmation is required');
+  if (rule.trustBasis !== 'user_confirmed' && rule.requires?.includes('source_verified') && source.verified !== true) trustReasons.push('source is not verified');
+  if (rule.requires?.includes('user_confirmation') && rule.trustBasis !== 'user_confirmed' && context.userConfirmed !== true) trustReasons.push('user confirmation is required');
   if (trustReasons.length) return { ...base, status: 'needs_review', ruleId: rule.id, ruleVersion: rule.version, unknownReasons: trustReasons };
   const sourceExpiry = source.validTo ? Date.parse(source.validTo) : Number.POSITIVE_INFINITY;
   const now = Date.parse(evaluationNow);
