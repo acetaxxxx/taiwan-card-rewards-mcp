@@ -9,7 +9,7 @@
 > [`taiwan-card-rewards-skill/references/mcp-tools.md`](taiwan-card-rewards-skill/references/mcp-tools.md) 為準。
 
 **文件狀態**：正式營運指引 (Normative Agent SOP)
-**適用範圍**：canonical 19-tool MCP contract（release tag 僅供部署管理）
+**適用範圍**：canonical 20-tool MCP contract（release tag 僅供部署管理）
 **語言**：繁體中文
 **遵循規範**：[`CONTEXT.md`](../../CONTEXT.md), [ADR 0001](../adr/0001-independent-card-rewards-domain-and-agent-supplied-rules.md), [ADR 0003](../adr/0003-complete-initial-mcp-surface-with-layered-trust-gates.md), [ADR 0004](../adr/0004-generic-benefit-status-and-schema-v2.md), [ADR 0005](../adr/0005-payment-route-opportunity-stacking.md), [ADR 0006](../adr/0006-multi-component-reward-ledger-and-cap-attribution.md), [ADR 0007 Payment-route facts](../adr/0007-provider-neutral-payment-route-facts-and-evidence.md), [Payment-route research](../research/archive/payment-route-chain-reality-and-mcp-design.md), [使用者安裝與 Skill 分發 SOP](user-installation-and-skill-distribution-sop.md), [Schema v2 Spec](../specs/card-rewards-schema-v2-specification.md).
 
@@ -35,7 +35,7 @@
 
 ---
 
-## 2. Canonical 19-tool MCP 合約體系
+## 2. Canonical 20-tool MCP 合約體系
 
 MCP 伺服器公開 20 項標準工具，Agent 必須依照其唯讀與寫入屬性合規調用；完整清單、closed schema 與逐項用途說明一律以 [`taiwan-card-rewards-skill/references/mcp-tools.md`](taiwan-card-rewards-skill/references/mcp-tools.md) 為準，本文件不重複維護第二份清單以避免走漏更新。
 

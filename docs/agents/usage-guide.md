@@ -43,7 +43,7 @@ npx --yes github:acetaxxxx/taiwan-card-rewards-mcp#main \
 Pin a release tag for repeatable use:
 
 ```bash
-npx --yes github:acetaxxxx/taiwan-card-rewards-mcp#v0.11.0 \
+npx --yes github:acetaxxxx/taiwan-card-rewards-mcp#v0.13.1 \
   --data-dir /absolute/tenant-directory
 ```
 
@@ -100,7 +100,7 @@ response already carries every diagnostic an Agent needs.
 
 ## 4. Workflow Guidelines for AI Agents
 
-For lightweight or lower-reasoning models such as Gemini 3.8 Flash Medium, refer to the high-density [Gemini Flash Guidance](gemini-flash-guidance.md) for core invariants, high-risk decision tables, and minimal payloads.
+For lightweight or lower-reasoning models, including Gemini Flash and Luna, load the bundled [low-reasoning playbook](taiwan-card-rewards-skill/references/low-reasoning-playbook.md) for core invariants, high-risk decisions, and minimal payloads. Then load only the workflow required by the current intent.
 
 ### A. Card Management & Discovery
 1. For a recommendation, call `recommend` directly with the merchant-first intent. `list_cards` is for management, explicit inventory requests, or onboarding checks; it is not a normal recommendation prerequisite.

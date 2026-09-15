@@ -5,7 +5,7 @@
   "metadata": {
     "model": "gemini-3.8-flash-medium",
     "protocol": "stdio-jsonrpc-2.0",
-    "guidanceDocument": "docs/agents/gemini-flash-guidance.md",
+    "guidanceDocument": "docs/agents/taiwan-card-rewards-skill/references/low-reasoning-playbook.md",
     "recordedAt": "2026-09-14T15:40:00Z",
     "coverage": [
       "merchant_resolution_and_ambiguity",

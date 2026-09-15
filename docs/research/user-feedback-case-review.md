@@ -306,7 +306,7 @@
 * **目標**：以極低代價修補 Agent 認知漏洞，建立二階段更正確認、相容鍵匯率重用與輕量 Playbook。
 * **具體工作項**：
   1. **部署 Gemini 3.8 Flash Medium `< 1500` Token 輕量引導手冊**：
-     - 在 `docs/agents/taiwan-card-rewards-skill/` 建立 `gemini-flash-guidance.md`，納入三層架構（核心原則、決策表、精簡 Payload），落實二階段更正確認與私有版本啟用流程。
+     - 在 `docs/agents/taiwan-card-rewards-skill/references/` 建立 `low-reasoning-playbook.md`，以 Gemini Flash 與 Luna 可共用的三層架構（核心原則、決策表、精簡 Payload）落實二階段更正確認與私有版本啟用流程。
   2. **補齊電支/商業銀行現鈔結匯查價指引手冊**：
      - 在 `docs/agents/taiwan-card-rewards-skill/references/` 新增 `wallet-and-clearing-fx-sources.md`，明定以商業銀行現鈔賣出結匯之電支掃碼路徑，應查詢之官方牌價來源與提取規範。
   3. **在 Skill 中建立「FX 相容鍵重用與清算上下文防呆」**：

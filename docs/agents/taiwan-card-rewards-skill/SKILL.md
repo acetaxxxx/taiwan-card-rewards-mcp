@@ -6,7 +6,7 @@ description: 協助試算、比較與記錄台灣信用卡回饋；路由至 can
 # Taiwan Card Rewards Assistant
 
 這是 Agent 直接載入的入口。詳細 JSON schema、錯誤與合法 payload 在
-[`references/mcp-tools.md`](references/mcp-tools.md)；不要從舊文章推導欄位。對於 Gemini 3.8 Flash Medium 等低推理模型，遵循 [Gemini Flash 指引](../gemini-flash-guidance.md) 的三層架構與最小合法 payload。
+[`references/mcp-tools.md`](references/mcp-tools.md)；不要從舊文章推導欄位。輕量或低推理模型（包含 Gemini Flash 與 Luna）先讀 [`references/low-reasoning-playbook.md`](references/low-reasoning-playbook.md)，再只載入目前意圖需要的 workflow。
 
 ## 先守住的邊界
 
@@ -34,11 +34,13 @@ description: 協助試算、比較與記錄台灣信用卡回饋；路由至 can
 
 私有 `user_confirmed` 優惠、`occurredAt`/`recordedAt`、以及由 Offer Route Selector 驅動的候選生成，以 [ADR 0010](../../adr/0010-user-confirmed-offers-transaction-chronology-and-offer-driven-routes.md) 為目標語意；在對應 public contract 完成前，不得假設新增欄位或工具已可呼叫。
 
-## 三個必讀入口
+## 按意圖載入
 
-- [`references/mcp-tools.md`](references/mcp-tools.md)：canonical 20-tool contract、closed input union、event/route/capability schema。
-- [`references/mcp-tool-call-playbook.md`](references/mcp-tool-call-playbook.md)：實際 MCP 呼叫順序與合法 JSON 骨架。
-- [`workflows/payment-route-and-fx.md`](workflows/payment-route-and-fx.md) 與 [`workflows/event-reward-and-wallet-eligibility.md`](workflows/event-reward-and-wallet-eligibility.md)：多層路徑、planned events、跨事件資格與 fail-closed。
+- 需要精確欄位或錯誤定義時，讀 [`references/mcp-tools.md`](references/mcp-tools.md)；需要呼叫骨架時再讀 [`references/mcp-tool-call-playbook.md`](references/mcp-tool-call-playbook.md)。
+- 商家推薦讀 [`workflows/recommendation-intent.md`](workflows/recommendation-intent.md)；回應含 `requiredActions` 時讀 [`workflows/preflight-and-required-actions.md`](workflows/preflight-and-required-actions.md)。
+- 新增卡片、帳戶或優惠讀 [`workflows/card-onboarding-and-benefit-enrollment.md`](workflows/card-onboarding-and-benefit-enrollment.md) 與 [`workflows/research-and-evidence-submission.md`](workflows/research-and-evidence-submission.md)。
+- 外幣或多層支付讀 [`workflows/payment-route-and-fx.md`](workflows/payment-route-and-fx.md)；跨事件回饋或沖正讀 [`workflows/event-reward-and-wallet-eligibility.md`](workflows/event-reward-and-wallet-eligibility.md)。
+- 輕量或低推理模型先讀 [`references/low-reasoning-playbook.md`](references/low-reasoning-playbook.md)，並保持上述按意圖載入規則。
 
 完整 Agent→MCP 範例：
 [`examples/payment-path-recommendation.md`](examples/payment-path-recommendation.md)、
