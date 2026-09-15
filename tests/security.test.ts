@@ -19,9 +19,9 @@ describe('Phase 1 safety boundaries', () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  it('rejects unknown fields before domain dispatch', () => {
-    expect(() => validateCard({ id: 'c1', issuer: 'issuer', productName: 'card', pan: '4111111111111111' })).toThrow(/UNKNOWN_FIELD/);
-    expect(() => validateToolArgs('register_card', { card: {}, dataDir: '/tmp/other' })).toThrow(/UNKNOWN_FIELD/);
+  it('ignores unknown fields before domain dispatch', () => {
+    expect(validateCard({ id: 'c1', issuer: 'issuer', productName: 'card', pan: '4111111111111111' })).toEqual({ id: 'c1', issuer: 'issuer', productName: 'card' });
+    expect(validateToolArgs('register_card', { card: {}, dataDir: '/tmp/other' })).toEqual({ card: {} });
   });
 
 });

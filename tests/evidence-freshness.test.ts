@@ -28,9 +28,9 @@ describe('external evidence and freshness gate', () => {
     expect(service.submitEvidence(evidence).id).toBe(store.read().evidence[0]?.id);
   });
 
-  it('rejects unknown fields and conflicting evidence without making it authoritative', () => {
+  it('ignores unknown fields and rejects conflicting evidence without making it authoritative', () => {
     const service = new RewardService(new MemoryStore(), 'u1');
-    expect(() => service.submitEvidence({ ...evidence, token: 'secret' })).toThrow();
+    expect(service.submitEvidence({ ...evidence, token: 'secret' })).not.toHaveProperty('token');
     service.submitEvidence(evidence);
     expect(() => service.submitEvidence({ ...evidence, id: 'ev-2', claim: { ...evidence.claim, ratePpm: 33000000 } })).toThrow(/conflict/);
   });

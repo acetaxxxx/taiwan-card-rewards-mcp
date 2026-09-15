@@ -73,15 +73,6 @@ function activeOfferSearch(args: Record<string, unknown>): ActiveOfferSearch {
   }
   return search;
 }
-function rejectSensitiveFields(value: unknown): void {
-  if (!value || typeof value !== 'object') return;
-  for (const [key, nested] of Object.entries(value)) {
-    if (/pan|card(number|_number)|cvv|cvc|otp|password|cookie|credential|secret|token|api.?key/i.test(key)) throw new RewardServiceError('SENSITIVE_FIELD_FORBIDDEN', `sensitive field is not accepted: ${key}`);
-    rejectSensitiveFields(nested);
-  }
-}
-
-
 async function processJsonRpc(service: RewardService, request: JsonRpc): Promise<Reply> {
   try {
     if (request.method === 'initialize') return successReply(request.id, initializeResult());
@@ -144,7 +135,6 @@ async function callTool(service: RewardService, params: Record<string, unknown>)
   const name = params.name;
   if (typeof name !== 'string') throw new RewardServiceError('INVALID_INPUT', 'tool name is required');
   const rawArgs = params.arguments ?? {};
-  rejectSensitiveFields(rawArgs);
   const args = validateToolArgs(name, normalizeMcpToolArguments(name, rawArgs));
   const maybePaged = (value: unknown[], sortKey: (item: unknown) => string, maxItems = 20): unknown => {
     if (args.limit === undefined && args.page === undefined && args.projection === undefined) return value;

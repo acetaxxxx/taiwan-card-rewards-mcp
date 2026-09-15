@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.14.1
+
+- Ignore unknown and sensitive input fields at validation boundaries instead of
+  persisting or dispatching them; declared fields remain strictly typed and
+  invalid values still fail closed.
+- Validate and normalize state before every file-store write, use schema-safe
+  reward component identifiers, and make transaction idempotency comparison
+  independent of server-generated field ordering.
+
 ## 0.14.0
 
 - Add user-confirmed offer versions, generated payment paths, bounded transaction history, reusable FX compatibility, and low-reasoning agent workflow coverage.

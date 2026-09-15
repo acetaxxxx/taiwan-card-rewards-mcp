@@ -25,7 +25,7 @@ describe('canonical PaymentEvent seam', () => {
     expect(event.relations?.funded_by).toEqual(['evt_topup_1']);
     const mixedBalance = validatePaymentEvent({ ...event, id: 'evt_purchase_mixed', relations: undefined });
     expect(mixedBalance.relations).toBeUndefined();
-    expect(() => validatePaymentEvent({ ...event, cvv: '123' })).toThrow();
+    expect(validatePaymentEvent({ ...event, cvv: '123' })).not.toHaveProperty('cvv');
     expect(() => validatePaymentEvent({ ...event, kind: 'unknown' })).toThrow();
   });
 });

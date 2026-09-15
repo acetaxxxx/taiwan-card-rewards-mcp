@@ -1,4 +1,5 @@
 import * as crypto from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
 import { type LedgerStore, type RecordedTransaction, type StoredState, contentHash } from './store.js';
 import { EventRewardLedger, convertMinor, createPaymentEventRewardCandidate, decidePaymentEventRewards, evaluateOffer, evaluatePredicate, matchPaymentEvent, matchPaymentEventChain, matchPaymentRouteSelector, rankCards, resolveCyclePeriodKey } from './evaluator.js';
 import type { CardDescriptor, CardSwitchInput, CardSwitchProjection, CardSwitchStatus, CapPeriod, CapPoolDefinition, EvaluationContext, MerchantIdentity, MerchantResolution, Money, OfferConfirmation, OfferRuleVersion, OfferSourceSnapshot, RewardBreakdown, RewardComponentRecord, TransactionTuple, UserBenefitInput, UserBenefitStatus, EvidenceRecord, PaymentRouteRecord, PaymentCapabilityRecord, PaymentAccountRecord, EventRewardLedgerRecord, EventRewardReversalRecord, PaymentPathRequest, PaymentPathRecommendation, PaymentPathCandidate, PaymentPathEvent, EligibilityFact, RewardValuationSnapshot, FxResolutionRequest, FxEvaluationContext, AppliedFxRate, RecommendationIntent, RecommendationIntentResult, IntentCandidate, FxSnapshot, ListTransactionsOptions, ListTransactionsResult, TransactionSummaryItem, TransactionDetailItem, FundingInstrument, TransactionListItem } from './types.js';
@@ -17,7 +18,9 @@ export interface RemainingCap { ruleId: string; usageKey: string; remaining: Mon
 type MerchantOnboardingInput = Omit<MerchantIdentity, 'canonicalId'> & { canonicalId?: string };
 
 function nowIso(): string { return new Date().toISOString(); }
-function componentId(transactionId: string, ruleId: string, version: string): string { return `${encodeURIComponent(transactionId)}:${encodeURIComponent(ruleId)}:${encodeURIComponent(version)}`; }
+function componentId(transactionId: string, ruleId: string, version: string): string {
+  return `cmp_${crypto.createHash('sha256').update(`${transactionId}\u0000${ruleId}\u0000${version}`).digest('hex').slice(0, 32)}`;
+}
 const ULID_ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
 function merchantId(): string {
   let time = Date.now();
@@ -91,7 +94,6 @@ export class RewardService {
   recordValidatedEventReward(input: unknown): EventRewardLedgerRecord {
     if (!this.metadataUser) throw new RewardServiceError('UNAUTHENTICATED', 'event reward recording requires an authenticated user');
     const source = typeof input === 'object' && input !== null ? input as Record<string, unknown> : {};
-    if (Object.keys(source).some((key) => !['event', 'sourceEvents', 'rule', 'chainRule', 'candidate', 'idempotencyKey'].includes(key))) throw new RewardServiceError('UNKNOWN_FIELD', 'validated event reward contains unsupported field');
     if (source.rule !== undefined && source.chainRule !== undefined) throw new RewardServiceError('INVALID_INPUT', 'validated event reward accepts either rule or chainRule, not both');
     if (source.rule === undefined && source.chainRule === undefined) throw new RewardServiceError('INVALID_INPUT', 'validated event reward requires a rule or chainRule');
     if (source.chainRule !== undefined && source.sourceEvents === undefined) throw new RewardServiceError('INVALID_INPUT', 'validated event reward chainRule requires sourceEvents');
@@ -138,7 +140,6 @@ export class RewardService {
   reverseEventReward(input: unknown): EventRewardReversalRecord {
     if (!this.metadataUser) throw new RewardServiceError('UNAUTHENTICATED', 'event reward reversal requires an authenticated user');
     const source = typeof input === 'object' && input !== null ? input as Record<string, unknown> : {};
-    if (Object.keys(source).some((key) => !['event', 'idempotencyKey'].includes(key))) throw new RewardServiceError('UNKNOWN_FIELD', 'event reward reversal contains unsupported field');
     const event = validatePaymentEvent(source.event);
     const idempotencyKey = typeof source.idempotencyKey === 'string' ? source.idempotencyKey : (() => { throw new RewardServiceError('INVALID_INPUT', 'event reward reversal idempotencyKey is required'); })();
     const state = this.store.read();
@@ -1442,7 +1443,7 @@ export class RewardService {
     const duplicate = visibleTransactions.find((record) => record.transaction.idempotencyKey === transaction.idempotencyKey);
     if (duplicate) {
       const txNormalized = { ...transaction, recordedAt: duplicate.transaction.recordedAt };
-      if (JSON.stringify(duplicate.transaction) !== JSON.stringify(txNormalized)) {
+      if (!isDeepStrictEqual(duplicate.transaction, txNormalized)) {
         throw new RewardServiceError('IDEMPOTENCY_CONFLICT', 'idempotencyKey already belongs to a different transaction');
       }
       return duplicate.reward;

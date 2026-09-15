@@ -23,10 +23,10 @@ describe('Schema v2 regression seams', () => {
     expect(evaluateOffer(rule('rc', ['count']), tx, countContext).status).toBe('no_match');
   });
 
-  it('round-trips canonical pool refs and fails closed on inline cap ambiguity', () => {
+  it('round-trips canonical pool refs and ignores legacy inline cap fields', () => {
     const parsed = validateRule(rule('round'));
     expect(parsed.capPoolRefs).toEqual(['pool']);
-    expect(() => validateRule({ ...rule('bad'), cap: { kind: 'calendar_month', cap: { amountMinor: 1, currency: 'TWD' }, usageKey: 'x' }, capPoolRefs: ['pool'] })).toThrow();
+    expect(validateRule({ ...rule('bad'), cap: { kind: 'calendar_month', cap: { amountMinor: 1, currency: 'TWD' }, usageKey: 'x' }, capPoolRefs: ['pool'] })).not.toHaveProperty('cap');
     expect(() => validateStoredState({ schemaVersion: 2, cards: [], snapshots: [], rules: [], transactions: [], campaigns: [], switchEnrollments: [], cardSwitches: [], capPools: [{ id: 'p', metric: 'reward', period: 'calendar_month', limit: 1, currency: 'TWD' }] })).not.toThrow();
   });
 

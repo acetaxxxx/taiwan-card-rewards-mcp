@@ -24,10 +24,10 @@ describe('first-class payment route onboarding', () => {
     expect(() => one.upsertPaymentRoute({ ...input, layers: [{ kind: 'payment_provider' as const, providerId: 'changed' }, { kind: 'card_issuer' as const, providerId: 'bank' }] })).toThrow(/different payment route/);
     expect(route.status).toBe('active');
   });
-  it('rejects credential fields while accepting unknown provider identifiers as candidates', () => {
+  it('ignores credential fields while accepting unknown provider identifiers as candidates', () => {
     const service = new RewardService(new MemoryStore(), 'u1');
-    expect(() => service.upsertPaymentRoute({ ...input, apiToken: 'secret' })).toThrow();
-    expect(service.upsertPaymentRoute({ ...input, status: 'candidate', confirmation: undefined }).layers[0]?.providerId).toBe('unknown-provider');
+    expect(service.upsertPaymentRoute({ ...input, apiToken: 'secret' })).not.toHaveProperty('apiToken');
+    expect(service.upsertPaymentRoute({ ...input, idempotencyKey: 'route-candidate', status: 'candidate', confirmation: undefined }).layers[0]?.providerId).toBe('unknown-provider');
   });
 
   it('defaults an observed route to active and records an explicit user denial as failed', () => {

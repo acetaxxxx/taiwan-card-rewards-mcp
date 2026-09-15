@@ -23,7 +23,7 @@ describe('intent recommendation independent acceptance review', () => {
     const service = new RewardService(new MemoryStore(), 'u1');
     expect(() => service.recommendIntent({ merchant: 'Shop', limit: 0 })).toThrow(/limit/);
     expect(() => service.recommendIntent({ merchant: { name: 42 } })).toThrow(/merchant/);
-    expect(() => service.recommendIntent({ merchant: 'Shop', amount: { amountMinor: 1, currency: 'TWD', extra: true } })).toThrow(/unsupported/);
+    expect(() => service.recommendIntent({ merchant: 'Shop', amount: { amountMinor: 1, currency: 'TWD', extra: true } })).not.toThrow();
     expect(() => service.recommendIntent({ merchant: { name: 'Shop', country: 'JP' }, country: 'TW' })).toThrow(/conflicting/);
   });
 

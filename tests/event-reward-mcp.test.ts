@@ -8,10 +8,10 @@ const event = { id: 'evt_mcp', kind: 'purchase', amount: { amountMinor: 10000, c
 const candidate = { eventId: 'evt_mcp', ruleId: 'rule_mcp', ruleVersion: 'v1', evidenceId: 'evidence_mcp', sponsor: 'wallet', benefitGroup: 'purchase', reward: { kind: 'percentage', rateBps: 100 }, eligibility: { status: 'matched', reasons: [] } };
 
 describe('event reward MCP contract and authenticated service seam', () => {
-  it('validates representative record/reversal payloads and rejects owner or sensitive fields', () => {
+  it('validates representative record/reversal payloads and ignores owner or sensitive fields', () => {
     expect(validateEventRewardInput({ event, candidate, idempotencyKey: 'event-key' }).event.id).toBe('evt_mcp');
-    expect(() => validateToolArgs('record_event_reward', { event, candidate, idempotencyKey: 'event-key', ownerUser: 'other' })).toThrow(/UNKNOWN_FIELD/);
-    expect(() => validateToolArgs('reverse_event_reward', { event, idempotencyKey: 'event-key', token: 'secret' })).toThrow(/UNKNOWN_FIELD/);
+    expect(validateToolArgs('record_event_reward', { event, candidate, idempotencyKey: 'event-key', ownerUser: 'other' })).not.toHaveProperty('ownerUser');
+    expect(validateToolArgs('reverse_event_reward', { event, idempotencyKey: 'event-key', token: 'secret' })).not.toHaveProperty('token');
   });
 
   it('records only matched candidates for the authenticated owner and supports explicit reversal', () => {
@@ -30,10 +30,10 @@ describe('event reward MCP contract and authenticated service seam', () => {
     } finally { rmSync(dir, { recursive: true, force: true }); }
   });
 
-  it('publishes unversioned tools with closed nested schemas', () => {
+  it('publishes unversioned tools with tolerant nested schemas', () => {
     for (const name of ['record_event_reward', 'reverse_event_reward']) {
       const tool = mcpTools.find((candidate) => candidate.name === name);
-      expect(tool?.inputSchema).toMatchObject({ type: 'object', additionalProperties: false });
+      expect(tool?.inputSchema).toMatchObject({ type: 'object', additionalProperties: true });
       expect(tool?.inputSchema).toHaveProperty('required');
     }
     expect(mcpTools.some((candidate) => candidate.name === 'record_event_reward_v1')).toBe(false);

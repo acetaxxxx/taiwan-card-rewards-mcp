@@ -123,11 +123,17 @@ export class FileStore implements LedgerStore {
 
   write(next: StoredState): void {
     const tempPath = `${this.filePath}.${process.pid}.tmp`;
-    const body = JSON.stringify(next, null, 2) + '\n';
+    let normalized: StoredState;
+    try {
+      normalized = validateStoredState(next);
+    } catch (error) {
+      throw new StoreError('STORE_INVALID', error instanceof Error ? error.message : 'state does not match the persistent schema');
+    }
+    const body = JSON.stringify(normalized, null, 2) + '\n';
     try {
       fs.writeFileSync(tempPath, body, { encoding: 'utf8', mode: 0o600 });
       fs.renameSync(tempPath, this.filePath);
-      this.state = structuredClone(next);
+      this.state = structuredClone(normalized);
     } catch (error) {
       try { fs.rmSync(tempPath, { force: true }); } catch { /* preserve the original error */ }
       throw new StoreError('STORE_UNAVAILABLE', error instanceof Error ? error.message : 'could not persist state');

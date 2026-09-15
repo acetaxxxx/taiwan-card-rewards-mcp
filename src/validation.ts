@@ -12,9 +12,8 @@ function object(value: unknown, name: string): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
-function keys(value: Record<string, unknown>, allowed: readonly string[], name: string): void {
-  for (const key of Object.keys(value)) if (!allowed.includes(key)) throw new RewardServiceError('UNKNOWN_FIELD', `${name} contains unsupported field: ${key}`);
-}
+/** Validators reconstruct declared fields, so unknown input is intentionally dropped. */
+function keys(_value: Record<string, unknown>, _allowed: readonly string[], _name: string): void {}
 
 function requiredString(value: unknown, name: string, id = false): string {
   if (typeof value !== 'string' || !value.trim() || value.length > 512 || (id && !ID.test(value))) throw new RewardServiceError('INVALID_INPUT', `${name} must be a valid string`);
@@ -1201,7 +1200,9 @@ export function validateToolArgs(name: string, value: unknown): Record<string, u
   const allowed: Record<string, string[]> = { register_card: ['card'], list_cards: ['limit', 'page', 'projection'], upsert_offer: ['snapshot', 'rule', 'confirmation', 'capPools', 'merchant'], upsert_payment_route: ['route'], list_payment_routes: ['limit', 'page', 'projection'], upsert_payment_capability: ['capability'], list_payment_capabilities: [], register_payment_account: ['account'], list_payment_accounts: ['limit', 'page', 'projection'], record_transaction: ['transaction'], list_transactions: ['startDate', 'endDate', 'timeBasis', 'fundingKind', 'cardId', 'limit', 'page', 'projection'], record_event_reward: ['event', 'sourceEvents', 'rule', 'chainRule', 'candidate', 'idempotencyKey'], reverse_event_reward: ['event', 'idempotencyKey'], remaining_caps: ['cardId', 'asOf', 'limit', 'page', 'projection'], calculate_reward: ['rule', 'transaction', 'context'], get_user_benefit_status: ['kind', 'cardId', 'asOfUtc', 'projection'], upsert_user_benefit_status: ['input'], resolve_merchant: ['rawQuery', 'country', 'market', 'mcc', 'channel'], search_active_offers: ['rawQuery', 'cardId', 'canonicalMerchantId', 'country', 'market', 'mcc', 'channel', 'asOf', 'limit', 'page', 'projection'] };
   if (!allowed[name]) throw new RewardServiceError('TOOL_NOT_FOUND', `unknown tool: ${name}`);
   keys(args, allowed[name], `tool ${name}`);
-  return args;
+  const normalized: Record<string, unknown> = {};
+  for (const key of allowed[name]) if (args[key] !== undefined) normalized[key] = args[key];
+  return normalized;
 }
 
 export function validateRecommendationIntent(value: unknown): RecommendationIntent {
@@ -1212,9 +1213,15 @@ export function validateRecommendationIntent(value: unknown): RecommendationInte
   else {
     const fields = object(input.merchant, 'merchant');
     keys(fields, ['name', 'rawStatement', 'canonicalId', 'canonicalNameZhHant', 'country', 'market'], 'merchant');
-    for (const [key, field] of Object.entries(fields)) requiredString(field, `merchant.${key}`);
     if (!['name', 'rawStatement', 'canonicalId', 'canonicalNameZhHant'].some(key => fields[key] !== undefined)) throw new RewardServiceError('INVALID_INPUT', 'merchant identity is required');
-    merchant = fields;
+    merchant = {
+      ...(fields.rawStatement === undefined ? {} : { rawStatement: requiredString(fields.rawStatement, 'merchant.rawStatement') }),
+      ...(fields.name === undefined ? {} : { name: requiredString(fields.name, 'merchant.name') }),
+      ...(fields.canonicalId === undefined ? {} : { canonicalId: requiredString(fields.canonicalId, 'merchant.canonicalId', true) }),
+      ...(fields.canonicalNameZhHant === undefined ? {} : { canonicalNameZhHant: requiredString(fields.canonicalNameZhHant, 'merchant.canonicalNameZhHant') }),
+      ...(fields.country === undefined ? {} : { country: requiredString(fields.country, 'merchant.country') }),
+      ...(fields.market === undefined ? {} : { market: requiredString(fields.market, 'merchant.market') }),
+    };
     for (const field of ['country', 'market']) if (input[field] !== undefined && fields[field] !== undefined && input[field] !== fields[field]) throw new RewardServiceError('INVALID_INPUT', `conflicting merchant ${field}`);
   }
   const limit = input.limit === undefined ? 10 : safeInt(input.limit, 'limit', 1);

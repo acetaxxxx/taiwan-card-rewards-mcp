@@ -256,18 +256,18 @@ describe('Schema v2A: canonical cap pool registry and shared aggregation', () =>
     // Rejects schema v1
     expect(() => validateStoredState({ ...validV2, schemaVersion: 1 })).toThrow(/INCOMPATIBLE_SCHEMA/);
 
-    // Rejects legacy inline cap
+    // Ignores legacy inline cap
     const ruleWithInlineCap = {
       ...base,
       cap: { kind: 'calendar_month', cap: { amountMinor: 100, currency: 'TWD' }, usageKey: 'k' },
     };
-    expect(() => validateRule(ruleWithInlineCap)).toThrow();
+    expect(validateRule(ruleWithInlineCap)).not.toHaveProperty('cap');
 
-    // Rejects legacy inline caps array
+    // Ignores legacy inline caps array
     const ruleWithInlineCaps = {
       ...base,
       caps: [{ kind: 'calendar_month', cap: { amountMinor: 100, currency: 'TWD' }, usageKey: 'k' }],
     };
-    expect(() => validateRule(ruleWithInlineCaps)).toThrow();
+    expect(validateRule(ruleWithInlineCaps)).not.toHaveProperty('caps');
   });
 });

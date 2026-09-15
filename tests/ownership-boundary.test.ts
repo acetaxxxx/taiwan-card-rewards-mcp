@@ -27,9 +27,9 @@ describe('agent workspace and durable-state ownership', () => {
     expect(store.read().transactions).toHaveLength(2);
   });
 
-  it('rejects caller ownership, storage, path, and credential overrides recursively', () => {
-    expect(() => validateToolArgs('list_cards', { user_id: 'bob' })).toThrow(/UNKNOWN_FIELD/);
-    expect(() => validateTransaction({ cardId: 'c1', kind: 'purchase', mode: 'planned', occurredAt: '2026-08-20T00:00:00Z', amount: { amountMinor: 1, currency: 'TWD' }, path: '/tmp/raw' })).toThrow(/UNKNOWN_FIELD/);
-    expect(() => validateContext({ token: 'secret' })).toThrow(/UNKNOWN_FIELD/);
+  it('ignores caller ownership, storage, path, and credential overrides recursively', () => {
+    expect(validateToolArgs('list_cards', { user_id: 'bob' })).toEqual({});
+    expect(validateTransaction({ cardId: 'c1', kind: 'purchase', mode: 'planned', occurredAt: '2026-08-20T00:00:00Z', amount: { amountMinor: 1, currency: 'TWD' }, path: '/tmp/raw' })).not.toHaveProperty('path');
+    expect(validateContext({ token: 'secret' })).not.toHaveProperty('token');
   });
 });

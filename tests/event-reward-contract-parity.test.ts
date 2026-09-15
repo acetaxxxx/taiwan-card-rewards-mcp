@@ -19,9 +19,9 @@ describe('event reward schema parity', () => {
     expect(schema.properties.chainRule.properties.windowSeconds.maximum).toBe(31 * 24 * 60 * 60);
   });
 
-  it('rejects top-level owner, sensitive, and unknown fields before dispatch', () => {
-    expect(() => validateToolArgs('record_event_reward', { event: {}, candidate: {}, idempotencyKey: 'x', ownerUser: 'other' })).toThrow(/UNKNOWN_FIELD/);
-    expect(() => validateToolArgs('record_event_reward', { event: {}, candidate: {}, idempotencyKey: 'x', token: 'secret' })).toThrow(/UNKNOWN_FIELD/);
+  it('ignores top-level owner, sensitive, and unknown fields before dispatch', () => {
+    expect(validateToolArgs('record_event_reward', { event: {}, candidate: {}, idempotencyKey: 'x', ownerUser: 'other' })).toEqual({ event: {}, candidate: {}, idempotencyKey: 'x' });
+    expect(validateToolArgs('record_event_reward', { event: {}, candidate: {}, idempotencyKey: 'x', token: 'secret' })).toEqual({ event: {}, candidate: {}, idempotencyKey: 'x' });
   });
 
   it('fully retires versioned names, not just from tools/list', () => {
