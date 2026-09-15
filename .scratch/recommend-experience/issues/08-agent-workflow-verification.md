@@ -15,7 +15,7 @@ Status: ready-for-human
 
 ## 低推理成本 Agent 驗收基準
 
-設計對象包含使用者指定的 gemini-3.8-flash-low、gpt-5.6-luna-low 等級；這是目標能力假設，不是已完成模型相容性驗證。
+設計對象是低推理模型等級；這是目標能力假設，不是已完成模型相容性驗證。
 
 - [x] canonical workflow 以短步驟寫明觸發條件、工具、輸入來源與完成條件；一般推薦從 merchant intent 開始。
 - [x] 每個補件 action 明示受影響候選、待查欄位、已知來源或來源探索要求、提交工具／欄位與完成條件；agent 不必推導內部資料模型。

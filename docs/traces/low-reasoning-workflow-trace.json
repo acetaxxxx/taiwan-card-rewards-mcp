@@ -1,11 +1,11 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "Gemini 3.8 Flash Medium stdio MCP Trace",
-  "description": "End-to-end execution trace of low-reasoning Gemini 3.8 Flash Medium interacting with taiwan-card-rewards-mcp over stdio JSON-RPC 2.0 protocol.",
+  "title": "Low-reasoning stdio MCP workflow trace",
+  "description": "End-to-end workflow trace for a low-reasoning model interacting with taiwan-card-rewards-mcp over stdio JSON-RPC 2.0.",
   "metadata": {
-    "model": "gemini-3.8-flash-medium",
+    "modelProfile": "low_reasoning",
     "protocol": "stdio-jsonrpc-2.0",
-    "guidanceDocument": "docs/agents/taiwan-card-rewards-skill/references/low-reasoning-playbook.md",
+    "guidanceDocument": "docs/taiwan-card-rewards-skill/references/low-reasoning-playbook.md",
     "recordedAt": "2026-09-14T15:40:00Z",
     "coverage": [
       "merchant_resolution_and_ambiguity",

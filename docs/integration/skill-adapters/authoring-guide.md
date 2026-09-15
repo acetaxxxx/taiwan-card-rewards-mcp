@@ -5,7 +5,7 @@ This guide helps an AI agent create a thin, portable skill that uses
 deterministic calculations, source/rule provenance, and the user-scoped ledger.
 The skill may ask questions and select when to call tools, but it does not
 become a second database or calculator. A copyable starting point is
-[`card-rewards-skill-template.md`](card-rewards-skill-template.md).
+[`skill-template.md`](skill-template.md).
 
 ## 1. Define the boundary before writing files
 

@@ -138,7 +138,7 @@ MCP 本次設計維持零網路；「自動處理」指內部讀取與判定，�
 
 ## 10. 參考與決策範圍
 
-依據 `src/mcp-contract.ts`、`src/cli.ts`、`src/service.ts`、`docs/agents/usage-guide.md`、`docs/agents/taiwan-card-rewards-skill/workflows/preflight-and-required-actions.md` 及 `CONTEXT.md`。
+依據 `src/mcp-contract.ts`、`src/cli.ts`、`src/service.ts`、`docs/usage/ai-agent-usage-guide.md`、`docs/taiwan-card-rewards-skill/card-rewards-recommendation/workflows/preflight-and-required-actions.md` 及 `CONTEXT.md`。
 
 維持 ADR 0001 的計算／Agent 研究分工、ADR 0005 的 opportunity stacking、ADR 0007 的有證據路徑語意。工具入口整合與暫存候選生成是提案；未在本次改寫領域定義或宣布新 ADR 已接受。
 

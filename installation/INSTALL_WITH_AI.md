@@ -49,13 +49,16 @@ Complete these steps:
    }
 
 4. Obtain the same pinned release and copy the complete directory
-   `docs/agents/taiwan-card-rewards-skill/` into
-   `<SKILL_DIRECTORY>/taiwan-card-rewards-assistant/`. Preserve SKILL.md,
-   references, workflows, examples, and templates as one bundle. Do not copy
-   only SKILL.md and do not install the repository's AGENTS.md as a user skill.
-5. Validate the installed SKILL.md frontmatter and every relative Markdown
-   link reachable from it. Confirm that the low-reasoning playbook exists at
-   `references/low-reasoning-playbook.md`.
+   `docs/taiwan-card-rewards-skill/` into
+   `<SKILL_DIRECTORY>/taiwan-card-rewards/`. Register the base router at
+   `taiwan-card-rewards/SKILL.md` and its three task skill folders:
+   `card-rewards-recommendation`,
+   `card-rewards-evidence`, and `card-rewards-ledger`. Preserve the complete
+   bundle structure; do not copy a single SKILL.md or install the repository's
+   AGENTS.md as a user skill.
+5. Validate every installed SKILL.md frontmatter and its relative Markdown
+   links. Confirm that `references/mcp-tools.md` and
+   `references/low-reasoning-playbook.md` are present.
 6. Tell me whether the host must be restarted or its MCP/skills reloaded. Do
    not claim the installation is active until reload has happened.
 7. After reload, initialize the MCP server, confirm
@@ -83,5 +86,5 @@ Safety boundaries:
   one absolute data directory.
 - The runtime skill teaches a user-facing agent how to research offers, call
   the MCP, interpret fail-closed results, and protect sensitive data.
-- Root [`AGENTS.md`](AGENTS.md) remains contributor-only guidance for agents
+- Root [`AGENTS.md`](../AGENTS.md) remains contributor-only guidance for agents
   developing this repository. It is not part of the user installation.

@@ -16,7 +16,7 @@ interface JsonRpcResponse {
   };
 }
 
-function createMcpClient(dataDir: string, user = 'gemini-flash-user') {
+function createMcpClient(dataDir: string, user = 'low-reasoning-user') {
   const cliPath = resolve('dist/cli.js');
   const child = spawn(process.execPath, [cliPath, '--data-dir', dataDir, '--user', user], {
     stdio: ['pipe', 'pipe', 'pipe'],
@@ -72,10 +72,10 @@ function createMcpClient(dataDir: string, user = 'gemini-flash-user') {
   return { send, callTool, close };
 }
 
-describe('Gemini 3.8 Flash Medium deterministic public-contract workflow test', () => {
+describe('low-reasoning deterministic public-contract workflow test', () => {
   it('verifies 20 MCP tools and full end-to-end guidance lifecycle over stdio', async () => {
-    const dataDir = mkdtempSync(join(tmpdir(), 'gemini-workflow-e2e-'));
-    const client = createMcpClient(dataDir, 'gemini-flash-user');
+    const dataDir = mkdtempSync(join(tmpdir(), 'low-reasoning-workflow-e2e-'));
+    const client = createMcpClient(dataDir, 'low-reasoning-user');
 
     try {
       // Step 1: Initialize and verify 20 MCP tools
@@ -366,7 +366,7 @@ describe('Gemini 3.8 Flash Medium deterministic public-contract workflow test', 
         parserVersion: '1.0.0',
         provenance: {
           sourceDescription: 'User chat correction',
-          submitter: 'gemini-flash-user',
+          submitter: 'low-reasoning-user',
           submittedAt: '2026-09-14T15:00:00Z',
           contentFingerprint: 'fp-kuma-350',
         },
@@ -443,7 +443,7 @@ describe('Gemini 3.8 Flash Medium deterministic public-contract workflow test', 
         rule: userCorrectionRule,
         confirmation: {
           confirmedAt: '2026-09-14T15:05:00Z',
-          confirmedBy: 'gemini-flash-user',
+          confirmedBy: 'low-reasoning-user',
           sourceReference: 'chat_session_20260914',
           trustBasis: 'user_confirmed',
           termsFingerprint: 'fp-kuma-350',

@@ -1,17 +1,21 @@
-# Agent Research Skill 與 Recommendation Pre-flight 標準作業程序 (SOP)
+# Archived: Agent Research Skill 與 Recommendation Pre-flight SOP
+
+> This document is historical. The current runtime skill is
+> [`mcp-tools.md`](../taiwan-card-rewards-skill/references/mcp-tools.md);
+> use its intent-routed workflows and current MCP tool schemas instead.
 
 > 正常商家消費意圖請直接呼叫 `recommend`，依
-> [`recommendation-intent.md`](taiwan-card-rewards-skill/workflows/recommendation-intent.md)
+> [`recommendation-intent.md`](../taiwan-card-rewards-skill/card-rewards-recommendation/workflows/recommendation-intent.md)
 > 執行。獨立的 `recommendation_preflight` 工具已完全移除——`recommend` 本身就是
 > 唯一、完整的推薦入口；required actions 的逐項處理見
-> [`preflight-and-required-actions.md`](taiwan-card-rewards-skill/workflows/preflight-and-required-actions.md)。
+> [`preflight-and-required-actions.md`](../taiwan-card-rewards-skill/card-rewards-recommendation/workflows/preflight-and-required-actions.md)。
 > 本文件其餘部分是研究/收斂 SOP 的敘事版本，工具細節一律以
-> [`taiwan-card-rewards-skill/references/mcp-tools.md`](taiwan-card-rewards-skill/references/mcp-tools.md) 為準。
+> [`mcp-tools.md`](../taiwan-card-rewards-skill/references/mcp-tools.md) 為準。
 
 **文件狀態**：正式營運指引 (Normative Agent SOP)
 **適用範圍**：canonical 20-tool MCP contract（release tag 僅供部署管理）
 **語言**：繁體中文
-**遵循規範**：[`CONTEXT.md`](../../CONTEXT.md), [ADR 0001](../adr/0001-independent-card-rewards-domain-and-agent-supplied-rules.md), [ADR 0003](../adr/0003-complete-initial-mcp-surface-with-layered-trust-gates.md), [ADR 0004](../adr/0004-generic-benefit-status-and-schema-v2.md), [ADR 0005](../adr/0005-payment-route-opportunity-stacking.md), [ADR 0006](../adr/0006-multi-component-reward-ledger-and-cap-attribution.md), [ADR 0007 Payment-route facts](../adr/0007-provider-neutral-payment-route-facts-and-evidence.md), [Payment-route research](../research/archive/payment-route-chain-reality-and-mcp-design.md), [使用者安裝與 Skill 分發 SOP](user-installation-and-skill-distribution-sop.md), [Schema v2 Spec](../specs/card-rewards-schema-v2-specification.md).
+**遵循規範**：[`CONTEXT.md`](../../CONTEXT.md), [ADR 0001](../adr/0001-independent-card-rewards-domain-and-agent-supplied-rules.md), [ADR 0003](../adr/0003-complete-initial-mcp-surface-with-layered-trust-gates.md), [ADR 0004](../adr/0004-generic-benefit-status-and-schema-v2.md), [ADR 0005](../adr/0005-payment-route-opportunity-stacking.md), [ADR 0006](../adr/0006-multi-component-reward-ledger-and-cap-attribution.md), [ADR 0007 Payment-route facts](../adr/0007-provider-neutral-payment-route-facts-and-evidence.md), [Payment-route research](../research/archive/payment-route-chain-reality-and-mcp-design.md), [使用者安裝與 Skill 分發 SOP](../../installation/README.md), [Schema v2 Spec](../specs/card-rewards-schema-v2-specification.md).
 
 ---
 
@@ -37,7 +41,7 @@
 
 ## 2. Canonical 20-tool MCP 合約體系
 
-MCP 伺服器公開 20 項標準工具，Agent 必須依照其唯讀與寫入屬性合規調用；完整清單、closed schema 與逐項用途說明一律以 [`taiwan-card-rewards-skill/references/mcp-tools.md`](taiwan-card-rewards-skill/references/mcp-tools.md) 為準，本文件不重複維護第二份清單以避免走漏更新。
+MCP 伺服器公開 20 項標準工具，Agent 必須依照其唯讀與寫入屬性合規調用；完整清單、closed schema 與逐項用途說明一律以 [`mcp-tools.md`](../taiwan-card-rewards-skill/references/mcp-tools.md) 為準，本文件不重複維護第二份清單以避免走漏更新。
 
 `recommend` 是唯一的推薦入口：merchant-first intent 的 `candidates[]` 已經
 同時包含直接刷卡（`kind: "direct_card"`）與多層路徑（`kind: "payment_path"`）

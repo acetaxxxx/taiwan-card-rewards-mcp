@@ -1,11 +1,11 @@
 # 使用者真實回饋案例研究與架構審查報告 (User Feedback Case Review)
 
-> **研究依據**：依據 `research` 技能規範，本研究以 `userFeedback/` 全部 4 份案例為出發點，嚴格對照儲存庫第一手權威資料：[`CONTEXT.md`](../../CONTEXT.md)、[`docs/adr/`](../adr/) 系列架構決策、[`docs/agents/usage-guide.md`](../agents/usage-guide.md)、[`docs/agents/taiwan-card-rewards-skill/`](../agents/taiwan-card-rewards-skill/) 規範，以及核心原始碼與測試（[`src/mcp-contract.ts`](../../src/mcp-contract.ts)、[`src/service.ts`](../../src/service.ts)、[`src/cli.ts`](../../src/cli.ts)、[`tests/agent-workflow-public-trace.test.ts`](../../tests/agent-workflow-public-trace.test.ts)）。  
+> **研究依據**：依據 `research` 技能規範，本研究以 `userFeedback/` 全部 4 份案例為出發點，嚴格對照儲存庫第一手權威資料：[`CONTEXT.md`](../../CONTEXT.md)、[`docs/adr/`](../adr/) 系列架構決策、[`docs/usage/ai-agent-usage-guide.md`](../usage/ai-agent-usage-guide.md)、[`docs/taiwan-card-rewards-skill/`](../taiwan-card-rewards-skill/) 規範，以及核心原始碼與測試（[`src/mcp-contract.ts`](../../src/mcp-contract.ts)、[`src/service.ts`](../../src/service.ts)、[`src/cli.ts`](../../src/cli.ts)、[`tests/agent-workflow-public-trace.test.ts`](../../tests/agent-workflow-public-trace.test.ts)）。
 > **最新產品方針與修訂重點**：
 > 1. **使用者確認規則啟用 (User-Confirmed Offers)**：使用者確認（User Confirmation）可直接啟用私有之 `user_confirmed` 規則版本；官方條款查證（Official Evidence）轉為可選之非阻塞旁路。推薦與試算輸出明確標示 `trust_basis`（`official_evidence` vs `user_confirmed`），並嚴守不可變版本、撤銷更正機制與租戶隔離（Tenant Isolation）。
 > 2. **外幣匯率相容鍵跨卡重用 (Reusable FX via Compatible Keys)**：FX 匯率以 `(baseCurrency, quoteCurrency, conversionOwner, conversionTiming, rateType, provider/scheme, freshnessWindow)` 之相容鍵（Compatible Key Tuple）跨卡與跨候選路徑安全重用（例如同屬 JCB 之多張卡片共享同一新鮮快照，免除每卡重查負擔）；精確作用域（route/card）優先於寬鬆 scheme，且嚴格禁止跨 conversionOwner 混用。
 > 3. **直接交易紀錄與查詢 (Transaction History)**：沿用單一 `Transaction` 模型；`record_transaction` 接受卡片、帳戶、錢包與現金，`list_transactions` 依時間區間分頁查詢。回饋、上限與路徑資訊是交易的關聯結果，不另建一套 Payment Journal 服務。
-> 4. **Gemini 3.8 Flash Medium 輕量引導 (3-Tier Playbook)**：採 `< 1500` token 的三層架構（意圖映射、決策表/動作合約、精簡 Payload 範例）與二階段更正確認，確保輕量模型低延遲且精確遵循。
+> 4. **低推理模型引導 (3-Tier Playbook)**：採 `< 1500` token 的三層架構（意圖映射、決策表/動作合約、精簡 Payload 範例）與二階段更正確認，確保輕量模型低延遲且精確遵循。
 
 ---
 
@@ -45,7 +45,7 @@
 * **第一手規範與架構對照**：
   - [`CONTEXT.md#L58-L63`](../../CONTEXT.md#L58-L63) 與 [`CONTEXT.md#L90-L94`](../../CONTEXT.md#L90-L94) 定義了 **Predicate AST** 與 **Exclusion**：條件比對是宣告式的精確樹狀結構，若未包含相應的商戶/通路分支，引擎將判定為不符合。
   - [`src/mcp-contract.ts#L10`](../../src/mcp-contract.ts#L10) 與 [`src/mcp-contract.ts#L81`](../../src/mcp-contract.ts#L81) 提供了商戶識別工具 [`resolve_merchant`](../../src/mcp-contract.ts#L81)，並在 [`upsert_offer`](../../src/mcp-contract.ts#L67) 支援原子建立候選商戶（如 `mch_china_airlines`），以避免商戶名稱歧義與通路脫鉤。
-  - 當規則覆蓋不足時，單純依賴本地快取會破壞推薦品質，Agent 應依據 [`docs/agents/taiwan-card-rewards-skill/workflows/research-and-evidence-submission.md`](../agents/taiwan-card-rewards-skill/workflows/research-and-evidence-submission.md) 流程保持對外部官方條款的主動檢索。
+  - 當規則覆蓋不足時，單純依賴本地快取會破壞推薦品質，Agent 應依據 [`research-and-evidence-submission.md`](../taiwan-card-rewards-skill/card-rewards-evidence/workflows/research-and-evidence-submission.md) 流程保持對外部官方條款的主動檢索。
 
 ---
 
@@ -183,23 +183,23 @@
 
 | 維度 | Agent 易用性：漸進式揭露 (Progressive Disclosure) | 堅守之精準安全邊界 (Surgical Fail-Closed) | 依據來源 |
 |---|---|---|---|
-| **推薦入口** | 單一入口 [`recommend`](../../src/mcp-contract.ts#L68) 直達，無需前置 `list_cards`；支援展示初估與候選排序 | planned 推薦純只讀，**絕對不扣減上限池**、不寫入持久帳本 | [`docs/agents/usage-guide.md#L101-L107`](../agents/usage-guide.md#L101-L107) |
+| **推薦入口** | 單一入口 [`recommend`](../../src/mcp-contract.ts#L68) 直達，無需前置 `list_cards`；支援展示初估與候選排序 | planned 推薦純只讀，**絕對不扣減上限池**、不寫入持久帳本 | [`docs/usage/ai-agent-usage-guide.md`](../usage/ai-agent-usage-guide.md) |
 | **支付路徑** | 優惠的 Route Selector／Capability 與使用者持有的卡或帳戶在推薦時直接生成候選；無需預先登記每個具體組合 | 只有使用者專屬或實際觀察狀態才持久化；嚴禁傳輸或儲存 PAN、CVV、OTP、密碼或 Token | [`docs/adr/0009`](../adr/0009-public-payment-capability-route-generation.md) |
 | **缺項處置** | 回傳 `requiredActions` 明示補件入口與責任方，允許展示帶標記之參考初估 | 金額計算嚴守 **Fail-Closed**：未知匯率/費率不腦補為 0 或 1:1，金額標記非確知 | [`src/service.ts#L875-L887`](../../src/service.ts#L875-L887) |
-| **外部查網** | Agent 主動檢索公開匯率與官網條款，減輕使用者填寫負擔 | **Zero-Network MCP**：MCP 本體保持零外網、零開放埠，外網完全由 Agent 工作區負責 | [`docs/agents/usage-guide.md#L50-L55`](../agents/usage-guide.md#L50-L55) |
+| **外部查網** | Agent 主動檢索公開匯率與官網條款，減輕使用者填寫負擔 | **Zero-Network MCP**：MCP 本體保持零外網、零開放埠，外網完全由 Agent 工作區負責 | [`docs/usage/ai-agent-usage-guide.md`](../usage/ai-agent-usage-guide.md) |
 | **規則更正** | 對話中經二階段確認後，直接啟用私有 `user_confirmed` 新版本；官方佐證可選 | 租戶完全隔離、版本不可變；計算與推薦輸出必須明確標明 `trust_basis` | [`CONTEXT.md#L48-L56`](../../CONTEXT.md#L48-L56) |
 | **匯率查詢** | 相容鍵跨卡/候選安全重用（如多張 JCB 卡共用同一快照），免除重複查價 | 作用域精確優先（route > scheme）；嚴禁跨 conversionOwner 混用；過期強制更新 | [`docs/adr/0007`](../adr/0007-provider-neutral-payment-route-facts-and-evidence.md) |
 | **歷史對帳** | `list_transactions(from, to, page, limit)` 直接列出信用卡、帳戶、錢包與現金交易 | 租戶隔離並限制單頁筆數；不延伸到帳戶餘額、預算或資產管理 | [`src/service.ts`](../../src/service.ts) |
 
 ---
 
-### 附錄：Gemini 3.8 Flash Medium 輕量落地指引 (< 1500 Tokens 3-Tier Architecture)
+### 附錄：低推理模型落地指引 (< 1500 Tokens 3-Tier Architecture)
 
-針對 Gemini 3.8 Flash Medium 等輕量推理模型，為避免提示詞過長導致注意力分散或延遲升高，採用 `< 1500` token 的精簡三層架構：
+針對輕量推理模型，為避免提示詞過長導致注意力分散或延遲升高，採用 `< 1500` token 的精簡三層架構：
 
 ```
 ┌────────────────────────────────────────────────────────────────────────┐
-│               Gemini 3.8 Flash Medium 輕量三層指引架構 (<1500 Tokens)    │
+│                    低推理模型三層指引架構 (<1500 Tokens)                 │
 ├────────────────────────────────────────────────────────────────────────┤
 │ Tier 1: 核心原則與意圖映射 (< 300 tokens)                               │
 │  - 推薦只讀、記帳授權、二階段規則更正確認、相容鍵匯率重用              │
@@ -305,12 +305,12 @@
 
 * **目標**：以極低代價修補 Agent 認知漏洞，建立二階段更正確認、相容鍵匯率重用與輕量 Playbook。
 * **具體工作項**：
-  1. **部署 Gemini 3.8 Flash Medium `< 1500` Token 輕量引導手冊**：
-     - 在 `docs/agents/taiwan-card-rewards-skill/references/` 建立 `low-reasoning-playbook.md`，以 Gemini Flash 與 Luna 可共用的三層架構（核心原則、決策表、精簡 Payload）落實二階段更正確認與私有版本啟用流程。
+  1. **部署 `< 1500` Token 低推理模型引導手冊**：
+     - 在 `docs/taiwan-card-rewards-skill/references/` 建立 `low-reasoning-playbook.md`，以三層架構（核心原則、決策表、精簡 Payload）落實二階段更正確認與私有版本啟用流程。
   2. **補齊電支/商業銀行現鈔結匯查價指引手冊**：
-     - 在 `docs/agents/taiwan-card-rewards-skill/references/` 新增 `wallet-and-clearing-fx-sources.md`，明定以商業銀行現鈔賣出結匯之電支掃碼路徑，應查詢之官方牌價來源與提取規範。
+     - 在 `docs/taiwan-card-rewards-skill/references/` 新增 `wallet-and-clearing-fx-sources.md`，明定以商業銀行現鈔賣出結匯之電支掃碼路徑，應查詢之官方牌價來源與提取規範。
   3. **在 Skill 中建立「FX 相容鍵重用與清算上下文防呆」**：
-     - 更新 [`docs/agents/taiwan-card-rewards-skill/workflows/payment-route-and-fx.md`](../agents/taiwan-card-rewards-skill/workflows/payment-route-and-fx.md)，明定同相容鍵（幣別、清算方、時點、牌價類型、組織）之卡片共享快照，免除每卡重複查價；同時加入負向防呆：當清算上下文為商業銀行現鈔結匯時，**嚴禁**跨作用域借用卡組織即期中價。
+     - 更新 [`payment-route-and-fx.md`](../taiwan-card-rewards-skill/card-rewards-recommendation/workflows/payment-route-and-fx.md)，明定同相容鍵（幣別、清算方、時點、牌價類型、組織）之卡片共享快照，免除每卡重複查價；同時加入負向防呆：當清算上下文為商業銀行現鈔結匯時，**嚴禁**跨作用域借用卡組織即期中價。
   4. **規範使用者確認啟用私有版本流程**：
      - 明定對話糾正應採「提取提案 $\rightarrow$ 使用者確認 $\rightarrow$ 啟用 `user_confirmed` 新版本」，禁止口頭答應不寫入，亦不再強制將外部爬蟲作為寫入前置阻塞。
 

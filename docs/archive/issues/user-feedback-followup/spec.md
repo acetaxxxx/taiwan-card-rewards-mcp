@@ -1,6 +1,6 @@
 # 使用者回饋導向的優惠、付款路徑與交易歷史
 
-Status: ready-for-agent
+Status: completed
 
 日期：2026-09-14
 
@@ -12,7 +12,7 @@ Status: ready-for-agent
 
 另一方面，交易資料已存在，卻沒有依時間區間列出歷史交易的 MCP 工具；`record_transaction` 又受限於信用卡識別，帳戶、錢包與現金支出不能用同一個自然的交易入口記錄。這使旅程回溯必須穿透資料檔，並迫使 Agent 在一般記帳與回饋事件之間選擇不同工具。
 
-FX 也存在兩種相反的失敗：同一清算脈絡被要求重複查價，或不同清算脈絡錯誤共用匯率。Gemini 3.8 Flash Medium 需要短而明確的工具契約，才能在上述流程中穩定工作。
+FX 也存在兩種相反的失敗：同一清算脈絡被要求重複查價，或不同清算脈絡錯誤共用匯率。低推理模型需要短而明確的工具契約，才能在上述流程中穩定工作。
 
 ## Solution
 
@@ -59,7 +59,7 @@ MCP 對 Agent 提供一個以使用者意圖為中心的公開介面：優惠可
 10. Event-scoped reward evaluation 繼續處理 top-up、purchase、發放、兌換與沖正等回饋語意，但以交易或事件識別與 Transaction 關聯。Agent 不需為一般記帳選擇 `record_event_reward`。
 11. FX Snapshot 以相容鍵重用：幣別與方向、conversion owner、conversion timing、rate type、provider 或 card scheme、以及新鮮度窗口都相同才可共用。route edge、route、card 或 issuer 的精確 scope 優先於通用 scope。
 12. 不同 conversion owner、rate type、card scheme，或已過期的私人報價不得當作可用共用報價。過期資料僅能是清楚標示的 estimate；實際 Transaction 不得把 estimate 當成已結算匯率。
-13. Gemini 3.8 Flash Medium 的操作文件採三層、少於 1,500 tokens 的形式：核心不變量與意圖路由；商家解析、直接推薦、使用者更正、selector 與 FX 的決策表；少量合法 payload 範例。品牌差異由資料與 MCP 回傳承載。
+13. 低推理模型的操作文件採三層、少於 1,500 tokens 的形式：核心不變量與意圖路由；商家解析、直接推薦、使用者更正、selector 與 FX 的決策表；少量合法 payload 範例。品牌差異由資料與 MCP 回傳承載。
 14. 在實作前新增或修訂決策紀錄：明確取代「無官方來源不可啟用私有規則」的假設；接受 ADR 0008 的單一 Transaction 與事件關聯方向；並補充 ADR 0007/0009，使 selector 可由 Offer Rule 驅動 planned route generation。舊 ADR 的歷史決策不刪除，而是標明被哪一份後續決策修訂。
 
 ## Testing Decisions

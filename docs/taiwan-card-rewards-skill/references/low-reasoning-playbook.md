@@ -1,8 +1,8 @@
 # Low-reasoning playbook
 
-Use this compact three-tier playbook for lightweight or lower-reasoning models,
-including Gemini Flash and Luna models. The canonical schemas remain in
-[`mcp-tools.md`](mcp-tools.md); this file controls routing and high-risk choices.
+Use this compact three-tier playbook for lightweight or lower-reasoning models.
+The canonical schemas remain in [`mcp-tools.md`](mcp-tools.md); this file
+controls routing and high-risk choices.
 
 ## Tier 1: invariants and intent router
 

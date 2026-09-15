@@ -2,13 +2,13 @@
 
 本標準作業程序規範多層支付路徑架構、最終扣款工具分類、支付拓撲與開放識別碼、外幣匯率研究及 PPM 量化標準。
 
-> **先讀研究與 ADR**：遇到跨境錢包、PayPay、TWQR、台灣 Pay、Pay+ 或任何新 provider，先讀 [`payment-route-chain-reality-and-mcp-design.md`](../../../research/archive/payment-route-chain-reality-and-mcp-design.md) 與 [ADR 0007](../../../adr/0007-provider-neutral-payment-route-facts-and-evidence.md)。品牌、QR 受理網路、消費者 App、互通方案、funding 與 settlement 是不同事實；只有官方證據支持時才可把它們串成一條 route。
+> **先查官方來源**：遇到跨境錢包、PayPay、TWQR、台灣 Pay、Pay+ 或任何新 provider，分別確認品牌、QR 受理網路、消費者 App、互通方案、funding 與 settlement；只有當期官方證據支持時才可把它們串成一條 route。
 
 ---
 
 ## 1. 循序支付路徑層級與最終扣款工具 (Payment-Route Layers & Funding Instruments)
 
-依據 [ADR 0005](../../../adr/0005-payment-route-opportunity-stacking.md) 與 [ADR 0006](../../../adr/0006-multi-component-reward-ledger-and-cap-attribution.md)，一筆消費可能同時產出多個獨立的 `RewardComponent`。系統將交易拆解為 **(A) 循序支付路徑層級** 與 **(B) 最終實體扣款工具**：
+一筆消費可能同時產出多個獨立的 `RewardComponent`。系統將交易拆解為 **(A) 循序支付路徑層級** 與 **(B) 最終實體扣款工具**：
 
 ### (A) 可疊加之循序支付路徑層級 (Ordered Payment-Route Layers)
 
