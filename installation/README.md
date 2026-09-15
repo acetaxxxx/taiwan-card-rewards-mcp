@@ -91,7 +91,7 @@ mkdir -p /path/to/my-card-rewards-data
 直接透過 `npx` 執行指定發行版本（npm 會自動觸發 `prepare` 編譯）：
 
 ```bash
-npx --yes github:acetaxxxx/taiwan-card-rewards-mcp#v0.13.1 \
+npx --yes github:acetaxxxx/taiwan-card-rewards-mcp#v0.14.0 \
   --data-dir /path/to/my-card-rewards-data \
   --user default-user
 ```
@@ -115,7 +115,7 @@ node dist/cli.js --data-dir /path/to/my-card-rewards-data --user default-user
       "command": "npx",
       "args": [
         "--yes",
-        "github:acetaxxxx/taiwan-card-rewards-mcp#v0.13.1",
+        "github:acetaxxxx/taiwan-card-rewards-mcp#v0.14.0",
         "--data-dir",
         "/absolute/path/to/my-card-rewards-data",
         "--user",
@@ -146,7 +146,7 @@ Agent 在接收到安裝或初始化指令時，應依照以下 Checklist 進行
 - [ ] 2. 伺服器握手 (Handshake Validation)
       - 發送 `initialize` JSON-RPC 請求。
       - 驗證回應中的 `protocolVersion` 為 `2024-11-05`。
-      - 驗證 `serverInfo.name` 為 `taiwan_card_rewards_mcp`，`serverInfo.version` 為 `0.13.1` (或更新相容版本)。
+      - 驗證 `serverInfo.name` 為 `taiwan_card_rewards_mcp`，`serverInfo.version` 為 `0.14.0` (或更新相容版本)。
 
 - [ ] 3. 20 項 canonical 公開工具檢核 (20-Tool Contract Verification)
       - 發送 `tools/list` 請求，確認 [`mcp-tools.md`](../docs/taiwan-card-rewards-skill/references/mcp-tools.md) 的 20 項工具完整存在：
@@ -192,7 +192,7 @@ Agent 在接收到安裝或初始化指令時，應依照以下 Checklist 進行
    ```bash
    cp -r /path/to/my-card-rewards-data /path/to/my-card-rewards-data.backup-$(date +%Y%m%d%H%M%S)
    ```
-3. **更新版本宣告**：將啟動命令或設定檔中的版本 tag 指向新版本（例如 `#v0.13.1`）。
+3. **更新版本宣告**：將啟動命令或設定檔中的版本 tag 指向新版本（例如 `#v0.14.0`）。
 4. **重新執行健康檢查**：重跑第 4 節的 20 項工具驗證與 `recommend` 健康檢查。
 
 ### 5.2 回滾程序 (Rollback Procedure)

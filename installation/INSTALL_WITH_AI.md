@@ -22,7 +22,7 @@ Inputs:
 - MCP config file: <MCP_CONFIG_FILE>
 - Skill directory: <SKILL_DIRECTORY>
 - Private data directory: <DATA_DIR>
-- Pinned release: v0.13.1
+- Pinned release: v0.14.0
 
 Complete these steps:
 
@@ -40,7 +40,7 @@ Complete these steps:
          "command": "npx",
          "args": [
            "--yes",
-           "github:acetaxxxx/taiwan-card-rewards-mcp#v0.13.1",
+           "github:acetaxxxx/taiwan-card-rewards-mcp#v0.14.0",
            "--data-dir",
            "<DATA_DIR>"
          ]
@@ -62,7 +62,7 @@ Complete these steps:
 6. Tell me whether the host must be restarted or its MCP/skills reloaded. Do
    not claim the installation is active until reload has happened.
 7. After reload, initialize the MCP server, confirm
-   `serverInfo.name = taiwan_card_rewards_mcp`, confirm version 0.13.1, and
+   `serverInfo.name = taiwan_card_rewards_mcp`, confirm version 0.14.0, and
    confirm tools/list exposes the complete 20-tool contract including
    `recommend` and `list_transactions`.
 8. Run a read-only smoke check with list_cards. Do not create cards, offers,

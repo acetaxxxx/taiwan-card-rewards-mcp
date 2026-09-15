@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.14.0
+
+- Add user-confirmed offer versions, generated payment paths, bounded transaction history, reusable FX compatibility, and low-reasoning agent workflow coverage.
+
 ## 0.13.1
 
 - Preserve the `enrolledAt` timestamp written for campaign registrations when

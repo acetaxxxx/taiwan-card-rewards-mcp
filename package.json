@@ -1,8 +1,10 @@
 {
   "name": "taiwan-card-rewards-mcp",
-  "version": "0.13.1",
+  "version": "0.14.0",
   "type": "module",
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "bin": {
     "taiwan-card-rewards-mcp": "dist/cli.js"
   },
