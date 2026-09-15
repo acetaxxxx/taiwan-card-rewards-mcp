@@ -537,6 +537,8 @@ export interface FxEvaluationContext {
   conversionOwner?: ConversionOwner | 'card_scheme' | 'issuer' | 'wallet' | 'merchant_dcc' | 'unknown' | undefined;
   conversionTiming?: ConversionTiming | undefined;
   rateType?: FxRateType | undefined;
+  /** Known clearing provider; a quote from another provider is not reusable. */
+  provider?: string | undefined;
   cardScheme?: string | undefined;
   cardId?: string | undefined;
   issuer?: string | undefined;

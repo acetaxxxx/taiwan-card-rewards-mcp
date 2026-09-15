@@ -197,6 +197,13 @@ export function isFxCompatible(params: {
     }
   }
 
+  // A provider-qualified clearing context is equally restrictive.  Leave an
+  // unknown provider reusable so a generic reference quote can still support
+  // planned recommendations, but never cross a known provider boundary.
+  if (context.provider && snapshot.provider.toUpperCase() !== context.provider.toUpperCase()) {
+    return false;
+  }
+
   // Non-card conversions (issuer, wallet, merchant_dcc) must never use card scheme quotes or rates
   if (ctxOwner !== 'card_scheme' && ctxOwner !== 'unknown') {
     if (snapshot.cardScheme || snapshot.rateType === 'card_scheme') {

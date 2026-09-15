@@ -384,6 +384,51 @@ describe('Gemini 3.8 Flash Medium deterministic public-contract workflow test', 
         reward: { kind: 'percentage', rateBps: 350 },
       };
 
+      // 7a. Preview the correction against the current rule before any durable write.
+      // calculate_reward is public and pure, so the agent can show this difference
+      // without activating the user-supplied candidate.
+      const correctionPreviewTransaction = {
+        cardId: 'card-esun-kuma-jcb',
+        kind: 'purchase',
+        mode: 'planned',
+        occurredAt: '2026-09-14T15:01:00Z',
+        amount: { amountMinor: 100000, currency: 'TWD' },
+        country: 'JP',
+      };
+      const currentRuleSnapshot = {
+        ...jcbSnapshot,
+        id: 'snap-jcb-fx',
+      };
+      const correctionPreviewContext = {
+        now: '2026-09-14T15:01:00Z',
+        sourceSnapshots: {
+          [currentRuleSnapshot.id]: currentRuleSnapshot,
+          [userCorrectionSnap.id]: userCorrectionSnap,
+        },
+      };
+      const currentRulePreview = await client.callTool('calculate_reward', {
+        rule: {
+          id: 'rule-kuma-jp-200',
+          cardId: 'card-esun-kuma-jcb',
+          version: '1.0.0',
+          sourceSnapshotId: currentRuleSnapshot.id,
+          status: 'active',
+          validFrom: '2026-01-01T00:00:00Z',
+          settlementCurrency: 'TWD',
+          match: { countries: ['JP'] },
+          reward: { kind: 'percentage', rateBps: 200 },
+        },
+        transaction: correctionPreviewTransaction,
+        context: correctionPreviewContext,
+      });
+      const candidatePreview = await client.callTool('calculate_reward', {
+        rule: userCorrectionRule,
+        transaction: correctionPreviewTransaction,
+        context: correctionPreviewContext,
+      });
+      expect(currentRulePreview.grossReward.amountMinor).toBe(2000);
+      expect(candidatePreview.grossReward.amountMinor).toBe(3500);
+
       // Writing without confirmation must fail
       await expect(
         client.callTool('upsert_offer', {

@@ -84,6 +84,12 @@ describe('Ticket 05: Compatible key FX reuse, isolation, scope precedence, and p
         context: { baseCurrency: 'JPY', quoteCurrency: 'TWD', conversionOwner: 'card_scheme', cardScheme: 'VISA' },
       })).toBe(false);
 
+      // A quote from one known clearing provider must not be reused by another.
+      expect(isFxCompatible({
+        snapshot: { ...baseSnapshot, provider: 'wallet-a', conversionOwner: 'wallet', rateType: 'spot_selling', cardScheme: undefined },
+        context: { baseCurrency: 'JPY', quoteCurrency: 'TWD', conversionOwner: 'wallet', provider: 'wallet-b' },
+      })).toBe(false);
+
       // Freshness check
       expect(isFxFresh(baseSnapshot, at)).toBe(true);
       expect(isFxFresh(baseSnapshot, '2026-09-10T14:00:00Z')).toBe(false); // 2h > 3600s

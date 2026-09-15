@@ -613,6 +613,48 @@ describe('Ticket 03: 統一交易記錄與時間查詢 (Unified Transactions & T
     }
   });
 
+  it('records a non-card foreign-currency spend without requiring FX from unrelated card rules', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'tx-non-card-unrelated-fx-'));
+    try {
+      const store = new FileStore({ dataDir: dir });
+      const service = new RewardService(store, 'user-1');
+      service.upsertOffer(
+        {
+          id: 'foreign-card-rule-source',
+          url: 'https://issuer.example/foreign-reward',
+          fetchedAt: '2026-09-01T00:00:00Z',
+          contentHash: 'foreign-card-rule-hash',
+          parserVersion: '1',
+          verified: true,
+        },
+        {
+          id: 'foreign-card-rule',
+          cardId: 'other-card',
+          version: '1',
+          sourceSnapshotId: 'foreign-card-rule-source',
+          status: 'active',
+          validFrom: '2026-09-01T00:00:00Z',
+          settlementCurrency: 'TWD',
+          match: {},
+          reward: { kind: 'percentage', rateBps: 300 },
+        },
+      );
+
+      expect(() => service.recordTransaction({
+        idempotencyKey: 'cash-jpy-no-reward',
+        kind: 'purchase',
+        mode: 'actual',
+        occurredAt: '2026-09-10T10:00:00Z',
+        amount: { amountMinor: 1000, currency: 'JPY' },
+        funding: { kind: 'cash' },
+      })).not.toThrow();
+      expect(service.listTransactions().transactions).toHaveLength(1);
+      store.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it('enforces multi-tenant isolation across recording, querying, and refunds', () => {
     const dir = mkdtempSync(join(tmpdir(), 'tx-multi-tenant-'));
     try {

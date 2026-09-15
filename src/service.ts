@@ -1485,7 +1485,11 @@ export class RewardService {
       }
     }
     const card = transaction.cardId ? state.cards.find((item) => item.id === transaction.cardId) : undefined;
-    const rules = state.rules.filter((rule) => rule.status === 'active' && (!card || rule.cardId === card.id));
+    // A non-card transaction has no card-reward evaluation path. Its audit record must
+    // not inherit FX requirements from unrelated active card rules.
+    const rules = card
+      ? state.rules.filter((rule) => rule.status === 'active' && rule.cardId === card.id)
+      : [];
     const foreignRule = rules.some((rule) => rule.settlementCurrency !== transaction.amount.currency);
     if (transaction.kind !== 'refund' && foreignRule) {
       if (!transaction.fx) {
