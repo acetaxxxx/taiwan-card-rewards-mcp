@@ -27,6 +27,34 @@ Predicate 只允許讀取下列交易欄位。欄位名稱必須以 `transaction
 - `NOT` 對缺失值仍應保留 unknown，不能把「不知道是否為台灣」當成「確定不是台灣」。
 - MCP 邊界的必要欄位（例如 `transaction.amount.currency`）仍由 transaction validator 驗證；評估器層保留缺失測試，以防內部呼叫或未來 schema 放寬時誤算。
 
+## Unknown 與錯誤原因契約
+
+回傳 `unknown` 或 `needs_review` 時，結果必須附帶結構化原因，不只提供一段自然語言訊息。每個原因至少包含：
+
+```json
+{
+  "code": "missing_required_fact",
+  "path": "transaction.amount.currency",
+  "message": "缺少交易幣別，無法判斷是否為新台幣",
+  "requiredFacts": ["transaction.amount.currency"],
+  "nextAction": "ask_user"
+}
+```
+
+建議原因代碼如下：
+
+| code | 使用時機 | agent 下一步 |
+| --- | --- | --- |
+| `missing_required_fact` | 欄位不存在或未提供 | 詢問使用者或補齊交易資料 |
+| `invalid_fact` | 欄位存在但格式不合法 | 請求修正格式 |
+| `conflicting_fact` | 同一欄位出現互相矛盾的值 | 顯示衝突並請使用者選定 |
+| `unsupported_field` | predicate 使用未公開的欄位路徑 | 改用白名單欄位 |
+| `stale_fact` | 資料超過有效期間 | 重新查詢或確認最新值 |
+
+`requiredFacts` 應列出所有阻擋判斷的欄位，`path` 應指向具體輸入位置；`message` 用繁體中文說明原因，但 agent 不應依賴文字解析決策。`no_match` 不需要錯誤原因，因為它代表條件已被確定判定為不成立。
+
+對 `AND` 條件，應合併所有缺失或衝突原因；對 `OR` 條件，若已有一個分支確定匹配則不需回報其他分支缺失。這能讓 agent 在一次回應中知道要補哪些資料，而不是盲目重試。
+
 ## 通用規則範例
 
 以下條件表達「非台灣且非新台幣，並排除 DCC」：
