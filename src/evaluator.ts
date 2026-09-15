@@ -28,8 +28,8 @@ import type {
 import { RewardServiceError } from './errors.js';
 import type { LedgerStore } from './store.js';
 
-function diagnostic(code: Diagnostic['code'], path: string, requiredFacts: readonly string[], retryAction: string): Diagnostic {
-  return { code, path, requiredFacts, retryAction };
+function diagnostic(code: Diagnostic['code'], path: string, requiredFacts: readonly string[], retryAction: string, message = `${path} 無法完成條件判斷`): Diagnostic {
+  return { code, path, requiredFacts, retryAction, message, nextAction: retryAction };
 }
 
 
@@ -373,22 +373,48 @@ export class EventRewardLedger {
 
 type FactResolution =
   | { kind: 'ok'; value: unknown }
-  | { kind: 'missing'; reason: string }
-  | { kind: 'conflict'; reason: string };
+  | { kind: 'missing'; reason: string; diagnostic: Diagnostic }
+  | { kind: 'invalid'; reason: string; diagnostic: Diagnostic }
+  | { kind: 'conflict'; reason: string; diagnostic: Diagnostic }
+  | { kind: 'unsupported'; reason: string; diagnostic: Diagnostic };
+
+const predicateFact = (path: string, value: unknown): FactResolution => {
+  if (value === undefined || value === null) return { kind: 'missing', reason: `missing ${path}`, diagnostic: diagnostic('missing_required_fact', path, [path], 'ask_user', `缺少 ${path}，無法判斷條件`) };
+  if (path.endsWith('.currency') || path === 'transaction.country' || path === 'transaction.merchant' || path === 'transaction.mcc' || path === 'transaction.channel' || path === 'transaction.paymentMethod' || path === 'transaction.funding.kind' || path === 'transaction.route.kind') {
+    if (typeof value !== 'string' || value.length === 0) return { kind: 'invalid', reason: `invalid ${path}`, diagnostic: diagnostic('invalid_fact', path, [path], 'ask_user', `${path} 必須是非空字串`) };
+  }
+  if (path === 'transaction.routeContext.dcc' && typeof value !== 'boolean') return { kind: 'invalid', reason: `invalid ${path}`, diagnostic: diagnostic('invalid_fact', path, [path], 'ask_user', `${path} 必須是布林值`) };
+  return { kind: 'ok', value };
+};
 
 function resolveFieldFact(field: string, tx: TransactionTuple, context: EvaluationContext): FactResolution {
   if (field.startsWith('transaction.')) {
-    const key = field.slice('transaction.'.length) as keyof TransactionTuple;
-    const val = tx[key];
-    if (val === undefined) return { kind: 'missing', reason: `missing ${field}` };
-    return { kind: 'ok', value: val };
+    switch (field) {
+      case 'transaction.country': return predicateFact(field, tx.country);
+      case 'transaction.merchant': return predicateFact(field, tx.merchant);
+      case 'transaction.mcc': return predicateFact(field, tx.mcc);
+      case 'transaction.channel': return predicateFact(field, tx.channel);
+      case 'transaction.amount.currency': {
+        const amountCurrency = tx.amount?.currency;
+        const routeCurrency = tx.routeContext?.transactionCurrency;
+        if (amountCurrency !== undefined && routeCurrency !== undefined && amountCurrency.toUpperCase() !== routeCurrency.toUpperCase()) {
+          return { kind: 'conflict', reason: `conflicting transaction currency facts`, diagnostic: diagnostic('conflicting_fact', field, ['transaction.amount.currency', 'transaction.routeContext.transactionCurrency'], 'ask_user', '交易金額幣別與路徑交易幣別互相衝突') };
+        }
+        return predicateFact(field, amountCurrency);
+      }
+      case 'transaction.routeContext.dcc': return predicateFact(field, tx.routeContext?.dcc);
+      case 'transaction.funding.kind': return predicateFact(field, tx.funding?.kind);
+      case 'transaction.route.kind': return predicateFact(field, tx.route?.kind);
+      case 'transaction.paymentMethod': return predicateFact(field, tx.paymentMethod);
+      default: return { kind: 'unsupported', reason: `unsupported field ${field}`, diagnostic: diagnostic('unsupported_field', field, [], 'use_supported_predicate_field', `不支援條件欄位 ${field}`) };
+    }
   }
 
   if (field.startsWith('user.')) {
     const txTime = tx.occurredAt ? Date.parse(tx.occurredAt) : NaN;
     const nowTime = context?.now ? Date.parse(context.now) : NaN;
     const checkTime = Number.isFinite(txTime) ? txTime : nowTime;
-    if (!Number.isFinite(checkTime)) return { kind: 'missing', reason: 'missing evaluation timestamp' };
+    if (!Number.isFinite(checkTime)) return { kind: 'missing', reason: 'missing evaluation timestamp', diagnostic: diagnostic('missing_required_fact', 'transaction.occurredAt', ['transaction.occurredAt'], 'ask_user', '缺少有效交易時間，無法套用使用者條件') };
 
     if (context?.userFacts && field in context.userFacts) {
       return { kind: 'ok', value: context.userFacts[field] };
@@ -422,13 +448,13 @@ function resolveFieldFact(field: string, tx: TransactionTuple, context: Evaluati
       if (validFacts.length > 0 && validFacts[0]) {
         const distinctValues = new Set(validFacts.map((f) => JSON.stringify(f.value)));
         if (distinctValues.size > 1) {
-          return { kind: 'conflict', reason: `conflicting user facts for ${field}` };
+          return { kind: 'conflict', reason: `conflicting user facts for ${field}`, diagnostic: diagnostic('conflicting_fact', field, [field], 'ask_user', `${field} 存在互相衝突的值`) };
         }
         return { kind: 'ok', value: validFacts[0].value };
       }
 
       if (matchingFacts.length > 0) {
-        return { kind: 'missing', reason: `missing ${field}` };
+        return { kind: 'missing', reason: `missing ${field}`, diagnostic: diagnostic('missing_required_fact', field, [field], 'ask_user', `缺少 ${field} 的有效值`) };
       }
     }
 
@@ -451,58 +477,63 @@ function resolveFieldFact(field: string, tx: TransactionTuple, context: Evaluati
       }
     }
 
-    return { kind: 'missing', reason: `missing ${field}` };
+    return { kind: 'missing', reason: `missing ${field}`, diagnostic: diagnostic('missing_required_fact', field, [field], 'ask_user', `缺少 ${field}，無法判斷條件`) };
   }
 
-  return { kind: 'missing', reason: `unsupported field ${field}` };
+  return { kind: 'unsupported', reason: `unsupported field ${field}`, diagnostic: diagnostic('unsupported_field', field, [], 'use_supported_predicate_field', `不支援條件欄位 ${field}`) };
 }
 
 export type PredicateOutcome = {
   matched: boolean;
   missing: string[];
   conflicts: string[];
+  diagnostics: Diagnostic[];
 };
 
 export function evaluatePredicate(predicate: Predicate, tx: TransactionTuple, context: EvaluationContext): PredicateOutcome {
   if (predicate.op === 'NOT') {
     const child = evaluatePredicate(predicate.rule, tx, context);
-    if (child.conflicts.length) return { matched: false, missing: [], conflicts: child.conflicts };
-    if (child.missing.length) return { matched: false, missing: child.missing, conflicts: [] };
-    return { matched: !child.matched, missing: [], conflicts: [] };
+    if (child.conflicts.length) return { matched: false, missing: [], conflicts: child.conflicts, diagnostics: child.diagnostics };
+    if (child.missing.length) return { matched: false, missing: child.missing, conflicts: [], diagnostics: child.diagnostics };
+    return { matched: !child.matched, missing: [], conflicts: [], diagnostics: [] };
   }
   if ('rules' in predicate) {
     const children = predicate.rules.map((child) => evaluatePredicate(child, tx, context));
     const conflicts = children.flatMap((c) => c.conflicts);
-    if (conflicts.length) return { matched: false, missing: [], conflicts };
+    const diagnostics = children.flatMap((c) => c.diagnostics);
+    if (conflicts.length) return { matched: false, missing: [], conflicts, diagnostics };
     const missing = children.flatMap((c) => c.missing);
     if (predicate.op === 'AND') {
       if (children.some((c) => !c.matched && c.missing.length === 0)) {
-        return { matched: false, missing: [], conflicts: [] };
+        return { matched: false, missing: [], conflicts: [], diagnostics };
       }
-      if (missing.length) return { matched: false, missing, conflicts: [] };
-      return { matched: true, missing: [], conflicts: [] };
+      if (missing.length) return { matched: false, missing, conflicts: [], diagnostics };
+      return { matched: true, missing: [], conflicts: [], diagnostics: [] };
     }
-    if (children.some((c) => c.matched)) return { matched: true, missing: [], conflicts: [] };
-    if (missing.length) return { matched: false, missing, conflicts: [] };
-    return { matched: false, missing: [], conflicts: [] };
+    if (children.some((c) => c.matched)) return { matched: true, missing: [], conflicts: [], diagnostics: [] };
+    if (missing.length) return { matched: false, missing, conflicts: [], diagnostics };
+    return { matched: false, missing: [], conflicts: [], diagnostics: [] };
   }
 
   const fact = resolveFieldFact(predicate.field, tx, context);
   if (fact.kind === 'conflict') {
-    return { matched: false, missing: [], conflicts: [fact.reason] };
+    return { matched: false, missing: [], conflicts: [fact.reason], diagnostics: [fact.diagnostic] };
   }
   if (fact.kind === 'missing') {
-    return { matched: false, missing: [fact.reason], conflicts: [] };
+    return { matched: false, missing: [fact.reason], conflicts: [], diagnostics: [fact.diagnostic] };
+  }
+  if (fact.kind === 'invalid' || fact.kind === 'unsupported') {
+    return { matched: false, missing: [], conflicts: [fact.reason], diagnostics: [fact.diagnostic] };
   }
   const actual = fact.value;
   if (predicate.op === 'EQUALS') {
-    return { matched: actual === predicate.value, missing: [], conflicts: [] };
+    return { matched: actual === predicate.value, missing: [], conflicts: [], diagnostics: [] };
   }
   if (predicate.op === 'MATCH_ALLOWLIST') {
     const matched = Array.isArray(predicate.value) && predicate.value.includes(String(actual));
-    return { matched, missing: [], conflicts: [] };
+    return { matched, missing: [], conflicts: [], diagnostics: [] };
   }
-  return { matched: false, missing: [`unsupported operator for ${predicate.field}`], conflicts: [] };
+  return { matched: false, missing: [`unsupported operator for ${predicate.field}`], conflicts: [], diagnostics: [diagnostic('unsupported_field', predicate.field, [], 'use_supported_predicate_operator', `不支援條件運算子 ${predicate.op}`)] };
 }
 
 export function convertMinor(amount: Money, currency: string, tx: TransactionTuple): number | undefined {
@@ -655,11 +686,11 @@ export function evaluateOffer(
   if (rule.predicate) {
     const outcome = evaluatePredicate(rule.predicate, tx, context);
     if (outcome.conflicts.length) {
-      return { ...base, status: 'needs_review', ruleId: rule.id, ruleVersion: rule.version, unknownReasons: outcome.conflicts };
+      return { ...base, status: 'needs_review', ruleId: rule.id, ruleVersion: rule.version, unknownReasons: outcome.conflicts, diagnostics: outcome.diagnostics };
     }
     if (!outcome.matched && outcome.missing.length === 0) return base;
     if (outcome.missing.length) {
-      return { ...base, status: 'unknown', ruleId: rule.id, ruleVersion: rule.version, unknownReasons: outcome.missing };
+      return { ...base, status: 'unknown', ruleId: rule.id, ruleVersion: rule.version, unknownReasons: outcome.missing, diagnostics: outcome.diagnostics };
     }
   } else {
     const matched = matchRule(rule, tx);
