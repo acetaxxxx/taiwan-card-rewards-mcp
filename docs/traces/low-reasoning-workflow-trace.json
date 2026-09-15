@@ -1,0 +1,528 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Low-reasoning stdio MCP workflow trace",
+  "description": "End-to-end workflow trace for a low-reasoning model interacting with taiwan-card-rewards-mcp over stdio JSON-RPC 2.0.",
+  "metadata": {
+    "modelProfile": "low_reasoning",
+    "protocol": "stdio-jsonrpc-2.0",
+    "guidanceDocument": "docs/taiwan-card-rewards-skill/references/low-reasoning-playbook.md",
+    "recordedAt": "2026-09-14T15:40:00Z",
+    "coverage": [
+      "merchant_resolution_and_ambiguity",
+      "direct_recommendation_without_listing",
+      "route_selector_and_capability_generation",
+      "compatible_key_fx_reuse",
+      "external_source_failure_stop_and_gap_delivery",
+      "two_phase_user_correction_preview_confirm_write",
+      "unified_transactions_four_funding_sources",
+      "dual_time_basis_querying"
+    ]
+  },
+  "turns": [
+    {
+      "turn": 1,
+      "scenario": "merchant_resolution_and_ambiguity",
+      "userMessage": "我想在台北一家超市買生鮮，好像是叫全聯之類的，哪張卡比較好？",
+      "modelReasoning": "使用者提到模糊商家名稱「全聯之類的」。依據第二層決策表 1（商家解析與歧義處理），當商家名稱不精確時，調用 resolve_merchant({ rawQuery: '全聯' }) 取得確切 canonicalId。紅線提醒：嚴禁調用 list_cards 或 list_payment_routes。",
+      "toolCall": {
+        "name": "resolve_merchant",
+        "arguments": {
+          "rawQuery": "全聯",
+          "country": "TW",
+          "market": "TW"
+        }
+      },
+      "toolResult": {
+        "resolutionStatus": "confirmed",
+        "merchant": {
+          "canonicalId": "mch_01J8PX000000000000PX000001",
+          "canonicalNameZhHant": "全聯福利中心",
+          "canonicalNameLocale": "zh-Hant-TW",
+          "operatingMarkets": ["TW"],
+          "status": "active"
+        }
+      },
+      "modelResponse": "已確認您欲消費的商家為「全聯福利中心」。請問您的預計消費金額是多少？我將直接為您試算最佳回饋卡別與付款路徑。",
+      "invariantsSatisfied": [
+        "no_preflight_listing",
+        "resolve_merchant_called_for_ambiguity_only"
+      ],
+      "terminalCondition": "awaiting_user_spend_amount"
+    },
+    {
+      "turn": 2,
+      "scenario": "direct_recommendation_without_listing",
+      "userMessage": "金額大概是 1,500 元台幣，我有玉山熊本熊卡和台新玫瑰卡，推薦哪張？",
+      "modelReasoning": "使用者提供了明確商家與金額。依據第一層紅線 #1：推薦直接呼叫 recommend，嚴禁先呼叫 list_cards 或 list_payment_routes。直接傳入商家名稱與消費金額。",
+      "toolCall": {
+        "name": "recommend",
+        "arguments": {
+          "merchant": {
+            "canonicalId": "mch_01J8PX000000000000PX000001",
+            "canonicalNameZhHant": "全聯福利中心"
+          },
+          "amount": {
+            "amountMinor": 150000,
+            "currency": "TWD"
+          },
+          "occurredAt": "2026-09-14T14:00:00Z"
+        }
+      },
+      "toolResult": {
+        "status": "ready",
+        "candidates": [
+          {
+            "id": "card:c_taishin_rose",
+            "kind": "direct_card",
+            "cardId": "c_taishin_rose",
+            "displayName": "台新 Richart 玫瑰卡",
+            "status": "ready",
+            "reward": {
+              "amountMinor": 5700,
+              "currency": "TWD"
+            },
+            "netSpend": {
+              "amountMinor": 144300,
+              "currency": "TWD"
+            },
+            "effectiveRateBps": 380,
+            "matchedRules": [
+              {
+                "ruleId": "rule-taishin-big-spend",
+                "status": "matched"
+              }
+            ]
+          },
+          {
+            "id": "card:c_esun_kumamon",
+            "kind": "direct_card",
+            "cardId": "c_esun_kumamon",
+            "displayName": "玉山熊本熊卡",
+            "status": "ready",
+            "reward": {
+              "amountMinor": 1500,
+              "currency": "TWD"
+            },
+            "netSpend": {
+              "amountMinor": 148500,
+              "currency": "TWD"
+            },
+            "effectiveRateBps": 100,
+            "matchedRules": [
+              {
+                "ruleId": "rule-esun-base",
+                "status": "matched"
+              }
+            ]
+          }
+        ],
+        "requiredActions": []
+      },
+      "modelResponse": "在全聯福利中心消費 1,500 元推薦方案：\n1. 【首選】台新 Richart 玫瑰卡：享 3.8% 回饋（約 57 元），實質支出 1,443 元。\n2. 玉山熊本熊卡：一般消費 1.0% 回饋（約 15 元），實質支出 1,485 元。",
+      "invariantsSatisfied": [
+        "direct_recommendation_executed",
+        "zero_preflight_listing"
+      ],
+      "terminalCondition": "recommendation_delivered"
+    },
+    {
+      "turn": 3,
+      "scenario": "route_selector_and_capability_generation",
+      "userMessage": "如果在全聯用 LINE Pay 或 PX Pay 綁卡支付，會有更高回饋嗎？",
+      "modelReasoning": "使用者詢問指定行動支付路徑。優惠規則已內建 routeSelector，系統中存在 LINE Pay 與 PX Pay 的 Public Payment Capability。依據第二層決策表 3，Agent 直接呼叫 recommend 獲取動態生成的 generated payment path，不得手動登記 durable route。",
+      "toolCall": {
+        "name": "recommend",
+        "arguments": {
+          "merchant": {
+            "canonicalId": "mch_01J8PX000000000000PX000001",
+            "canonicalNameZhHant": "全聯福利中心"
+          },
+          "amount": {
+            "amountMinor": 150000,
+            "currency": "TWD"
+          },
+          "channel": "in_store",
+          "occurredAt": "2026-09-14T14:10:00Z"
+        }
+      },
+      "toolResult": {
+        "status": "ready",
+        "candidates": [
+          {
+            "id": "gen_route_pxpay_taishin",
+            "kind": "payment_path",
+            "displayName": "PX Pay 綁定台新玫瑰卡",
+            "status": "ready",
+            "reward": {
+              "amountMinor": 7500,
+              "currency": "TWD"
+            },
+            "netSpend": {
+              "amountMinor": 142500,
+              "currency": "TWD"
+            },
+            "effectiveRateBps": 500,
+            "matchedRules": [
+              {
+                "ruleId": "rule-pxpay-taishin-promo",
+                "status": "matched"
+              }
+            ]
+          },
+          {
+            "id": "card:c_taishin_rose",
+            "kind": "direct_card",
+            "displayName": "台新 Richart 玫瑰卡 (實體刷卡)",
+            "status": "ready",
+            "reward": {
+              "amountMinor": 5700,
+              "currency": "TWD"
+            },
+            "effectiveRateBps": 380
+          },
+          {
+            "id": "gen_route_linepay_esun",
+            "kind": "payment_path",
+            "displayName": "LINE Pay 綁定玉山熊本熊卡",
+            "status": "ready",
+            "reward": {
+              "amountMinor": 1500,
+              "currency": "TWD"
+            },
+            "effectiveRateBps": 100
+          }
+        ],
+        "requiredActions": []
+      },
+      "modelResponse": "若使用行動支付，推薦選擇【PX Pay 綁定台新玫瑰卡】：\n- 回饋率達 5.0%（獲得約 75 元回饋），為目前最佳付款路徑。\n- 若直接實體刷卡為 3.8%（57 元）。\n- LINE Pay 綁定玉山熊本熊卡則維持 1.0%（15 元）。",
+      "invariantsSatisfied": [
+        "route_selector_path_generation",
+        "unified_candidate_ranking"
+      ],
+      "terminalCondition": "payment_path_recommended"
+    },
+    {
+      "turn": 4,
+      "scenario": "compatible_key_fx_reuse",
+      "userMessage": "我明天去日本唐吉訶德買 10,000 日圓，玉山熊本熊卡跟富邦 J 卡都是 JCB，哪張划算？",
+      "modelReasoning": "使用者詢問兩張同卡組織 (JCB) 的日圓實體消費。清算條件相同：(JPY, TWD, card_scheme, card_scheme, JCB)。依據第二層決策表 4，兩張卡共享相同的相容鍵 FX 快照，呼叫 recommend 時附帶一份 JCB 日圓快照，系統自動跨卡重用。",
+      "toolCall": {
+        "name": "recommend",
+        "arguments": {
+          "merchant": "唐吉訶德",
+          "amount": {
+            "amountMinor": 1000000,
+            "currency": "JPY"
+          },
+          "country": "JP",
+          "channel": "in_store",
+          "occurredAt": "2026-09-15T10:00:00Z",
+          "fx": {
+            "id": "fx-jcb-jpy-twd-20260914",
+            "baseCurrency": "JPY",
+            "quoteCurrency": "TWD",
+            "ratePpm": 215000,
+            "capturedAt": "2026-09-14T10:00:00Z",
+            "provider": "JCB",
+            "rateType": "card_scheme",
+            "cardScheme": "JCB",
+            "conversionOwner": "card_scheme",
+            "maxAgeSeconds": 86400
+          }
+        }
+      },
+      "toolResult": {
+        "status": "ready",
+        "candidates": [
+          {
+            "id": "card:c_fubon_j",
+            "kind": "direct_card",
+            "displayName": "富邦 J 卡",
+            "status": "ready",
+            "fxEstimate": {
+              "status": "estimated",
+              "ratePpm": 215000,
+              "source": "snapshot_reuse"
+            },
+            "reward": {
+              "amountMinor": 65,
+              "currency": "TWD"
+            },
+            "netSpend": {
+              "amountMinor": 2085,
+              "currency": "TWD"
+            },
+            "effectiveRateBps": 300
+          },
+          {
+            "id": "card:c_esun_kumamon",
+            "kind": "direct_card",
+            "displayName": "玉山熊本熊卡",
+            "status": "ready",
+            "fxEstimate": {
+              "status": "estimated",
+              "ratePpm": 215000,
+              "source": "snapshot_reuse"
+            },
+            "reward": {
+              "amountMinor": 43,
+              "currency": "TWD"
+            },
+            "netSpend": {
+              "amountMinor": 2107,
+              "currency": "TWD"
+            },
+            "effectiveRateBps": 200
+          }
+        ],
+        "requiredActions": []
+      },
+      "modelResponse": "在日本唐吉訶德消費 10,000 日圓（以 JCB 匯率 0.215 折合約 2,150 台幣試算）：\n1. 【推薦】富邦 J 卡：日韓消費 3.0% 回饋，約可得 65 元回饋，折合淨支出約 2,085 元。\n2. 玉山熊本熊卡：一般消費 2.0% 回饋，約可得 43 元回饋，折合淨支出約 2,107 元。",
+      "invariantsSatisfied": [
+        "compatible_key_fx_reuse_across_cards",
+        "consistent_clearing_context"
+      ],
+      "terminalCondition": "fx_comparison_delivered"
+    },
+    {
+      "turn": 5,
+      "scenario": "external_source_failure_stop_and_gap_delivery",
+      "userMessage": "如果改在首爾樂天免稅店刷 50,000 韓元（KRW），玉山熊本熊卡（JCB）有推薦嗎？",
+      "modelReasoning": "使用者查詢韓元 (KRW) 消費，但本機目前缺乏 KRW 匯率快照且無外部連網權限。呼叫 recommend 獲取診斷。依據第一層紅線 #5：外部來源查詢失敗時，立即停止無效重試，標記估算狀態並交付 requiredActions 結構化缺口。",
+      "toolCall": {
+        "name": "recommend",
+        "arguments": {
+          "merchant": "首爾樂天免稅店",
+          "amount": {
+            "amountMinor": 5000000,
+            "currency": "KRW"
+          },
+          "country": "KR",
+          "occurredAt": "2026-09-15T11:00:00Z"
+        }
+      },
+      "toolResult": {
+        "status": "action_required",
+        "candidates": [
+          {
+            "id": "card:c_esun_kumamon",
+            "kind": "direct_card",
+            "displayName": "玉山熊本熊卡",
+            "status": "unknown",
+            "fxEstimate": {
+              "status": "unavailable"
+            }
+          }
+        ],
+        "requiredActions": [
+          {
+            "id": "act-fx-krw-twd",
+            "action": "query_approved_fx_source",
+            "owner": "agent",
+            "description": "Missing active FX rate for KRW -> TWD",
+            "fxResolutionRequest": {
+              "baseCurrency": "KRW",
+              "quoteCurrency": "TWD",
+              "cardScheme": "JCB",
+              "referenceSourceUrls": [
+                "https://rate.bot.com.tw/xrt?Lang=zh-TW"
+              ]
+            }
+          }
+        ]
+      },
+      "modelResponse": "目前系統內缺乏韓元（KRW/TWD）的有效卡組織匯率快照，依安全規則停止重試並交付缺口說明：\n- 缺少資訊：KRW 至 TWD 之 JCB 清算匯率。\n- 建議行動：可參考臺灣銀行牌價或 JCB 官方清算公告取得最新匯率後提供給系統進行精確折算。",
+      "invariantsSatisfied": [
+        "fail_closed_on_missing_fx",
+        "immediate_stop_no_invalid_retry",
+        "structured_gap_delivery"
+      ],
+      "terminalCondition": "action_required_reported"
+    },
+    {
+      "turn": 6,
+      "scenario": "two_phase_user_correction_preview_confirm_write",
+      "userMessage": "你剛才算玉山熊本熊卡日本回饋只有 2.0% 不對，我在日本實體一般消費有登錄專屬加碼，應該是 3.5% 才對！",
+      "modelReasoning": "使用者提出優惠回饋率更正。依據第一層紅線 #2 及第二層決策表 2（更正生命週期）：嚴禁未確認直接呼叫 upsert_offer，亦嚴禁口頭答應後遺失狀態。第一階段必須產出「差異預覽」並請求使用者明確確認。",
+      "toolCall": null,
+      "toolResult": null,
+      "modelResponse": "【優惠更正預覽】\n- 卡別：玉山熊本熊卡 (c_esun_kumamon)\n- 項目：日本實體消費專屬回饋\n- 原規則：2.0% (官方牌卡基準)\n- 新提案：3.5% (使用者專屬登錄加碼，私有確認版本)\n- 生效日：2026-09-01 起\n- 上限：無額外上限\n\n請問您是否確認將此設定套用為您的個人專屬回饋規則？確認後我將為您持久化寫入系統。",
+      "invariantsSatisfied": [
+        "diff_preview_rendered",
+        "no_write_before_confirmation",
+        "no_verbal_concession_without_persistence"
+      ],
+      "terminalCondition": "awaiting_user_diff_confirmation"
+    },
+    {
+      "turn": 7,
+      "scenario": "two_phase_user_correction_confirmed_write",
+      "userMessage": "確認無誤，請幫我儲存生效！",
+      "modelReasoning": "使用者已回覆「確認無誤」。進入第二階段：執行寫入。呼叫 upsert_offer，帶入 trustBasis: 'user_confirmed' 與完整的 confirmation 物件。",
+      "toolCall": {
+        "name": "upsert_offer",
+        "arguments": {
+          "snapshot": {
+            "id": "snap-user-esun-kuma-override",
+            "url": "https://bank.example/user-input",
+            "fetchedAt": "2026-09-14T15:00:00Z",
+            "contentHash": "hash-esun-kuma-user-override",
+            "parserVersion": "1.0.0",
+            "sourceType": "user_input",
+            "provenance": {
+              "sourceDescription": "User correction dialog in chat",
+              "submitter": "user",
+              "submittedAt": "2026-09-14T15:00:00Z",
+              "contentFingerprint": "fp-esun-350bps"
+            }
+          },
+          "rule": {
+            "id": "rule-esun-kuma-jp-override-v2",
+            "cardId": "c_esun_kumamon",
+            "version": "2.0.0",
+            "sourceSnapshotId": "snap-user-esun-kuma-override",
+            "status": "active",
+            "trustBasis": "user_confirmed",
+            "validFrom": "2026-09-01T00:00:00Z",
+            "settlementCurrency": "TWD",
+            "match": {
+              "countries": ["JP"],
+              "channels": ["in_store"]
+            },
+            "reward": {
+              "kind": "percentage",
+              "rateBps": 350
+            }
+          },
+          "confirmation": {
+            "confirmedAt": "2026-09-14T15:01:00Z",
+            "confirmedBy": "user",
+            "sourceReference": "user_correction_session_20260914",
+            "trustBasis": "user_confirmed",
+            "termsFingerprint": "fp-esun-350bps",
+            "offerPeriod": {
+              "validFrom": "2026-09-01T00:00:00Z"
+            },
+            "rewardUnit": "TWD",
+            "rewardConditionsSummary": "日本實體加碼 3.5%",
+            "capSummary": "無上限"
+          }
+        }
+      },
+      "toolResult": {
+        "snapshot": {
+          "id": "snap-user-esun-kuma-override",
+          "sourceType": "user_input"
+        },
+        "rule": {
+          "id": "rule-esun-kuma-jp-override-v2",
+          "status": "active",
+          "trustBasis": "user_confirmed"
+        }
+      },
+      "modelResponse": "已為您成功寫入專屬優惠版本：玉山熊本熊卡在日本實體消費即日起享有 3.5% 回饋。往後的試算與推薦將優先套用您的個人確認規則。",
+      "invariantsSatisfied": [
+        "user_confirmed_rule_persisted",
+        "two_phase_correction_lifecycle_complete"
+      ],
+      "terminalCondition": "correction_successfully_persisted"
+    },
+    {
+      "turn": 8,
+      "scenario": "unified_transactions_four_funding_sources",
+      "userMessage": "請幫我把今天在大阪的 4 筆消費記下來：\n1. 刷玉山熊本熊卡 3,000 JPY\n2. 街口綁定台新銀行帳戶扣款 1,200 JPY\n3. 全支付餘額付款 800 JPY\n4. 黑門市場現金買章魚燒 600 JPY",
+      "modelReasoning": "使用者要求記錄 4 筆消費。依據第一層紅線 #3 與第二層決策表 5，系統支援 4 種資金來源（credit_card、linked_bank_account、wallet_balance、cash），現金與無卡交易嚴禁帶入 cardId。使用 record_transaction 逐一寫入並提供唯一的 idempotencyKey。",
+      "toolCall": {
+        "name": "record_transaction",
+        "arguments": {
+          "transaction": {
+            "idempotencyKey": "tx-osaka-20260914-001",
+            "kind": "purchase",
+            "mode": "actual",
+            "occurredAt": "2026-09-14T11:00:00Z",
+            "amount": {
+              "amountMinor": 300000,
+              "currency": "JPY"
+            },
+            "cardId": "c_esun_kumamon",
+            "funding": {
+              "kind": "credit_card",
+              "cardId": "c_esun_kumamon"
+            },
+            "merchant": "心齋橋商店"
+          }
+        }
+      },
+      "toolResult": {
+        "status": "recorded",
+        "transactionId": "tx-osaka-20260914-001",
+        "effectiveReward": {
+          "amountMinor": 225,
+          "currency": "TWD"
+        }
+      },
+      "modelResponse": "已完成第 1 筆記錄：玉山熊本熊卡 3,000 JPY（實體信用卡）。依序完成其餘 3 筆資金來源記帳：\n2. 台新銀行連結帳戶扣款 1,200 JPY（account / linked_bank_account）\n3. 全支付錢包餘額 800 JPY（account / wallet_balance）\n4. 黑門市場現金 600 JPY（cash，無卡片 ID）\n全部 4 種資金來源均已成功登錄至您的持久化帳本！",
+      "invariantsSatisfied": [
+        "four_funding_sources_supported",
+        "non_blocking_actual_ledger_write"
+      ],
+      "terminalCondition": "transactions_recorded"
+    },
+    {
+      "turn": 9,
+      "scenario": "dual_time_basis_querying",
+      "userMessage": "請幫我查詢今天在大阪發生的消費，另外也列出我剛剛在晚間系統中補登的所有紀錄。",
+      "modelReasoning": "使用者要求以兩種時間維度查詢交易：1) occurred_at（消費實際發生時間）；2) recorded_at（晚間補登/系統寫入時間）。依據第二層決策表 5，調用 list_transactions 分別指定 timeBasis: 'occurred_at' 與 'recorded_at'。",
+      "toolCall": {
+        "name": "list_transactions",
+        "arguments": {
+          "startDate": "2026-09-14T00:00:00Z",
+          "endDate": "2026-09-14T23:59:59Z",
+          "timeBasis": "occurred_at",
+          "projection": "summary",
+          "limit": 50
+        }
+      },
+      "toolResult": {
+        "timeBasis": "occurred_at",
+        "total": 4,
+        "transactions": [
+          {
+            "idempotencyKey": "tx-osaka-20260914-001",
+            "occurredAt": "2026-09-14T11:00:00Z",
+            "amount": { "amountMinor": 300000, "currency": "JPY" },
+            "funding": { "kind": "credit_card", "cardId": "c_esun_kumamon" },
+            "merchant": "心齋橋商店"
+          },
+          {
+            "idempotencyKey": "tx-osaka-20260914-002",
+            "occurredAt": "2026-09-14T12:30:00Z",
+            "amount": { "amountMinor": 120000, "currency": "JPY" },
+            "funding": { "kind": "account", "subtype": "linked_bank_account", "accountId": "acc_taishin_bank" },
+            "merchant": "街口合作店家"
+          },
+          {
+            "idempotencyKey": "tx-osaka-20260914-003",
+            "occurredAt": "2026-09-14T14:00:00Z",
+            "amount": { "amountMinor": 80000, "currency": "JPY" },
+            "funding": { "kind": "account", "subtype": "wallet_balance", "accountId": "acc_pxpay_wallet" },
+            "merchant": "全支付合作超市"
+          },
+          {
+            "idempotencyKey": "tx-osaka-20260914-004",
+            "occurredAt": "2026-09-14T16:00:00Z",
+            "amount": { "amountMinor": 60000, "currency": "JPY" },
+            "funding": { "kind": "cash" },
+            "merchant": "黑門市場小吃"
+          }
+        ]
+      },
+      "modelResponse": "已完成雙時間基準查詢：\n\n【依消費發生時間 (occurred_at)】今日大阪消費共 4 筆：\n1. 11:00 心齋橋商店：3,000 JPY (玉山熊本熊卡)\n2. 12:30 街口合作店家：1,200 JPY (台新銀行連結帳戶)\n3. 14:00 全支付合作超市：800 JPY (全支付錢包餘額)\n4. 16:00 黑門市場小吃：600 JPY (現金)\n\n【依系統寫入時間 (recorded_at)】晚間補登紀錄：\n- 4 筆均於今晚（2026-09-14 20:00~20:05 UTC）由使用者同步登記入帳，審計序列完整。",
+      "invariantsSatisfied": [
+        "dual_time_basis_querying",
+        "bounded_list_transactions_projection"
+      ],
+      "terminalCondition": "history_report_delivered"
+    }
+  ]
+}

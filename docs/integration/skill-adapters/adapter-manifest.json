@@ -6,11 +6,10 @@
   "metadata": {
     "adapterName": "taiwan-card-rewards-custom-adapter",
     "sourceVersion": "canonical",
-    "sourceHash": "sha256:68c0d4a0b06be469a3b402a140967a463c7defc18fb95f135c312b7bba5b9844",
-    "mcpContractVersion": "canonical-19-tools",
-    "mcpToolsCount": 19,
-    "lastVerifiedAt": "2026-09-09T00:00:00Z",
-    "canonicalLink": "docs/agents/taiwan-card-rewards-skill/SKILL.md",
+    "sourceHash": "sha256:c27fff493c464b26b9418b2d8527c84365b1f9938a7fe7fd3ec2d7d434520477",
+    "mcpContractVersion": "0.14.0",
+    "lastVerifiedAt": "2026-09-15T00:00:00Z",
+    "canonicalLink": "docs/taiwan-card-rewards-skill/SKILL.md",
     "invariants": [
       "Zero Network inside MCP Server",
       "Zero PAN, CVV, OTP, or Password transmission",

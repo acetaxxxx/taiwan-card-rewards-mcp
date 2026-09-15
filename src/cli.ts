@@ -12,17 +12,67 @@ import { evaluateOffer } from './evaluator.js';
 import { validateUserBenefitInput, validateContext, validateToolArgs, validateTransaction, validateCard, validateCapPool, validateConfirmation, validateRule, validateSnapshot } from './validation.js';
 import { projectPage, ProjectionInputError, ProjectionTooLargeError } from './projections.js';
 import { SharedMcpClient, SharedMcpOwner, connectSharedBridge } from './shared-mcp.js';
+import type { SharedRpcResponse } from './shared-mcp.js';
 import { runStdioBridge } from './shared-cli.js';
 import type { CardDescriptor } from './types.js';
 
 const packageJson = createRequire(import.meta.url)('../package.json') as { version: string };
 
-type JsonRpc = { jsonrpc?: string; id?: string | number | null; method?: string; params?: Record<string, unknown> };
-type Reply = { jsonrpc: '2.0'; id: string | number | null; result?: unknown; error?: { code: number; message: string; data?: unknown } };
+type JsonRpcId = string | number | null;
+type JsonRpc = { jsonrpc?: string; id?: JsonRpcId; method?: string; params?: Record<string, unknown> };
+type Reply = { jsonrpc: '2.0'; id: JsonRpcId; result?: unknown; error?: { code: number; message: string; data?: unknown } };
 
-function reply(id: JsonRpc['id'], result: unknown): void { process.stdout.write(`${JSON.stringify({ jsonrpc: '2.0', id: id ?? null, result } satisfies Reply)}\n`); }
-function failure(id: JsonRpc['id'], code: number, message: string, data?: unknown): void { process.stdout.write(`${JSON.stringify({ jsonrpc: '2.0', id: id ?? null, error: { code, message, ...(data === undefined ? {} : { data }) } } satisfies Reply)}\n`); }
-function toolResult(value: unknown): unknown { return { content: [{ type: 'text', text: JSON.stringify(value) }], structuredContent: value }; }
+function responseId(id: JsonRpc['id']): JsonRpcId { return id ?? null; }
+function successReply(id: JsonRpc['id'], result: unknown): Reply { return { jsonrpc: '2.0', id: responseId(id), result }; }
+function errorReply(id: JsonRpc['id'], code: number, message: string, data?: unknown): Reply {
+  const error: NonNullable<Reply['error']> = { code, message };
+  if (data !== undefined) error.data = data;
+  return { jsonrpc: '2.0', id: responseId(id), error };
+}
+function writeReply(response: Reply): void { process.stdout.write(`${JSON.stringify(response)}\n`); }
+function reply(id: JsonRpc['id'], result: unknown): void { writeReply(successReply(id, result)); }
+function failure(id: JsonRpc['id'], code: number, message: string, data?: unknown): void { writeReply(errorReply(id, code, message, data)); }
+function toolResult(value: unknown): { content: readonly { type: 'text'; text: string }[]; structuredContent: unknown } {
+  return { content: [{ type: 'text', text: JSON.stringify(value) }], structuredContent: value };
+}
+function initializeResult(): Record<string, unknown> {
+  return {
+    protocolVersion: '2024-11-05',
+    capabilities: { tools: {} },
+    serverInfo: { name: 'taiwan_card_rewards_mcp', version: packageJson.version },
+    instructions: mcpInstructions,
+  };
+}
+function toolListResult(): { tools: readonly { name: string; description: string; inputSchema: Record<string, unknown> }[] } {
+  return { tools: mcpTools.map((tool) => ({ name: tool.name, description: tool.description, inputSchema: tool.inputSchema })) };
+}
+function sharedResponse(response: Reply): SharedRpcResponse {
+  const result: SharedRpcResponse = { id: response.id };
+  if (response.result !== undefined) result.result = response.result;
+  if (response.error !== undefined) result.error = { code: response.error.code, message: response.error.message };
+  return result;
+}
+type MerchantResolutionFacts = Parameters<RewardService['resolveMerchant']>[1];
+type ActiveOfferSearch = Parameters<RewardService['searchActiveOffers']>[0];
+
+function merchantResolutionFacts(args: Record<string, unknown>): MerchantResolutionFacts {
+  const facts: MerchantResolutionFacts = {};
+  for (const field of ['country', 'market', 'mcc', 'channel'] as const) {
+    if (typeof args[field] === 'string') facts[field] = args[field];
+  }
+  return facts;
+}
+
+function activeOfferSearch(args: Record<string, unknown>): ActiveOfferSearch {
+  const search: ActiveOfferSearch = {};
+  for (const field of ['rawQuery', 'cardId', 'canonicalMerchantId', 'country', 'market', 'mcc', 'channel', 'asOf'] as const) {
+    if (typeof args[field] === 'string') search[field] = args[field];
+  }
+  for (const field of ['limit', 'page'] as const) {
+    if (typeof args[field] === 'number') search[field] = args[field];
+  }
+  return search;
+}
 function rejectSensitiveFields(value: unknown): void {
   if (!value || typeof value !== 'object') return;
   for (const [key, nested] of Object.entries(value)) {
@@ -34,14 +84,14 @@ function rejectSensitiveFields(value: unknown): void {
 
 async function processJsonRpc(service: RewardService, request: JsonRpc): Promise<Reply> {
   try {
-    if (request.method === 'initialize') return { jsonrpc: '2.0', id: request.id ?? null, result: { protocolVersion: '2024-11-05', capabilities: { tools: {} }, serverInfo: { name: 'taiwan_card_rewards_mcp', version: packageJson.version }, instructions: mcpInstructions } };
-    if (request.method === 'tools/list') return { jsonrpc: '2.0', id: request.id ?? null, result: { tools: mcpTools.map((tool) => ({ name: tool.name, description: tool.description, inputSchema: tool.inputSchema })) } };
-    if (request.method === 'tools/call') return { jsonrpc: '2.0', id: request.id ?? null, result: toolResult(await callTool(service, request.params ?? {})) };
-    return { jsonrpc: '2.0', id: request.id ?? null, error: { code: -32601, message: `Method not found: ${request.method ?? ''}` } };
+    if (request.method === 'initialize') return successReply(request.id, initializeResult());
+    if (request.method === 'tools/list') return successReply(request.id, toolListResult());
+    if (request.method === 'tools/call') return successReply(request.id, toolResult(await callTool(service, request.params ?? {})));
+    return errorReply(request.id, -32601, `Method not found: ${request.method ?? ''}`);
   } catch (error) {
     const code = error instanceof RewardServiceError || error instanceof StartupContractError ? error.code : error instanceof ProjectionInputError ? error.code : error instanceof ProjectionTooLargeError ? 'PAYLOAD_TOO_LARGE' : 'INTERNAL_ERROR';
     const data = error instanceof RewardServiceError && error.details !== undefined ? { code, details: error.details } : { code };
-    return { jsonrpc: '2.0', id: request.id ?? null, error: { code: -32000, message: code, data } };
+    return errorReply(request.id, -32000, code, data);
   }
 }
 
@@ -50,7 +100,7 @@ async function runOwner(config: StartupConfig): Promise<void> {
   const service = new RewardService(store, config.user);
   const owner = new SharedMcpOwner({ dataDir: config.dataDir, handler: async (request) => {
     const response = await processJsonRpc(service, request as JsonRpc);
-    return { id: response.id, ...(response.result === undefined ? {} : { result: response.result }), ...(response.error === undefined ? {} : { error: response.error }) };
+    return sharedResponse(response);
   } });
   const close = async () => { await owner.close(); store.close(); process.exit(0); };
   process.once('SIGINT', () => { void close(); });
@@ -85,7 +135,7 @@ async function main(): Promise<void> {
     try { request = JSON.parse(line) as JsonRpc; } catch { failure(null, -32700, 'Parse error'); continue; }
     if (request.method === 'notifications/initialized' || request.method?.startsWith('notifications/')) continue;
     const response = await processJsonRpc(service, request);
-    process.stdout.write(`${JSON.stringify(response)}\n`);
+    writeReply(response);
   }
   store.close();
 }
@@ -121,6 +171,7 @@ async function callTool(service: RewardService, params: Record<string, unknown>)
     case 'register_payment_account': return service.upsertPaymentAccount(args.account);
     case 'list_payment_accounts': return maybePaged([...service.listPaymentAccounts()], (item) => String((item as { id: string }).id), 50);
     case 'record_transaction': return service.recordTransaction(validateTransaction(args.transaction));
+    case 'list_transactions': return service.listTransactions(args);
     case 'record_event_reward': return service.recordValidatedEventReward(args);
     case 'reverse_event_reward': return service.reverseEventReward(args);
     case 'remaining_caps': return maybePaged(service.remainingCaps(String(args.cardId), typeof args.asOf === 'string' ? args.asOf : undefined), (item) => String((item as { usageKey: string }).usageKey));
@@ -132,9 +183,9 @@ async function callTool(service: RewardService, params: Record<string, unknown>)
     case 'upsert_user_benefit_status': return service.upsertUserBenefitStatus(validateUserBenefitInput(args.input));
     case 'resolve_merchant': {
       if (typeof args.rawQuery !== 'string') throw new RewardServiceError('INVALID_INPUT', 'rawQuery is required');
-      return service.resolveMerchant(args.rawQuery, { ...(typeof args.country === 'string' ? { country: args.country } : {}), ...(typeof args.market === 'string' ? { market: args.market } : {}), ...(typeof args.mcc === 'string' ? { mcc: args.mcc } : {}), ...(typeof args.channel === 'string' ? { channel: args.channel } : {}) });
+      return service.resolveMerchant(args.rawQuery, merchantResolutionFacts(args));
     }
-    case 'search_active_offers': return service.searchActiveOffers({ ...(typeof args.rawQuery === 'string' ? { rawQuery: args.rawQuery } : {}), ...(typeof args.cardId === 'string' ? { cardId: args.cardId } : {}), ...(typeof args.canonicalMerchantId === 'string' ? { canonicalMerchantId: args.canonicalMerchantId } : {}), ...(typeof args.country === 'string' ? { country: args.country } : {}), ...(typeof args.market === 'string' ? { market: args.market } : {}), ...(typeof args.mcc === 'string' ? { mcc: args.mcc } : {}), ...(typeof args.channel === 'string' ? { channel: args.channel } : {}), ...(typeof args.asOf === 'string' ? { asOf: args.asOf } : {}), ...(typeof args.limit === 'number' ? { limit: args.limit } : {}), ...(typeof args.page === 'number' ? { page: args.page } : {}) });
+    case 'search_active_offers': return service.searchActiveOffers(activeOfferSearch(args));
     case 'calculate_reward': return evaluateOffer(validateRule(args.rule), validateTransaction(args.transaction), validateContext(args.context));
     default: throw new RewardServiceError('TOOL_NOT_FOUND', `unknown tool: ${name}`);
   }

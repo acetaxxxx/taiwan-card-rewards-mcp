@@ -2,6 +2,8 @@
 status: accepted
 ---
 
+> 私有 `user_confirmed` 規則與其 trust basis 由 [ADR 0010](0010-user-confirmed-offers-transaction-chronology-and-offer-driven-routes.md) 補充；本 ADR 的來源可追溯與 deterministic evaluator 邊界維持不變。
+
 # Independent Card Rewards Domain with Agent-Supplied Rules
 
 `taiwan-card-rewards-mcp` is an independent Card Rewards bounded context. The

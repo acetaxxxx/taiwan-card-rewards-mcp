@@ -3,17 +3,17 @@
 This directory contains the design, research, specifications, and future Aion
 integration contract for `taiwan-card-rewards-mcp`.
 
-## Start here
+## Current guidance
 
-- [推薦體驗規劃與實作票：單一 recommend、完整付款路徑與缺項回復](../.scratch/recommend-experience/spec.md)
-- [目前可用的商家意圖推薦流程](agents/taiwan-card-rewards-skill/workflows/recommendation-intent.md)
-- [目標 Agent workflow：登記、推薦、匯率更新與完整分頁](../.scratch/recommend-experience/agent-workflow.md)
-- [AI Agent usage guide](agents/usage-guide.md)
-- [Agent skill-authoring guide](agents/skill-authoring-guide.md)
-- [Canonical Taiwan Card Rewards Skill Bundle](agents/taiwan-card-rewards-skill/SKILL.md)
-- [使用者安裝與 Skill 分發 SOP](agents/user-installation-and-skill-distribution-sop.md)
-- [Agent Research Skill 與 Pre-flight SOP (v0.11.0)](agents/agent-research-skill-and-preflight-sop.md)
-- [Card-rewards skill template](agents/card-rewards-skill-template.md)
+- [目前可用的商家意圖推薦流程](taiwan-card-rewards-skill/card-rewards-recommendation/workflows/recommendation-intent.md)
+- [AI Agent usage guide](usage/ai-agent-usage-guide.md)
+- [Copyable AI-assisted installation](../installation/INSTALL_WITH_AI.md)
+- [Skill adapter integration](integration/skill-adapters/README.md)
+- [Taiwan Card Rewards runtime skill bundle](taiwan-card-rewards-skill/)
+- [MCP tool contract](taiwan-card-rewards-skill/references/mcp-tools.md)
+- [Low-reasoning playbook](taiwan-card-rewards-skill/references/low-reasoning-playbook.md)
+- [使用者安裝與 Skill 分發 SOP](../installation/README.md)
+- [使用者卡片與權益設定檢核清單](usage/user-config-checklist.md)
 - [Card Rewards Schema v2 specification](specs/card-rewards-schema-v2-specification.md)
 - [Multi-component reward ledger specification (v0.6.0)](specs/multi-component-ledger-and-cap-attribution-specification.md)
 - [MCP nested schemas and actionable errors specification](specs/mcp-nested-schemas-actionable-errors-specification.md)
@@ -30,6 +30,11 @@ integration contract for `taiwan-card-rewards-mcp`.
 - [Reference study and product plan](specs/taiwan-card-rewards-mcp-reference-study.md)
 - [Repository and Aion integration contract](specs/card-rewards-mcp-repository.md)
 - [Skill/Agent binding plan](integration/CARD_REWARDS_SKILL_BINDING_PLAN.md)
+
+## Work tracking and history
+
+- Active work uses the local [`.scratch/`](../.scratch/) issue tracker.
+- Completed or superseded planning material is under [archive/](archive/README.md).
 
 The integration plan is a planning document only. It does not create or
 install an Aion Skill, and the MCP remains the authority for deterministic

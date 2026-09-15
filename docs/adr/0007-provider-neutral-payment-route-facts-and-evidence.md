@@ -1,6 +1,6 @@
 # ADR 0007: Provider-neutral payment-route facts, funding rails, and evidence
 
-**Status**: Accepted for the v0.9.x route-binding slice
+**Status**: Accepted for the v0.9.x route-binding slice; 由 [ADR 0010](0010-user-confirmed-offers-transaction-chronology-and-offer-driven-routes.md) 補充 Offer Route Selector 驅動暫存路徑生成。
 
 **Date**: 2026-09-06
 
@@ -20,7 +20,7 @@ The terminal funding instrument remains the stable coarse category `credit_card 
 
 Provider names, app names, payment methods, acceptance networks, and interoperability schemes remain open strings. Adding a provider therefore adds an evidence-backed route and offer rule; it does not require a new MCP tool or a core enum. Stable topology kinds are reserved for calculation semantics, not brand names.
 
-The current 15-tool surface remains the public seam. Route registration uses `upsert_payment_route`; route discovery uses `list_payment_routes`. Reward applicability should be expressed by a reusable `Payment Route Selector` over route roles and transitions: a selector may bind to a funding node, a payment-service node, an acceptance node, one transition, or a complete route pattern. `OfferRuleVersion.routeId` remains a backward-compatible exact constraint for a concrete observed route, but it is not the reusable policy language and must not hide matching semantics inside an opaque ID. Generic rules omit `routeId`.
+The current 19-tool surface remains the public seam. Route registration uses `upsert_payment_route`; route discovery uses `list_payment_routes`. Reward applicability should be expressed by a reusable `Payment Route Selector` over route roles and transitions: a selector may bind to a funding node, a payment-service node, an acceptance node, one transition, or a complete route pattern. `OfferRuleVersion.routeId` remains a backward-compatible exact constraint for a concrete observed route, but it is not the reusable policy language and must not hide matching semantics inside an opaque ID. Generic rules omit `routeId`.
 
 The simpler `money_source + pay_channel` projection is allowed as an input or display view when a route has only two relevant facts. It is not the canonical domain model because it loses intermediate services and transition semantics.
 

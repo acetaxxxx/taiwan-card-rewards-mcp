@@ -5,7 +5,7 @@ This guide helps an AI agent create a thin, portable skill that uses
 deterministic calculations, source/rule provenance, and the user-scoped ledger.
 The skill may ask questions and select when to call tools, but it does not
 become a second database or calculator. A copyable starting point is
-[`card-rewards-skill-template.md`](card-rewards-skill-template.md).
+[`skill-template.md`](skill-template.md).
 
 ## 1. Define the boundary before writing files
 
@@ -25,7 +25,7 @@ user question; no action requires the skill to calculate or persist ledger truth
 
 ## 2. Pin and validate the MCP connection
 
-Use the published immutable package version `0.11.0` (or a later reviewed release) in deployment configuration. Never
+Use the published immutable package version `0.14.0` (or a later reviewed release) in deployment configuration. Never
 use `latest`, a moving tag, an unbounded range, or a model-provided command
 path. Updates are deliberate: review the release notes, update the pinned
 version, run the host's handshake/tool smoke check, then deploy.
@@ -33,7 +33,7 @@ version, run the host's handshake/tool smoke check, then deploy.
 At startup, validate the MCP handshake and tool list before business calls:
 
 1. Confirm the expected protocol and server identity.
-2. Confirm all 19 canonical public tools exist, including the merchant-first `recommend` entry point (whose response already unifies direct-card and payment-path candidates) and payment-route/account onboarding/listing, with the expected closed input schemas;
+2. Confirm all 20 canonical public tools exist, including the merchant-first `recommend` entry point (whose response already unifies direct-card and payment-path candidates), `list_transactions`, and payment-route/account onboarding/listing, with the expected closed input schemas;
    check required fields, enums/bounds, and `additionalProperties: false` at
    every object level, not only the top-level tool object.
 3. Confirm the process is bound by the trusted host to the intended user scope.
@@ -133,7 +133,7 @@ every mutation has an affirmative user confirmation immediately before it.
 ## 6. Final review checklist
 
 - MCP package/version is pinned to a reviewed release and the handshake checks
-  the complete 12-tool manifest and every nested tool schema.
+  the complete 20-tool manifest and every nested tool schema.
 - MCP errors stop the flow; no fallback calculator, anonymous scope, or default
   data store is introduced.
 - Official sources are preferred and third-party material remains candidate

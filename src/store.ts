@@ -11,6 +11,7 @@ export interface RecordedTransaction {
   /** User scope is stamped by the workspace; absent is legacy/unscoped data. */
   ownerUser?: string;
   appliedFx?: AppliedFxRate | undefined;
+  recordedAt?: string;
 }
 
 export interface StoredState {

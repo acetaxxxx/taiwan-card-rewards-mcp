@@ -326,7 +326,7 @@ Schema v2 defines exactly **19 tools** on the public MCP surface, including the 
 
 The authoritative 19-tool matrix, including read/write status and closed input
 schemas, lives in
-[`docs/agents/taiwan-card-rewards-skill/references/mcp-tools.md`](../agents/taiwan-card-rewards-skill/references/mcp-tools.md).
+[`mcp-tools.md`](../taiwan-card-rewards-skill/references/mcp-tools.md).
 It includes card calculation/ranking, account and route onboarding, the closed
 card/payment_path `recommend` union, canonical event recording/reversal,
 benefit status, merchant resolution, and active-offer search. This specification

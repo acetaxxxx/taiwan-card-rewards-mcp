@@ -1,9 +1,9 @@
 # 使用者安裝與 Skill 分發標準作業程序 (SOP)
 
 **文件狀態**：正式營運與分發規範 (Normative Distribution & Installation SOP)
-**適用範圍**：canonical 19-tool MCP contract（release tag 僅供部署管理）
+**適用範圍**：canonical 20-tool MCP contract（release tag 僅供部署管理）
 **語言**：繁體中文
-**遵循規範**：[`CONTEXT.md`](../../CONTEXT.md), [ADR 0001](../adr/0001-independent-card-rewards-domain-and-agent-supplied-rules.md), [ADR 0003](../adr/0003-complete-initial-mcp-surface-with-layered-trust-gates.md), [ADR 0004](../adr/0004-generic-benefit-status-and-schema-v2.md), [ADR 0005](../adr/0005-payment-route-opportunity-stacking.md), [ADR 0006](../adr/0006-multi-component-reward-ledger-and-cap-attribution.md), [Agent Research Skill SOP](agent-research-skill-and-preflight-sop.md), [Usage Guide](usage-guide.md).
+**公開 contract**：以 MCP 的 `tools/list` 為準；bundle 內的 [`mcp-tools.md`](../docs/taiwan-card-rewards-skill/references/mcp-tools.md) 是可讀的配套指引。
 
 ---
 
@@ -14,9 +14,11 @@
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
 │              Canonical Source of Truth (本專案唯一權威版本)                │
-│  - docs/agents/taiwan-card-rewards-skill/SKILL.md (Agent 入口)           │
-│  - docs/agents/taiwan-card-rewards-skill/references/ (詳細 contract)     │
-│  - canonical contract：19 tools | 語系：繁體中文 (zh-Hant-TW)             │
+│  - docs/taiwan-card-rewards-skill/SKILL.md (base router)                 │
+│  - docs/taiwan-card-rewards-skill/references/ (公開 contract)            │
+│  - docs/taiwan-card-rewards-skill/card-rewards-{recommendation,          │
+│    evidence,ledger}/ (任務 skill)                                        │
+│  - canonical contract：20 tools | 語系：繁體中文 (zh-Hant-TW)             │
 └────────────────────────────────────┬────────────────────────────────────┘
                                      │
            ┌─────────────────────────┴─────────────────────────┐
@@ -30,7 +32,7 @@
 ```
 
 ### 1.1 Canonical Source 原則
-1. **單一事實來源 (Single Source of Truth)**：Agent 入口是 [`docs/agents/taiwan-card-rewards-skill/SKILL.md`](taiwan-card-rewards-skill/SKILL.md)，詳細 contract 是其 [`references/mcp-tools.md`](taiwan-card-rewards-skill/references/mcp-tools.md)；模板與長版研究 SOP 是可移植輔助文件，不得覆蓋入口或 source contract。
+1. **單一事實來源 (Single Source of Truth)**：公開工具與 schema 以 MCP 的 `tools/list` 為準；bundled contract 指引在 [`mcp-tools.md`](../docs/taiwan-card-rewards-skill/references/mcp-tools.md)。runtime skill 不讀 ADR、研究或 repository implementation 文件。
 2. **免除自行重構負擔**：使用者或整合商**不需要、亦不應被要求**自行從零編寫或推導完整 Skill 邏輯；安裝時應優先直接引用或複製 Canonical 檔案。
 
 ### 1.2 Local Adapter 轉接與在地化規範
@@ -89,7 +91,7 @@ mkdir -p /path/to/my-card-rewards-data
 直接透過 `npx` 執行指定發行版本（npm 會自動觸發 `prepare` 編譯）：
 
 ```bash
-npx --yes github:acetaxxxx/taiwan-card-rewards-mcp#v0.11.0 \
+npx --yes github:acetaxxxx/taiwan-card-rewards-mcp#v0.14.0 \
   --data-dir /path/to/my-card-rewards-data \
   --user default-user
 ```
@@ -113,7 +115,7 @@ node dist/cli.js --data-dir /path/to/my-card-rewards-data --user default-user
       "command": "npx",
       "args": [
         "--yes",
-        "github:acetaxxxx/taiwan-card-rewards-mcp#v0.11.0",
+        "github:acetaxxxx/taiwan-card-rewards-mcp#v0.14.0",
         "--data-dir",
         "/absolute/path/to/my-card-rewards-data",
         "--user",
@@ -124,10 +126,11 @@ node dist/cli.js --data-dir /path/to/my-card-rewards-data --user default-user
 }
 ```
 
-### 步驟 3：載入與安裝 Canonical Skill
-1. 將本專案的 [`docs/agents/taiwan-card-rewards-skill/SKILL.md`](taiwan-card-rewards-skill/SKILL.md) 內容複製至您的 Agent 技能庫中（例如 AionCore Skills 或 Cursor Rules）。
-2. 若您的 Agent 需要專用名稱，可在檔頭指定 `name: card-rewards-assistant`。
-3. 確保 Agent 能讀取 [`docs/agents/taiwan-card-rewards-skill/references/mcp-tools.md`](taiwan-card-rewards-skill/references/mcp-tools.md) 與相關 workflow；研究細節可參考 [`docs/agents/agent-research-skill-and-preflight-sop.md`](agent-research-skill-and-preflight-sop.md)。
+### 步驟 3：載入與安裝 Canonical Skill Bundle
+1. 將完整的 [`docs/taiwan-card-rewards-skill/`](../docs/taiwan-card-rewards-skill/) 目錄複製至使用者的 Agent 技能庫。
+2. 先註冊 bundle root 的 `SKILL.md` 作為 base router，再註冊 `card-rewards-recommendation`、`card-rewards-evidence` 與 `card-rewards-ledger` 三個 task skill；保留 bundle 的相對目錄結構與各自的 frontmatter，不要安裝 repo 根目錄的 `AGENTS.md`。
+3. 驗證 base router 與各 task skill 的相對連結均可讀，並確認 [`low-reasoning-playbook.md`](../docs/taiwan-card-rewards-skill/references/low-reasoning-playbook.md) 已隨 bundle 安裝。
+4. 若要讓 AI agent 代為執行 MCP 設定、bundle 複製與健康檢查，使用本目錄的 [`INSTALL_WITH_AI.md`](INSTALL_WITH_AI.md)。
 
 ---
 
@@ -143,10 +146,10 @@ Agent 在接收到安裝或初始化指令時，應依照以下 Checklist 進行
 - [ ] 2. 伺服器握手 (Handshake Validation)
       - 發送 `initialize` JSON-RPC 請求。
       - 驗證回應中的 `protocolVersion` 為 `2024-11-05`。
-      - 驗證 `serverInfo.name` 為 `taiwan_card_rewards_mcp`，`serverInfo.version` 為 `0.11.0` (或更新相容版本)。
+      - 驗證 `serverInfo.name` 為 `taiwan_card_rewards_mcp`，`serverInfo.version` 為 `0.14.0` (或更新相容版本)。
 
-- [ ] 3. 19 項 canonical 公開工具檢核 (19-Tool Contract Verification)
-      - 發送 `tools/list` 請求，確認 [`taiwan-card-rewards-skill/references/mcp-tools.md`](taiwan-card-rewards-skill/references/mcp-tools.md) 的 19 項工具完整存在：
+- [ ] 3. 20 項 canonical 公開工具檢核 (20-Tool Contract Verification)
+      - 發送 `tools/list` 請求，確認 [`mcp-tools.md`](../docs/taiwan-card-rewards-skill/references/mcp-tools.md) 的 20 項工具完整存在：
         [ ] recommend (唯讀，merchant-first intent，同時回傳直接刷卡與多層路徑候選)
         [ ] calculate_reward (唯讀，純數學計算)
         [ ] resolve_merchant (唯讀，實體消歧義)
@@ -164,6 +167,7 @@ Agent 在接收到安裝或初始化指令時，應依照以下 Checklist 進行
         [ ] upsert_payment_capability (寫入，公共支付能力建立)
         [ ] upsert_user_benefit_status (寫入，權益與登錄確認)
         [ ] record_transaction (寫入，實際交易記帳與退款)
+        [ ] list_transactions (唯讀，依 occurred_at/recorded_at 查詢交易與分頁投影)
         [ ] record_event_reward (寫入，event rule/chain eligibility)
         [ ] reverse_event_reward (寫入，explicit event refund reversal)
 
@@ -172,6 +176,8 @@ Agent 在接收到安裝或初始化指令時，應依照以下 Checklist 進行
       - 發起一次最簡 `recommend` 測試（例如只帶 `merchant`），確認回傳結構包含 `status`、`candidates` 與 `resultVersion`。
 
 - [ ] 5. Skill 與 Adapter 整合確認 (Skill Integrity Check)
+      - 確認安裝的是完整 skill bundle，而非單一 SKILL.md。
+      - 驗證 SKILL.md 指向的 references/workflows 均可讀。
       - 若使用 Local Adapter，檢查檔頭包含 `sourceVersion`、`sourceHash` 與 `canonicalLink`。
       - 確認 Agent Workspace 已就緒，具備外部網頁檢索與匯率計算能力。
 ```
@@ -186,8 +192,8 @@ Agent 在接收到安裝或初始化指令時，應依照以下 Checklist 進行
    ```bash
    cp -r /path/to/my-card-rewards-data /path/to/my-card-rewards-data.backup-$(date +%Y%m%d%H%M%S)
    ```
-3. **更新版本宣告**：將啟動命令或設定檔中的版本 tag 指向新版本（例如 `#v0.11.0`）。
-4. **重新執行健康檢查**：重跑第 4 節的 19 項工具驗證與 `recommend` 健康檢查。
+3. **更新版本宣告**：將啟動命令或設定檔中的版本 tag 指向新版本（例如 `#v0.14.0`）。
+4. **重新執行健康檢查**：重跑第 4 節的 20 項工具驗證與 `recommend` 健康檢查。
 
 ### 5.2 回滾程序 (Rollback Procedure)
 若升級後遇到相容性問題或異常：

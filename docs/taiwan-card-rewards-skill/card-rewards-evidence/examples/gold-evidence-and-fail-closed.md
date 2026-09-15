@@ -24,7 +24,7 @@ claim: { factKey: "user.membership", value: "gold", version: "terms-1" }
 Agent 應先走 evidence/research 流程，將官方 snapshot/rule 交給 `upsert_offer`。
 Eligibility fact（例如 Gold 會員資格）本身是 self-asserted：只要 Agent 提供
 `factKey`/`value`（見下），系統直接信任並用來評估 predicate，不需要另外呼叫
-任何 evidence 提交 tool 先行核准——現行 19-tool public surface 也沒有這種
+任何 evidence 提交 tool 先行核准——現行 20-tool public surface 也沒有這種
 tool，不能在文件中假裝它存在。同一個 `factKey`（同一張卡）出現兩個不同的
 `value` 會被視為衝突並導致 `needs_review`，這是唯一剩下的內建保護。
 
@@ -107,7 +107,7 @@ version: valuation-terms-1
 evidenceId: ev_valuation_official_illustrative
 ```
 
-目前 public 19-tool surface 沒有提交此 valuation snapshot 的工具；若 durable
+目前 public 20-tool surface 沒有提交此 valuation snapshot 的工具；若 durable
 store 也沒有已驗證 snapshot，payment-path candidate 必須帶
 `requiredActions: ["provide a validated valuation snapshot for each reward unit"]`
 並為 `blocked`/`needs_review`。Agent 不可用「1 point = NT$1」臆測。

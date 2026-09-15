@@ -340,7 +340,7 @@ describe('Track B: FX Resolution & Provenance Freeze', () => {
 
     describe('Agent Skill Workflow Document Verification', () => {
       it('verifies payment-route-and-fx.md mandates search before submit and zero automated core network I/O', () => {
-        const docPath = join(__dirname, '../docs/agents/taiwan-card-rewards-skill/workflows/payment-route-and-fx.md');
+        const docPath = join(__dirname, '../docs/taiwan-card-rewards-skill/card-rewards-recommendation/workflows/payment-route-and-fx.md');
         const docContent = readFileSync(docPath, 'utf8');
 
         // Verify workflow mandates external search/query before mutation

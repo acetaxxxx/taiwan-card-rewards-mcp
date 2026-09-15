@@ -1,3 +1,5 @@
 # Complete initial MCP surface with layered trust gates
 
+> 私有 `user_confirmed` 規則、單一 Transaction public surface 與未來新增查詢入口由 [ADR 0010](0010-user-confirmed-offers-transaction-chronology-and-offer-driven-routes.md) 補充；本 ADR 的 MCP 零網路與獨立 trust gate 維持不變。
+
 The first implementation delivers the complete eight-tool MCP surface, including catalog, source-governance, recommendation, transaction, cap, and refund operations, while preserving a pure calculation core. Bank pages, images, and PDFs are obtained and parsed by the Agent or UI; the MCP accepts only structured snapshots and does not make outbound network requests. It supports purchase, partial and repeated refunds, idempotency, and cap reconciliation rather than exposing incomplete write tools. Persistence is accessed through a `LedgerStore`/repository seam with the current FileStore as its first adapter, leaving SQLite/WAL migration independent of domain logic. Trust is layered: MCP validation enforces the contract and the evaluator independently enforces provenance and user confirmation, so no caller can turn an untrusted rule into a confident reward calculation.

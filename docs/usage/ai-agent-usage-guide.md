@@ -43,7 +43,7 @@ npx --yes github:acetaxxxx/taiwan-card-rewards-mcp#main \
 Pin a release tag for repeatable use:
 
 ```bash
-npx --yes github:acetaxxxx/taiwan-card-rewards-mcp#v0.11.0 \
+npx --yes github:acetaxxxx/taiwan-card-rewards-mcp#v0.14.0 \
   --data-dir /absolute/tenant-directory
 ```
 
@@ -86,6 +86,7 @@ response already carries every diagnostic an Agent needs.
 | `list_payment_capabilities` | Read-only | List public payment capabilities available for planned route generation. | `UNAUTHENTICATED`, `STORE_UNAVAILABLE` |
 | `register_payment_account` | Mutating | Register a wallet or linked bank account identity with evidence; never send credentials or account numbers. | `INVALID_CONFIRMATION`, `IDEMPOTENCY_CONFLICT`, `SENSITIVE_FIELD_FORBIDDEN` |
 | `list_payment_accounts` | Read-only | List user-scoped account identities before constructing payment routes. | `INVALID_INPUT`, `STORE_UNAVAILABLE` |
+| `list_transactions` | Read-only | List recorded actual transactions within an optional time range, sorted chronologically with stable pagination and summary/detail projections. | `INVALID_INPUT`, `PAYLOAD_TOO_LARGE`, `STORE_UNAVAILABLE` |
 | `search_active_offers` | Read-only | Search current active offers and return bounded canonical merchant/offer records; it never applies a reward. | `MISSING_REQUIRED_FACT`, `NOT_FOUND`, `STALE` |
 | `resolve_merchant` | Read-only | Validate an Agent-provided canonical merchant ID/name and return bounded merchant facts; it never interprets aliases or applies a reward. | `MERCHANT_AMBIGUOUS`, `MISSING_REQUIRED_FACT`, `NOT_FOUND` |
 | `record_transaction` | Mutating | Record an actual purchase (with `idempotencyKey`) or linked refund, updating durable cap usage. | `IDEMPOTENCY_CONFLICT`, `INVALID_REFUND`, `INSUFFICIENT_FACTS`, `NEEDS_REVIEW` |
@@ -99,18 +100,21 @@ response already carries every diagnostic an Agent needs.
 
 ## 4. Workflow Guidelines for AI Agents
 
+For lightweight or lower-reasoning models, load the bundled [low-reasoning playbook](../taiwan-card-rewards-skill/references/low-reasoning-playbook.md) for core invariants, high-risk decisions, and minimal payloads. Then load only the task skill required by the current intent.
+
 ### A. Card Management & Discovery
 1. For a recommendation, call `recommend` directly with the merchant-first intent. `list_cards` is for management, explicit inventory requests, or onboarding checks; it is not a normal recommendation prerequisite.
 2. If the user holds a new card, call `register_card` with card descriptors (e.g. `{ id: "esun-kumamon", issuer: "ESunBank", productName: "Kumamon Card", network: "JCB", country: "TW" }`).
 
-For the merchant-first recommendation shape, follow [`recommendation-intent.md`](taiwan-card-rewards-skill/workflows/recommendation-intent.md). `recommend` is the only entry point; there is no separate preflight call or legacy transaction branch.
+For the merchant-first recommendation shape, follow [`recommendation-intent.md`](../taiwan-card-rewards-skill/card-rewards-recommendation/workflows/recommendation-intent.md). `recommend` is the only entry point; there is no separate preflight call or legacy transaction branch.
 
 ### B. Offer Ingestion, OCR & Candidate Activation
 1. **Official Web Sources**: The Agent or UI retrieves official bank pages using its own approved browsing or ingestion path, then supplies an unverified structured source snapshot with provenance and content fingerprint. The MCP does not retrieve web content.
 2. **Flyers, App Screenshots & OCR**: Perform image/PDF processing **outside the MCP**. Extract declarative rule fields and assemble a candidate `OfferSourceSnapshot` with `sourceType: "user_input"` and `provenance`.
 3. **Candidate Activation (`upsert_offer`)**:
-   - Rules created from unverified inputs or images remain in `status: "candidate"` and will fail the Calculation Trust Gate (`needs_review`).
-   - To activate a candidate rule, present the extracted summary to the human user. Upon confirmation, invoke `upsert_offer` supplying the `confirmation` object:
+   - Rules created from unverified inputs or images remain in `status: "candidate"` until the user confirms the proposed terms.
+   - A user-confirmed rule is private to that user and returned with `trustBasis: "user_confirmed"`; it is usable for that user's recommendation but is never presented as issuer-verified or shared with other users.
+   - To activate a candidate rule, present the extracted summary to the human user. Upon confirmation, invoke `upsert_offer` supplying the `confirmation` object with `trustBasis: "user_confirmed"`:
      ```json
      {
        "snapshot": { "id": "snap-01", "url": "https://official.bank.com/offer" },
@@ -118,7 +122,8 @@ For the merchant-first recommendation shape, follow [`recommendation-intent.md`]
        "confirmation": {
          "confirmedAt": "2026-08-31T00:00:00Z",
          "confirmedBy": "user",
-         "sourceReference": "https://official.bank.com/offer",
+       "trustBasis": "user_confirmed",
+       "sourceReference": "使用者於對話確認的條款摘要",
          "offerPeriod": { "validFrom": "2026-01-01T00:00:00Z" },
          "rewardUnit": "TWD",
          "rewardConditionsSummary": "Japan in-store transactions",

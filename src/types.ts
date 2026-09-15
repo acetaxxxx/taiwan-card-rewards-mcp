@@ -1,10 +1,12 @@
+import type { PageInfo } from './projections.js';
+
 export type Currency = string;
 export type FxRateType = 'cash_selling' | 'spot_selling' | 'mid_market' | 'card_scheme';
 export type EvaluationStatus = 'ok' | 'no_match' | 'unknown' | 'needs_review' | 'stale';
 export type TransactionKind = 'purchase' | 'refund';
 export type TransactionMode = 'planned' | 'actual';
 export type PaymentRouteKind = 'direct_card' | 'wallet' | 'merchant_app';
-export type ConversionOwner = 'merchant' | 'wallet' | 'payment_provider' | 'card_network' | 'issuer' | 'bank' | 'acquirer' | 'unknown';
+export type ConversionOwner = 'merchant' | 'wallet' | 'payment_provider' | 'card_network' | 'issuer' | 'bank' | 'acquirer' | 'card_scheme' | 'merchant_dcc' | 'unknown';
 export type ConversionTiming = 'transaction' | 'clearing' | 'settlement' | 'posting';
 export interface PaymentRoute { kind: PaymentRouteKind; providerId?: string | undefined; appId?: string | undefined; displayName?: string | undefined; }
 export interface PaymentRouteContext {
@@ -224,7 +226,12 @@ export interface MerchantResolution {
 export interface OfferConfirmation {
   confirmedAt: string;
   confirmedBy: string;
-  sourceReference: string;
+  /** Official source reference when one exists; user confirmations may omit it. */
+  sourceReference?: string | undefined;
+  /** The authority that allowed this rule version to become active. */
+  trustBasis?: 'official_verified' | 'user_confirmed' | undefined;
+  /** Stable fingerprint of the terms the user reviewed and accepted. */
+  termsFingerprint?: string | undefined;
   offerPeriod: { validFrom: string; validTo?: string | undefined };
   rewardUnit: string;
   rewardConditionsSummary?: string | undefined;
@@ -233,7 +240,9 @@ export interface OfferConfirmation {
 
 export interface OfferSourceSnapshot {
   id: string;
-  url: string;
+  ownerUser?: string | undefined;
+  /** Public URL for official snapshots; omitted for a user attestation. */
+  url?: string | undefined;
   fetchedAt: string;
   contentHash: string;
   parserVersion: string;
@@ -294,6 +303,13 @@ export interface OfferRuleVersion {
   cardId?: string;
   version: string;
   sourceSnapshotId: string;
+  /** Public rules are unscoped; user-confirmed rules belong to one owner. */
+  ownerUser?: string | undefined;
+  trustBasis?: 'official_verified' | 'user_confirmed' | undefined;
+  /** Stable family key used to select one version without double counting. */
+  familyId?: string | undefined;
+  supersedesRuleId?: string | undefined;
+  supersessionReason?: 'user_correction' | 'user_revocation' | 'official_refresh' | undefined;
   status: 'candidate' | 'active' | 'stale' | 'superseded' | 'needs_review' | 'unknown';
   validFrom: string;
   validTo?: string | undefined;
@@ -313,9 +329,31 @@ export interface OfferRuleVersion {
   capPoolRefs?: readonly string[] | undefined;
   /** Optional exact PaymentRoute binding; absent means the legacy generic rule. */
   routeId?: string | undefined;
+  /** Optional reusable Payment Route Selector over route roles, transitions, and allowlists */
+  routeSelector?: PaymentRouteSelector | undefined;
   /** Optional recommendation-time event eligibility; exactly one may be supplied. */
   eventRule?: PaymentEventRule | undefined;
   eventChainRule?: PaymentEventChainRule | undefined;
+}
+
+export interface PaymentRouteSelector {
+  /** Open provider or consumerApp allowlist for payment services (e.g. ['line_pay', 'jko_pay', 'taishin_pay_plus']) */
+  paymentServices?: readonly string[] | undefined;
+  paymentServiceAllowlist?: readonly string[] | undefined;
+  /** Open provider allowlist for merchant acceptance networks (e.g. ['paypay', 'twqr']) */
+  acceptanceNetworks?: readonly string[] | undefined;
+  acceptanceNetworkAllowlist?: readonly string[] | undefined;
+  /** Allowed funding kinds (e.g. ['credit_card', 'account', 'cash']) */
+  fundingKinds?: readonly ('credit_card' | 'account' | 'cash')[] | undefined;
+  /** Node roles required by the route */
+  nodeRoles?: readonly PaymentPathNodeRole[] | undefined;
+  /** Route transitions required by the route */
+  transitions?: readonly PaymentPathTransition[] | undefined;
+  /** Route transitions forbidden by the route */
+  excludedTransitions?: readonly PaymentPathTransition[] | undefined;
+  /** Optional validity window for this selector */
+  validFrom?: string | undefined;
+  validTo?: string | undefined;
 }
 
 export interface FxSnapshot {
@@ -336,6 +374,12 @@ export interface FxSnapshot {
   /** Optional scope restrictions for card-specific or issuer-specific quotes. */
   cardIdScope?: string | undefined;
   issuerScope?: string | undefined;
+  rateDirection?: 'base_to_quote' | 'quote_to_base' | undefined;
+  conversionOwner?: ConversionOwner | undefined;
+  conversionTiming?: ConversionTiming | undefined;
+  cardScheme?: string | undefined;
+  routeIdScope?: string | undefined;
+  edgeIdScope?: string | undefined;
 }
 
 export interface AppliedFxRate {
@@ -375,7 +419,8 @@ export interface CycleWindow {
 export interface TransactionTuple {
   idempotencyKey?: string | undefined;
   routeId?: string | undefined;
-  cardId: string;
+  cardId?: string | undefined;
+  funding?: FundingInstrument | undefined;
   kind: TransactionKind;
   mode: TransactionMode;
   merchant?: string | undefined;
@@ -384,6 +429,7 @@ export interface TransactionTuple {
   channel?: string | undefined;
   paymentMethod?: string | undefined;
   occurredAt: string;
+  recordedAt?: string | undefined;
   amount: Money;
   fx?: FxSnapshot | undefined;
   refundOfId?: string | undefined;
@@ -395,7 +441,7 @@ export interface TransactionTuple {
 
 export interface RewardBreakdown {
   status: EvaluationStatus;
-  cardId: string;
+  cardId?: string | undefined;
   transaction: TransactionTuple;
   ruleId?: string | undefined;
   ruleVersion?: string | undefined;
@@ -407,6 +453,51 @@ export interface RewardBreakdown {
   unknownReasons: string[];
   diagnostics?: readonly Diagnostic[] | undefined;
   components?: readonly RewardComponent[] | undefined;
+}
+
+export type TransactionTimeBasis = 'occurred_at' | 'recorded_at';
+
+export interface ListTransactionsOptions {
+  startDate?: string | undefined;
+  endDate?: string | undefined;
+  timeBasis?: TransactionTimeBasis | undefined;
+  fundingKind?: 'credit_card' | 'account' | 'cash' | undefined;
+  cardId?: string | undefined;
+  limit?: number | undefined;
+  page?: number | undefined;
+  projection?: 'summary' | 'detail' | undefined;
+}
+
+export interface TransactionSummaryItem {
+  idempotencyKey?: string | undefined;
+  occurredAt: string;
+  recordedAt?: string | undefined;
+  kind: TransactionKind;
+  amount: Money;
+  funding: FundingInstrument;
+  cardId?: string | undefined;
+  merchant?: string | undefined;
+  channel?: string | undefined;
+  rewardStatus?: EvaluationStatus | undefined;
+  rewardAmount?: Money | undefined;
+  refundOfId?: string | undefined;
+}
+
+export interface TransactionDetailItem {
+  transaction: TransactionTuple;
+  reward: RewardBreakdown;
+  appliedFx?: AppliedFxRate | undefined;
+  capUsages?: readonly ComponentCapUsage[] | undefined;
+  components?: readonly RewardComponentRecord[] | undefined;
+  route?: PaymentRoute | PaymentRouteRecord | undefined;
+}
+
+export type TransactionListItem = TransactionSummaryItem | TransactionDetailItem;
+
+export interface ListTransactionsResult {
+  transactions: readonly TransactionListItem[];
+  items: readonly TransactionListItem[];
+  pageInfo: PageInfo;
 }
 
 export interface Diagnostic {
@@ -432,10 +523,29 @@ export interface FxResolutionRequest {
   sourceStatus?: 'known' | 'discovery_required';
   purpose?: 'path_quote' | 'policy_research' | 'reference_estimate';
   rateDirection?: 'base_to_quote';
-  scope?: { kind: 'public_reference' | 'card' | 'issuer' | 'route' | 'route_edge'; cardId?: string; issuer?: string; routeId?: string; edgeId?: string };
+  cardScheme?: string | undefined;
+  scope?: { kind: 'public_reference' | 'card' | 'issuer' | 'route' | 'route_edge' | 'card_scheme'; cardId?: string; issuer?: string; routeId?: string; edgeId?: string; cardScheme?: string };
   freshness?: { maxAgeSeconds?: number; targetTime?: string };
   requiredFields?: readonly string[];
   submission?: { tool: string; field: string };
+}
+
+export interface FxEvaluationContext {
+  baseCurrency: Currency;
+  quoteCurrency: Currency;
+  rateDirection?: 'base_to_quote' | 'quote_to_base' | undefined;
+  conversionOwner?: ConversionOwner | 'card_scheme' | 'issuer' | 'wallet' | 'merchant_dcc' | 'unknown' | undefined;
+  conversionTiming?: ConversionTiming | undefined;
+  rateType?: FxRateType | undefined;
+  /** Known clearing provider; a quote from another provider is not reusable. */
+  provider?: string | undefined;
+  cardScheme?: string | undefined;
+  cardId?: string | undefined;
+  issuer?: string | undefined;
+  routeId?: string | undefined;
+  edgeId?: string | undefined;
+  asOf?: string | undefined;
+  requireFresh?: boolean | undefined;
 }
 
 
@@ -625,7 +735,11 @@ export interface IntentRule {
   ruleVersion: string;
   component: RewardComponentKind;
   sourceSnapshotId: string;
-  sourceUrl?: string;
+  sourceUrl?: string | undefined;
+  trustBasis?: 'official_verified' | 'user_confirmed' | undefined;
+  ownerUser?: string | undefined;
+  confirmedAt?: string | undefined;
+  sourceSummary?: string | undefined;
   validFrom: string;
   validTo?: string;
   conditions: RuleMatch;

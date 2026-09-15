@@ -1,6 +1,10 @@
 # Agent workflow：登記、推薦、匯率更新與完整優惠探索
 
-Status: ready-for-agent
+Status: needs-triage
+
+> This is a historical draft that still describes removed FX policy and
+> observation tools. Do not use it as runtime guidance until its contract is
+> reconciled with `tools/list` and the canonical skill bundle.
 
 這是[推薦體驗改善提案](spec.md)的實作流程草稿；現行部署仍以實際 MCP handshake、tools/list schema 與回應為準。`research_fx_policy` 與 FX refresh 是 `requiredActions`，不是工具名稱；政策與 observation 分別使用 `upsert_fx_policy`、`upsert_fx_observation`。
 
@@ -84,7 +88,7 @@ MCP 的 `fxResolutionRequest` 是查詢要求，`fxObservation` 是 Agent 查完
 | 文件 | 必須同步的內容 |
 | --- | --- |
 | `src/mcp-contract.ts` instructions/descriptions | recommend 正常入口；回傳 actions 的處理責任；10 是 page size |
-| `docs/agents/usage-guide.md` | 新版能力與 workflow 入口；planned／記帳分工 |
+| `docs/usage/ai-agent-usage-guide.md` | 新版能力與 workflow 入口；planned／記帳分工 |
 | skill `SKILL.md` router | 登記、推薦、FX recovery、更多／全部各分支指向同一流程 |
 | skill workflow、playbook、examples | 使用實際 schema 的首次推薦、估算、補件重算、完整分頁範例 |
 | authoring guide、template、舊 preflight SOP | 改引用 canonical workflow；舊契約標記適用版本或遷移說明 |
