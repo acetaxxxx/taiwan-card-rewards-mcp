@@ -1,5 +1,5 @@
 import { SUPPORTED_PREDICATE_FIELDS } from './types.js';
-import type { CardDescriptor, CardProduct, CapPeriod, CapPoolDefinition, CardSwitchCampaign, CardSwitchConfirmation, CardSwitchInput, CardSwitchEnrollment, CardSwitchProjection, EligibilityFact, EvaluationContext, FxSnapshot, HeldCard, MerchantIdentity, MerchantProvenance, Money, OfferConfirmation, OfferProvenance, OfferRuleVersion, OfferSourceSnapshot, Predicate, PredicateValue, RewardBreakdown, RewardSpec, RuleMatch, TransactionTuple, PaymentRouteKind, RewardComponentKind, RewardComponentRecord, PaymentRouteContext, PaymentRouteRecord, PaymentCapabilityRecord, PaymentAccountRecord, PaymentEvent, PaymentEventKind, PaymentEventRule, PaymentEventChainRule, EventRewardLedgerRecord, EventRewardReversalRecord, EventRewardCapUsageRecord, PaymentEventRewardCandidate, PaymentEventRewardCandidateInput, PaymentEventMatch, RewardValuationSnapshot, PaymentRouteSelector, FundingInstrument, ListTransactionsOptions, TransactionTimeBasis, AppliedFxRate, FxRateType, IngestionSourceScope, IngestionFlowRecord, IngestionDraftTombstone, IngestionManifestLeaf, IngestionBenefitLeafSubmission, IngestionLocalExclusion, IngestionMerchantReference } from './types.js';
+import type { CardDescriptor, CardProduct, CapPeriod, CapPoolDefinition, CardSwitchCampaign, CardSwitchConfirmation, CardSwitchInput, CardSwitchEnrollment, CardSwitchProjection, EligibilityFact, EvaluationContext, FxSnapshot, HeldCard, MerchantIdentity, MerchantProvenance, Money, OfferConfirmation, OfferProvenance, OfferRuleVersion, OfferSourceSnapshot, Predicate, PredicateValue, RewardBreakdown, RewardSpec, RuleMatch, TransactionTuple, PaymentRouteKind, RewardComponentKind, RewardComponentRecord, PaymentRouteContext, PaymentRouteRecord, PaymentCapabilityRecord, PaymentAccountRecord, PaymentEvent, PaymentEventKind, PaymentEventRule, PaymentEventChainRule, EventRewardLedgerRecord, EventRewardReversalRecord, EventRewardCapUsageRecord, PaymentEventRewardCandidate, PaymentEventRewardCandidateInput, PaymentEventMatch, RewardValuationSnapshot, PaymentRouteSelector, FundingInstrument, ListTransactionsOptions, TransactionTimeBasis, AppliedFxRate, FxRateType, IngestionSourceScope, IngestionFlowRecord, IngestionDraftTombstone, IngestionManifestLeaf, IngestionBenefitLeafSubmission, IngestionLocalExclusion, IngestionMerchantReference, AppliedExclusion, IngestionExclusionArtifact, IngestionExclusionLeafSubmission, IngestionExclusionScope, IngestionExclusionTarget } from './types.js';
 import type { StoredState } from './store.js';
 import type { EvidenceRecord, FactCandidate } from './types.js';
 import { RewardServiceError } from './errors.js';
@@ -514,7 +514,7 @@ export function validatePaymentRouteSelector(value: unknown): PaymentRouteSelect
 
 export function validateRule(value: unknown): OfferRuleVersion {
   const item = object(value, 'rule');
-  keys(item, ['id', 'cardId', 'version', 'sourceSnapshotId', 'ownerUser', 'trustBasis', 'familyId', 'supersedesRuleId', 'supersessionReason', 'status', 'validFrom', 'validTo', 'settlementCurrency', 'match', 'predicate', 'requires', 'reward', 'capPoolRefs', 'confirmation', 'combination', 'componentKind', 'sponsor', 'benefitGroup', 'useSettlementAmount', 'stacking', 'routeId', 'routeSelector', 'eventRule', 'eventChainRule'], 'rule');
+  keys(item, ['id', 'cardId', 'version', 'sourceSnapshotId', 'ownerUser', 'trustBasis', 'familyId', 'supersedesRuleId', 'supersessionReason', 'status', 'validFrom', 'validTo', 'settlementCurrency', 'match', 'predicate', 'sharedExclusions', 'requires', 'reward', 'capPoolRefs', 'confirmation', 'combination', 'componentKind', 'sponsor', 'benefitGroup', 'useSettlementAmount', 'stacking', 'routeId', 'routeSelector', 'eventRule', 'eventChainRule'], 'rule');
   const status = requiredString(item.status, 'rule.status');
   if (!['candidate', 'active', 'stale', 'superseded', 'needs_review', 'unknown'].includes(status)) throw new RewardServiceError('INVALID_INPUT', 'rule.status is invalid');
   const rewardItem = object(item.reward, 'rule.reward');
@@ -531,6 +531,7 @@ export function validateRule(value: unknown): OfferRuleVersion {
   if (validTo && (!Number.isFinite(Date.parse(validTo)) || !validTo.includes('T'))) throw new RewardServiceError('INVALID_INPUT', 'rule.validTo must be an ISO date-time');
   let predicate: Predicate | undefined;
   if (item.predicate !== undefined) predicate = validatePredicate(item.predicate);
+  const sharedExclusions = item.sharedExclusions === undefined ? undefined : validateAppliedExclusions(item.sharedExclusions, 'rule.sharedExclusions');
   let requires: OfferRuleVersion['requires'] | undefined;
   if (item.requires !== undefined) {
     if (!Array.isArray(item.requires) || item.requires.some((entry) => entry !== 'source_verified' && entry !== 'user_confirmation')) throw new RewardServiceError('INVALID_INPUT', 'rule.requires contains an unsupported trust requirement');
@@ -585,6 +586,7 @@ export function validateRule(value: unknown): OfferRuleVersion {
   if (supersessionReason) rule.supersessionReason = supersessionReason as OfferRuleVersion['supersessionReason'];
   if (validTo) rule.validTo = validTo;
   if (predicate) rule.predicate = predicate;
+  if (sharedExclusions?.length) rule.sharedExclusions = sharedExclusions;
   if (requires?.length) rule.requires = requires;
   if (capPoolRefs) rule.capPoolRefs = capPoolRefs;
   if (componentKind) rule.componentKind = componentKind as OfferRuleVersion['componentKind'];
@@ -980,10 +982,10 @@ export function validateIngestionSourceScope(value: unknown): IngestionSourceSco
 
 function validateIngestionFlow(value: unknown): IngestionFlowRecord {
   const item = object(value, 'ingestion flow');
-  keys(item, ['id', 'ownerUser', 'sourceScope', 'revision', 'status', 'idempotencyKey', 'createdAt', 'lastActivityAt', 'expiresAt', 'sourceCapture', 'manifest', 'benefitArtifacts'], 'ingestion flow');
+  keys(item, ['id', 'ownerUser', 'sourceScope', 'revision', 'status', 'idempotencyKey', 'createdAt', 'lastActivityAt', 'expiresAt', 'sourceCapture', 'manifest', 'benefitArtifacts', 'exclusionArtifacts'], 'ingestion flow');
   const status = requiredString(item.status, 'ingestion flow.status');
   if (!['awaiting_source', 'awaiting_manifest', 'processing_leaves', 'ready_to_finalize', 'complete', 'needs_review', 'conflict', 'failed', 'cancelled', 'expired'].includes(status)) throw new RewardServiceError('INVALID_INPUT', 'ingestion flow.status is invalid');
-  return { id: requiredString(item.id, 'ingestion flow.id', true), ownerUser: requiredString(item.ownerUser, 'ingestion flow.ownerUser', true), sourceScope: validateIngestionSourceScope(item.sourceScope), revision: safeInt(item.revision, 'ingestion flow.revision', 1), status: status as IngestionFlowRecord['status'], idempotencyKey: requiredString(item.idempotencyKey, 'ingestion flow.idempotencyKey', true), createdAt: iso(item.createdAt, 'ingestion flow.createdAt'), lastActivityAt: iso(item.lastActivityAt, 'ingestion flow.lastActivityAt'), expiresAt: iso(item.expiresAt, 'ingestion flow.expiresAt'), ...(item.sourceCapture === undefined ? {} : { sourceCapture: validateIngestionSourceCapture(item.sourceCapture) }), ...(item.manifest === undefined ? {} : { manifest: validateIngestionManifest(item.manifest) }), ...(item.benefitArtifacts === undefined ? {} : { benefitArtifacts: validateIngestionBenefitArtifacts(item.benefitArtifacts) }) };
+  return { id: requiredString(item.id, 'ingestion flow.id', true), ownerUser: requiredString(item.ownerUser, 'ingestion flow.ownerUser', true), sourceScope: validateIngestionSourceScope(item.sourceScope), revision: safeInt(item.revision, 'ingestion flow.revision', 1), status: status as IngestionFlowRecord['status'], idempotencyKey: requiredString(item.idempotencyKey, 'ingestion flow.idempotencyKey', true), createdAt: iso(item.createdAt, 'ingestion flow.createdAt'), lastActivityAt: iso(item.lastActivityAt, 'ingestion flow.lastActivityAt'), expiresAt: iso(item.expiresAt, 'ingestion flow.expiresAt'), ...(item.sourceCapture === undefined ? {} : { sourceCapture: validateIngestionSourceCapture(item.sourceCapture) }), ...(item.manifest === undefined ? {} : { manifest: validateIngestionManifest(item.manifest) }), ...(item.benefitArtifacts === undefined ? {} : { benefitArtifacts: validateIngestionBenefitArtifacts(item.benefitArtifacts) }), ...(item.exclusionArtifacts === undefined ? {} : { exclusionArtifacts: validateIngestionExclusionArtifacts(item.exclusionArtifacts) }) };
 }
 
 function validateIngestionLocalExclusion(value: unknown, name: string): IngestionLocalExclusion {
@@ -991,6 +993,49 @@ function validateIngestionLocalExclusion(value: unknown, name: string): Ingestio
   if (item.scope !== 'benefit') throw new RewardServiceError('INVALID_INPUT', `${name}.scope is invalid`);
   if (!Array.isArray(item.evidenceRefs) || item.evidenceRefs.length < 1 || item.evidenceRefs.length > 32) throw new RewardServiceError('INVALID_INPUT', `${name}.evidenceRefs must contain 1..32 references`);
   return { scope: 'benefit', predicate: validatePredicate(item.predicate, `${name}.predicate`), evidenceRefs: item.evidenceRefs.map((ref, index) => requiredString(ref, `${name}.evidenceRefs[${index}]`)) };
+}
+
+const exclusionTargetFields: Record<IngestionExclusionTarget, readonly string[]> = {
+  merchant: ['transaction.merchant', 'transaction.mcc'],
+  transaction_fact: ['transaction.country', 'transaction.channel', 'transaction.amount.currency', 'transaction.funding.kind'],
+  payment_route: ['transaction.route.kind', 'transaction.routeContext.dcc'],
+  payment_method: ['transaction.paymentMethod'],
+};
+function predicateFields(predicate: Predicate): readonly string[] { return predicate.op === 'NOT' ? predicateFields(predicate.rule) : 'rules' in predicate ? predicate.rules.flatMap(predicateFields) : [predicate.field]; }
+function validateIngestionExclusionScope(value: unknown, name: string): IngestionExclusionScope {
+  const item = object(value, name); keys(item, ['kind', 'benefitIds'], name);
+  const kind = requiredString(item.kind, `${name}.kind`);
+  if (kind === 'all_benefits') { if (item.benefitIds !== undefined) throw new RewardServiceError('INVALID_INPUT', `${name}.benefitIds is not allowed for all_benefits`); return { kind }; }
+  if (kind !== 'benefit_ids' || !Array.isArray(item.benefitIds) || item.benefitIds.length < 1 || item.benefitIds.length > 128) throw new RewardServiceError('INVALID_INPUT', `${name} must identify all_benefits or 1..128 benefit IDs`);
+  const benefitIds = item.benefitIds.map((id, index) => requiredString(id, `${name}.benefitIds[${index}]`, true));
+  if (new Set(benefitIds).size !== benefitIds.length) throw new RewardServiceError('INVALID_INPUT', `${name}.benefitIds contains duplicates`);
+  return { kind, benefitIds };
+}
+function validateAppliedExclusions(value: unknown, name: string): readonly AppliedExclusion[] {
+  if (!Array.isArray(value) || value.length > 128) throw new RewardServiceError('INVALID_INPUT', `${name} must be an array of at most 128 exclusions`);
+  return value.map((entry, index) => {
+    const item = object(entry, `${name}[${index}]`); keys(item, ['sourceLeafId', 'sourceFlowId', 'target', 'predicate', 'evidenceRefs'], `${name}[${index}]`);
+    const target = requiredString(item.target, `${name}[${index}].target`);
+    if (!['merchant', 'transaction_fact', 'payment_route', 'payment_method'].includes(target)) throw new RewardServiceError('INVALID_INPUT', `${name}[${index}].target is unsupported`);
+    if (!Array.isArray(item.evidenceRefs) || item.evidenceRefs.length < 1 || item.evidenceRefs.length > 32) throw new RewardServiceError('INVALID_INPUT', `${name}[${index}].evidenceRefs must contain 1..32 references`);
+    const predicate = validatePredicate(item.predicate, `${name}[${index}].predicate`);
+    if (predicateFields(predicate).some((field) => !exclusionTargetFields[target as IngestionExclusionTarget].includes(field))) throw new RewardServiceError('INVALID_INPUT', `${name}[${index}].predicate does not match target ${target}`);
+    return { sourceLeafId: requiredString(item.sourceLeafId, `${name}[${index}].sourceLeafId`, true), sourceFlowId: requiredString(item.sourceFlowId, `${name}[${index}].sourceFlowId`, true), target: target as IngestionExclusionTarget, predicate, evidenceRefs: item.evidenceRefs.map((ref, refIndex) => requiredString(ref, `${name}[${index}].evidenceRefs[${refIndex}]`)) };
+  });
+}
+export function validateIngestionExclusionLeaf(value: unknown): IngestionExclusionLeafSubmission {
+  const item = object(value, 'exclusion leaf'); keys(item, ['flowId', 'actionId', 'expectedRevision', 'idempotencyKey', 'leafId', 'target', 'scope', 'predicate', 'evidenceRefs', 'disposition', 'reason'], 'exclusion leaf');
+  if (typeof item.expectedRevision !== 'number' || !Number.isSafeInteger(item.expectedRevision) || item.expectedRevision < 1) throw new RewardServiceError('INVALID_INPUT', 'exclusion leaf expectedRevision is required');
+  if (!Array.isArray(item.evidenceRefs) || item.evidenceRefs.length < 1 || item.evidenceRefs.length > 32) throw new RewardServiceError('INVALID_INPUT', 'exclusion leaf evidenceRefs must contain 1..32 references');
+  const target = requiredString(item.target, 'exclusion leaf.target');
+  if (!['merchant', 'transaction_fact', 'payment_route', 'payment_method'].includes(target)) throw new RewardServiceError('NEEDS_REVIEW', 'exclusion target is not supported by the evaluator', { code: 'UNSUPPORTED_EXCLUSION_TARGET', path: 'target', requiredFacts: ['an evaluator-supported exclusion target'], retryAction: 'submit_exclusion_leaf', affectedIds: [] });
+  const predicate = validatePredicate(item.predicate, 'exclusion leaf.predicate');
+  if (predicateFields(predicate).some((field) => !exclusionTargetFields[target as IngestionExclusionTarget].includes(field))) throw new RewardServiceError('NEEDS_REVIEW', `exclusion predicate is not expressible for target ${target}`, { code: 'UNSUPPORTED_EXCLUSION_TARGET', path: 'predicate', requiredFacts: [`predicate fields supported by ${target}`], retryAction: 'submit_exclusion_leaf', affectedIds: [] });
+  const disposition = item.disposition === undefined ? 'materialized' : requiredString(item.disposition, 'exclusion leaf.disposition');
+  if (disposition !== 'materialized' && disposition !== 'ignored') throw new RewardServiceError('INVALID_INPUT', 'exclusion leaf.disposition is invalid');
+  const reason = item.reason === undefined ? undefined : requiredString(item.reason, 'exclusion leaf.reason');
+  if (disposition === 'ignored' && reason === undefined) throw new RewardServiceError('INVALID_INPUT', 'ignored exclusion requires a reason');
+  return { flowId: requiredString(item.flowId, 'exclusion leaf.flowId', true), actionId: requiredString(item.actionId, 'exclusion leaf.actionId', true), expectedRevision: item.expectedRevision, idempotencyKey: requiredString(item.idempotencyKey, 'exclusion leaf.idempotencyKey', true), leafId: requiredString(item.leafId, 'exclusion leaf.leafId', true), target: target as IngestionExclusionTarget, scope: validateIngestionExclusionScope(item.scope, 'exclusion leaf.scope'), predicate, evidenceRefs: item.evidenceRefs.map((ref, index) => requiredString(ref, `exclusion leaf.evidenceRefs[${index}]`)), disposition: disposition as 'materialized' | 'ignored', ...(reason === undefined ? {} : { reason }) };
 }
 
 function validateIngestionBenefitArtifacts(value: unknown): NonNullable<IngestionFlowRecord['benefitArtifacts']> {
@@ -1001,6 +1046,16 @@ function validateIngestionBenefitArtifacts(value: unknown): NonNullable<Ingestio
     if (!Array.isArray(item.evidenceRefs) || item.evidenceRefs.length < 1 || item.evidenceRefs.length > 32) throw new RewardServiceError('STORE_CORRUPT', `benefitArtifacts[${index}].evidenceRefs is invalid`);
     const exclusions = item.localExclusions === undefined ? [] : (Array.isArray(item.localExclusions) ? item.localExclusions.map((v, i) => validateIngestionLocalExclusion(v, `benefitArtifacts[${index}].localExclusions[${i}]`)) : (() => { throw new RewardServiceError('STORE_CORRUPT', `benefitArtifacts[${index}].localExclusions is invalid`); })());
     return { id: requiredString(item.id, `benefitArtifacts[${index}].id`, true), flowId: requiredString(item.flowId, `benefitArtifacts[${index}].flowId`, true), revision: safeInt(item.revision, `benefitArtifacts[${index}].revision`, 1), leafId: requiredString(item.leafId, `benefitArtifacts[${index}].leafId`, true), ruleId: requiredString(item.ruleId, `benefitArtifacts[${index}].ruleId`, true), ruleVersion: requiredString(item.ruleVersion, `benefitArtifacts[${index}].version`), snapshotId: requiredString(item.snapshotId, `benefitArtifacts[${index}].snapshotId`, true), evidenceRefs: item.evidenceRefs.map((v, i) => requiredString(v, `benefitArtifacts[${index}].evidenceRefs[${i}]`)), localExclusions: exclusions, idempotencyKey: requiredString(item.idempotencyKey, `benefitArtifacts[${index}].idempotencyKey`, true), payloadHash: requiredString(item.payloadHash, `benefitArtifacts[${index}].payloadHash`, true), status: 'candidate' as const };
+  });
+}
+
+function validateIngestionExclusionArtifacts(value: unknown): NonNullable<IngestionFlowRecord['exclusionArtifacts']> {
+  if (!Array.isArray(value)) throw new RewardServiceError('STORE_CORRUPT', 'ingestion flow exclusionArtifacts must be an array');
+  return value.map((entry, index) => {
+    const item = object(entry, `exclusionArtifacts[${index}]`); keys(item, ['id', 'revision', 'sourceLeafId', 'sourceFlowId', 'target', 'scope', 'predicate', 'evidenceRefs', 'idempotencyKey', 'payloadHash', 'status'], `exclusionArtifacts[${index}]`);
+    if (item.status !== 'candidate') throw new RewardServiceError('STORE_CORRUPT', `exclusionArtifacts[${index}].status is invalid`);
+    const [applied] = validateAppliedExclusions([{ sourceLeafId: item.sourceLeafId, sourceFlowId: item.sourceFlowId, target: item.target, predicate: item.predicate, evidenceRefs: item.evidenceRefs }], `exclusionArtifacts[${index}]`);
+    return { id: requiredString(item.id, `exclusionArtifacts[${index}].id`, true), revision: safeInt(item.revision, `exclusionArtifacts[${index}].revision`, 1), ...applied!, scope: validateIngestionExclusionScope(item.scope, `exclusionArtifacts[${index}].scope`), idempotencyKey: requiredString(item.idempotencyKey, `exclusionArtifacts[${index}].idempotencyKey`, true), payloadHash: requiredString(item.payloadHash, `exclusionArtifacts[${index}].payloadHash`, true), status: 'candidate' as const };
   });
 }
 

@@ -328,6 +328,8 @@ export interface OfferRuleVersion {
   settlementCurrency: Currency;
   match: RuleMatch;
   predicate?: Predicate | undefined;
+  /** Source-backed exclusions applied to this rule during ingestion. */
+  sharedExclusions?: readonly AppliedExclusion[] | undefined;
   requires?: readonly CalculationTrustRequirement[] | undefined;
   reward: RewardSpec;
   componentKind?: RewardComponentKind | undefined;
@@ -463,6 +465,8 @@ export interface RewardBreakdown {
   capRemainingBefore?: Money | undefined;
   capRemainingAfter?: Money | undefined;
   unknownReasons: string[];
+  /** Exclusions that matched, including the source leaf and its evidence. */
+  matchedExclusions?: readonly AppliedExclusion[] | undefined;
   diagnostics?: readonly Diagnostic[] | undefined;
   components?: readonly RewardComponent[] | undefined;
 }
@@ -850,6 +854,12 @@ export type IngestionFlowStatus = 'awaiting_source' | 'awaiting_manifest' | 'pro
 export interface IngestionSourceCapture { sourceType: 'official' | 'user_input'; url?: string; description?: string; retrievedAt: string; contentHash: string; artifactRef: string; submitter: string; submittedAt: string; }
 export interface IngestionManifestLeaf { id: string; kind: 'benefit' | 'exclusion'; summary: string; evidenceLocator: string; dependsOn: readonly string[]; disposition?: 'materialized' | 'ignored' | 'superseded'; dispositionReason?: string; dispositionEvidence?: string; }
 export interface IngestionLocalExclusion { scope: 'benefit'; predicate: Predicate; evidenceRefs: readonly string[]; }
+export type IngestionExclusionTarget = 'merchant' | 'transaction_fact' | 'payment_route' | 'payment_method';
+export interface IngestionExclusionScope { kind: 'all_benefits' | 'benefit_ids'; benefitIds?: readonly string[]; }
+/** A persisted exclusion retains provenance after its candidate rule is finalized. */
+export interface AppliedExclusion { sourceLeafId: string; sourceFlowId: string; target: IngestionExclusionTarget; predicate: Predicate; evidenceRefs: readonly string[]; }
+export interface IngestionExclusionLeafSubmission { flowId: string; actionId: string; expectedRevision: number; idempotencyKey: string; leafId: string; target: IngestionExclusionTarget; scope: IngestionExclusionScope; predicate: Predicate; evidenceRefs: readonly string[]; disposition?: 'materialized' | 'ignored'; reason?: string; }
+export interface IngestionExclusionArtifact extends AppliedExclusion { id: string; revision: number; scope: IngestionExclusionScope; idempotencyKey: string; payloadHash: string; status: 'candidate'; }
 export interface IngestionMerchantReference { rawQuery: string; canonicalId?: string; country?: string; market?: string; mcc?: string; channel?: string; candidate?: Omit<MerchantIdentity, 'canonicalId' | 'status'> & { canonicalId?: string; status?: 'candidate' }; }
 export interface IngestionBenefitLeafSubmission { flowId: string; actionId: string; expectedRevision: number; idempotencyKey: string; leafId: string; offer: { snapshot: OfferSourceSnapshot; rule: OfferRuleVersion; capPools?: readonly CapPoolDefinition[]; merchant?: Omit<MerchantIdentity, 'canonicalId'> & { canonicalId?: string }; }; merchantRefs?: readonly IngestionMerchantReference[]; evidenceRefs: readonly string[]; localExclusions?: readonly IngestionLocalExclusion[]; }
 export interface IngestionBenefitArtifact { id: string; flowId: string; revision: number; leafId: string; ruleId: string; ruleVersion: string; snapshotId: string; evidenceRefs: readonly string[]; localExclusions: readonly IngestionLocalExclusion[]; idempotencyKey: string; payloadHash: string; status: 'candidate'; }
@@ -866,6 +876,7 @@ export interface IngestionFlowRecord {
   sourceCapture?: IngestionSourceCapture;
   manifest?: readonly IngestionManifestLeaf[];
   benefitArtifacts?: readonly IngestionBenefitArtifact[];
+  exclusionArtifacts?: readonly IngestionExclusionArtifact[];
 }
 export interface IngestionDraftTombstone {
   id: string;

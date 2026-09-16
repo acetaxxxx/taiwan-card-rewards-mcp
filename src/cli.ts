@@ -155,6 +155,7 @@ async function callTool(service: RewardService, params: Record<string, unknown>)
     case 'submit_ingestion_source': return service.submitIngestionSource(args);
     case 'submit_ingestion_manifest': return service.submitIngestionManifest(args);
     case 'submit_benefit_leaf': return service.submitBenefitLeaf(args);
+    case 'submit_exclusion_leaf': return service.submitExclusionLeaf(args);
     case 'register_card': return service.registerCard(validateCard(args.card));
     case 'list_cards': return maybePaged(service.listCards(), (item) => String((item as CardDescriptor).id), 50);
     case 'upsert_offer': return service.upsertOffer(validateSnapshot(args.snapshot), validateRule(args.rule), args.confirmation !== undefined ? validateConfirmation(args.confirmation) : undefined, args.capPools === undefined ? undefined : (Array.isArray(args.capPools) ? args.capPools.map(validateCapPool) : []), args.merchant as any);

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { emptyState, RewardService, type LedgerStore, type StoredState } from '../src/index.js';
+import { emptyState, evaluateOffer, RewardService, type LedgerStore, type StoredState } from '../src/index.js';
 
 class MemoryStore implements LedgerStore {
   private state: StoredState = emptyState();
@@ -114,5 +114,36 @@ describe('ingestion flow spine', () => {
     expect(error?.code).toBe('NEEDS_REVIEW');
     expect(error?.details).toEqual(expect.objectContaining({ code: 'UNSUPPORTED_REWARD_UNIT', path: 'offer.rule.reward.kind', retryAction: 'submit_benefit_leaf' }));
     expect(service.inspectIngestion(created.flow.id).flow.manifest?.[0]).not.toHaveProperty('disposition');
+  });
+
+  it('applies a source-scoped shared exclusion to every dependent benefit and preserves its evaluator provenance', () => {
+    const store = new MemoryStore();
+    const service = new RewardService(store, 'user-a');
+    const created = service.createIngestion({ sourceScope: { kind: 'official_url', value: 'https://bank.example/shared-exclusion' }, idempotencyKey: 'shared-exclusion' });
+    const sourced = service.submitIngestionSource({ flowId: created.flow.id, actionId: created.nextAction?.actionId, expectedRevision: 1, sourceCapture: { sourceType: 'official', url: 'https://bank.example/shared-exclusion', retrievedAt: '2026-09-16T00:00:00.000Z', contentHash: 'shared-hash', artifactRef: 'artifact:shared', submitter: 'agent', submittedAt: '2026-09-16T00:00:00.000Z' } });
+    const manifested = service.submitIngestionManifest({ flowId: created.flow.id, actionId: sourced.nextAction?.actionId, expectedRevision: 2, manifest: [{ id: 'exclude-wallet', kind: 'exclusion', summary: 'wallet excluded', evidenceLocator: 'page:1#exclude', dependsOn: [] }, { id: 'benefit-a', kind: 'benefit', summary: 'benefit A', evidenceLocator: 'page:1#a', dependsOn: ['exclude-wallet'] }, { id: 'benefit-b', kind: 'benefit', summary: 'benefit B', evidenceLocator: 'page:1#b', dependsOn: ['exclude-wallet'] }] });
+    const exclusion = service.submitExclusionLeaf({ flowId: created.flow.id, actionId: manifested.nextAction?.actionId, expectedRevision: 3, idempotencyKey: 'exclude-wallet-v1', leafId: 'exclude-wallet', target: 'payment_method', scope: { kind: 'all_benefits' }, predicate: { field: 'transaction.paymentMethod', op: 'EQUALS', value: 'wallet-x' }, evidenceRefs: ['page:1#exclude'] });
+    expect(exclusion.artifact).toEqual(expect.objectContaining({ sourceLeafId: 'exclude-wallet', status: 'candidate' }));
+    const next = exclusion.flow.nextAction!;
+    const submitBenefit = (leafId: string, ruleId: string, actionId: string, revision: number) => service.submitBenefitLeaf({ flowId: created.flow.id, actionId, expectedRevision: revision, idempotencyKey: `${leafId}-v1`, leafId, evidenceRefs: [`page:1#${leafId}`], offer: { snapshot: { id: `snapshot-${leafId}`, url: 'https://bank.example/shared-exclusion', fetchedAt: '2026-09-16T00:00:00.000Z', contentHash: 'shared-hash', parserVersion: '1', verified: true, sourceType: 'official' }, rule: { id: ruleId, cardId: 'card-1', version: '1', sourceSnapshotId: `snapshot-${leafId}`, status: 'candidate', validFrom: '2026-01-01T00:00:00.000Z', settlementCurrency: 'TWD', match: {}, reward: { kind: 'percentage', rateBps: 300 } } } });
+    const first = submitBenefit(next.leafId!, 'rule-a', next.actionId, next.expectedRevision);
+    expect(first.flow.flow.manifest?.find((leaf) => leaf.id === 'benefit-a')?.disposition).toBe('materialized');
+    expect(first.flow.nextAction?.leafId).toBe('benefit-b');
+    const second = submitBenefit(first.flow.nextAction!.leafId!, 'rule-b', first.flow.nextAction!.actionId, first.flow.nextAction!.expectedRevision);
+    expect(second.flow.flow.status).toBe('ready_to_finalize');
+    const candidate = store.read().rules.find((rule) => rule.id === 'rule-a')!;
+    expect(candidate.sharedExclusions).toEqual([expect.objectContaining({ sourceLeafId: 'exclude-wallet', evidenceRefs: ['page:1#exclude'] })]);
+    const evaluated = evaluateOffer({ ...candidate, status: 'active' }, { cardId: 'card-1', kind: 'purchase', mode: 'planned', occurredAt: '2026-09-16T00:00:00.000Z', amount: { amountMinor: 10000, currency: 'TWD' }, paymentMethod: 'wallet-x' }, { sourceSnapshots: { [candidate.sourceSnapshotId]: store.read().snapshots.find((snapshot) => snapshot.id === candidate.sourceSnapshotId)! } });
+    expect(evaluated.status).toBe('no_match');
+    expect(evaluated.matchedExclusions?.[0]).toEqual(expect.objectContaining({ sourceLeafId: 'exclude-wallet' }));
+  });
+
+  it('rejects ambiguous shared-exclusion scope and requires a reason to ignore an exclusion', () => {
+    const service = new RewardService(new MemoryStore(), 'user-a');
+    const created = service.createIngestion({ sourceScope: { kind: 'official_url', value: 'https://bank.example/ambiguous-exclusion' }, idempotencyKey: 'ambiguous-exclusion' });
+    const sourced = service.submitIngestionSource({ flowId: created.flow.id, actionId: created.nextAction?.actionId, expectedRevision: 1, sourceCapture: { sourceType: 'official', url: 'https://bank.example/ambiguous-exclusion', retrievedAt: '2026-09-16T00:00:00.000Z', contentHash: 'ambiguous-exclusion-hash', artifactRef: 'artifact:ambiguous-exclusion', submitter: 'agent', submittedAt: '2026-09-16T00:00:00.000Z' } });
+    const manifested = service.submitIngestionManifest({ flowId: created.flow.id, actionId: sourced.nextAction?.actionId, expectedRevision: 2, manifest: [{ id: 'exclude', kind: 'exclusion', summary: 'exclude', evidenceLocator: 'page:1', dependsOn: [] }, { id: 'benefit', kind: 'benefit', summary: 'benefit', evidenceLocator: 'page:2', dependsOn: ['exclude'] }] });
+    expect(() => service.submitExclusionLeaf({ flowId: created.flow.id, actionId: manifested.nextAction?.actionId, expectedRevision: 3, idempotencyKey: 'ambiguous', leafId: 'exclude', target: 'merchant', scope: { kind: 'benefit_ids', benefitIds: ['unknown-benefit'] }, predicate: { field: 'transaction.merchant', op: 'EQUALS', value: 'merchant-a' }, evidenceRefs: ['page:1'] })).toThrow(/unknown or ambiguous benefit/);
+    expect(() => service.submitExclusionLeaf({ flowId: created.flow.id, actionId: manifested.nextAction?.actionId, expectedRevision: 3, idempotencyKey: 'ignored', leafId: 'exclude', target: 'merchant', scope: { kind: 'all_benefits' }, predicate: { field: 'transaction.merchant', op: 'EQUALS', value: 'merchant-a' }, evidenceRefs: ['page:1'], disposition: 'ignored' })).toThrow(/ignored exclusion requires a reason/);
   });
 });

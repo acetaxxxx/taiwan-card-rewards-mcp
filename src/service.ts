@@ -2,10 +2,10 @@ import * as crypto from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { type LedgerStore, type RecordedTransaction, type StoredState, contentHash } from './store.js';
 import { EventRewardLedger, convertMinor, createPaymentEventRewardCandidate, decidePaymentEventRewards, evaluateOffer, evaluatePredicate, matchPaymentEvent, matchPaymentEventChain, matchPaymentRouteSelector, rankCards, resolveCyclePeriodKey } from './evaluator.js';
-import type { CardDescriptor, CardSwitchInput, CardSwitchProjection, CardSwitchStatus, CapPeriod, CapPoolDefinition, EvaluationContext, MerchantIdentity, MerchantResolution, Money, OfferConfirmation, OfferRuleVersion, OfferSourceSnapshot, RewardBreakdown, RewardComponentRecord, TransactionTuple, UserBenefitInput, UserBenefitStatus, EvidenceRecord, PaymentRouteRecord, PaymentCapabilityRecord, PaymentAccountRecord, EventRewardLedgerRecord, EventRewardReversalRecord, PaymentPathRequest, PaymentPathRecommendation, PaymentPathCandidate, PaymentPathEvent, EligibilityFact, RewardValuationSnapshot, FxResolutionRequest, FxEvaluationContext, AppliedFxRate, RecommendationIntent, RecommendationIntentResult, IntentCandidate, FxSnapshot, ListTransactionsOptions, ListTransactionsResult, TransactionSummaryItem, TransactionDetailItem, FundingInstrument, TransactionListItem, IngestionFlowRecord, IngestionSourceScope, IngestionDraftTombstone, IngestionBenefitLeafSubmission, IngestionBenefitArtifact } from './types.js';
+import type { CardDescriptor, CardSwitchInput, CardSwitchProjection, CardSwitchStatus, CapPeriod, CapPoolDefinition, EvaluationContext, MerchantIdentity, MerchantResolution, Money, OfferConfirmation, OfferRuleVersion, OfferSourceSnapshot, RewardBreakdown, RewardComponentRecord, TransactionTuple, UserBenefitInput, UserBenefitStatus, EvidenceRecord, PaymentRouteRecord, PaymentCapabilityRecord, PaymentAccountRecord, EventRewardLedgerRecord, EventRewardReversalRecord, PaymentPathRequest, PaymentPathRecommendation, PaymentPathCandidate, PaymentPathEvent, EligibilityFact, RewardValuationSnapshot, FxResolutionRequest, FxEvaluationContext, AppliedFxRate, RecommendationIntent, RecommendationIntentResult, IntentCandidate, FxSnapshot, ListTransactionsOptions, ListTransactionsResult, TransactionSummaryItem, TransactionDetailItem, FundingInstrument, TransactionListItem, IngestionFlowRecord, IngestionSourceScope, IngestionDraftTombstone, IngestionBenefitLeafSubmission, IngestionBenefitArtifact, IngestionExclusionArtifact, AppliedExclusion } from './types.js';
 import type { StartupConfig } from './startup.js';
 import { RewardServiceError } from './errors.js';
-import { validateCard, validateCapPool, validateConfirmation, validateEligibilityFact, validateMerchant, validateRecommendationTransaction, validateRule, validateSnapshot, validateTransaction, validateEvidence, validateFactCandidate, validatePaymentRouteRecord, validatePaymentCapability, validatePaymentAccountRecord, validateEventRewardInput, validatePaymentEvent, validatePaymentEventChainRule, validatePaymentEventRule, validateRewardValuationSnapshot, validateListTransactionsOptions, validateIngestionSourceScope, validateIngestionSourceCapture, validateIngestionManifest, validateIngestionBenefitLeaf } from './validation.js';
+import { validateCard, validateCapPool, validateConfirmation, validateEligibilityFact, validateMerchant, validateRecommendationTransaction, validateRule, validateSnapshot, validateTransaction, validateEvidence, validateFactCandidate, validatePaymentRouteRecord, validatePaymentCapability, validatePaymentAccountRecord, validateEventRewardInput, validatePaymentEvent, validatePaymentEventChainRule, validatePaymentEventRule, validateRewardValuationSnapshot, validateListTransactionsOptions, validateIngestionSourceScope, validateIngestionSourceCapture, validateIngestionManifest, validateIngestionBenefitLeaf, validateIngestionExclusionLeaf } from './validation.js';
 import { cardSwitchStatus, projectionFromInput } from './card-switch.js';
 import { buildFxResolutionRequest, freezeAppliedFxRate, deriveConversionOwner, isFxFresh, isFxCompatible, getFxScopeSpecificity, findBestMatchingFx } from './fx.js';
 import { validateRecommendationIntent } from './validation.js';
@@ -177,6 +177,9 @@ export class RewardService {
     const unresolvedPool = parsed.offer.rule.capPoolRefs?.find((id) => !knownPools.has(id));
     if (unresolvedPool !== undefined) throw new RewardServiceError('NEEDS_REVIEW', 'benefit leaf references an unresolved cap pool', { code: 'NEEDS_REVIEW', path: 'offer.rule.capPoolRefs', requiredFacts: [`validated cap pool ${unresolvedPool}`], retryAction: 'submit_benefit_leaf', affectedIds: [flow.id, parsed.leafId, unresolvedPool] });
     if (parsed.offer.rule.routeId !== undefined && !before.paymentRoutes.some((route) => route.id === parsed.offer.rule.routeId)) throw new RewardServiceError('NEEDS_REVIEW', 'benefit leaf references an unresolved payment route', { code: 'NEEDS_REVIEW', path: 'offer.rule.routeId', requiredFacts: [`validated payment route ${parsed.offer.rule.routeId}`], retryAction: 'submit_benefit_leaf', affectedIds: [flow.id, parsed.leafId, parsed.offer.rule.routeId] });
+    const sharedExclusions = this.appliedSharedExclusions(flow, leaf.id);
+    if (parsed.localExclusions?.some((local) => sharedExclusions.some((shared) => isDeepStrictEqual(local.predicate, shared.predicate)))) throw new RewardServiceError('NEEDS_REVIEW', 'local and shared exclusion duplicate each other', { code: 'EXCLUSION_SCOPE_CONFLICT', path: 'localExclusions', requiredFacts: ['one non-overlapping exclusion scope'], retryAction: 'submit_benefit_leaf', affectedIds: [flow.id, leaf.id, ...sharedExclusions.map((shared) => shared.sourceLeafId)] });
+    if (sharedExclusions.length) materializedRule = { ...materializedRule, sharedExclusions };
     const result = this.upsertOffer(parsed.offer.snapshot, materializedRule, undefined, parsed.offer.capPools, merchant);
     const artifact: IngestionBenefitArtifact = { id: `artifact_${crypto.randomUUID().replace(/-/g, '')}`, flowId: flow.id, revision: flow.revision, leafId: leaf.id, ruleId: result.rule.id, ruleVersion: result.rule.version, snapshotId: result.snapshot.id, evidenceRefs: parsed.evidenceRefs, localExclusions: parsed.localExclusions ?? [], idempotencyKey: parsed.idempotencyKey, payloadHash, status: 'candidate' };
     this.store.update((state) => {
@@ -191,6 +194,38 @@ export class RewardService {
       current.lastActivityAt = this.workflowNow().toISOString();
     });
     return { artifact, flow: this.inspectIngestion(flow.id) };
+  }
+
+  submitExclusionLeaf(input: unknown): { artifact?: IngestionExclusionArtifact; flow: ReturnType<RewardService['inspectIngestion']> } {
+    const ownerUser = this.requireIngestionOwner();
+    const parsed = validateIngestionExclusionLeaf(input);
+    const disposition = parsed.disposition ?? 'materialized';
+    this.sweepExpiredIngestions();
+    const before = this.store.read();
+    const flow = before.ingestionFlows.find((candidate) => candidate.id === parsed.flowId && candidate.ownerUser === ownerUser);
+    if (!flow) throw new RewardServiceError('FLOW_NOT_FOUND', `ingestion flow ${parsed.flowId} not found`);
+    const payloadHash = contentHash(JSON.stringify(parsed));
+    const existing = flow.exclusionArtifacts?.find((artifact) => artifact.idempotencyKey === parsed.idempotencyKey);
+    if (existing) {
+      if (existing.payloadHash !== payloadHash) throw new RewardServiceError('IDEMPOTENCY_CONFLICT', 'exclusion leaf idempotencyKey already belongs to a different payload', { code: 'IDEMPOTENCY_CONFLICT', path: 'idempotencyKey', requiredFacts: [], retryAction: 'submit_exclusion_leaf_with_new_idempotency_key', affectedIds: [existing.id] });
+      return { artifact: existing, flow: this.inspectIngestion(flow.id) };
+    }
+    const action = this.presentIngestion(flow).nextAction;
+    const leaf = flow.manifest?.find((candidate) => candidate.id === parsed.leafId);
+    if (!action || action.kind !== 'PROCESS_LEAF' || action.leafId !== parsed.leafId || !leaf || leaf.kind !== 'exclusion' || leaf.disposition !== undefined) throw new RewardServiceError('INVALID_FLOW_ACTION', 'exclusion leaf is not the server-owned next action', { code: 'INVALID_FLOW_ACTION', path: 'leafId', requiredFacts: ['get_ingestion.nextAction.leafId'], retryAction: 'get_ingestion', affectedIds: [flow.id] });
+    if (parsed.expectedRevision !== flow.revision || parsed.actionId !== action.actionId) throw new RewardServiceError('STALE_REVISION', 'exclusion leaf action is stale', { code: 'STALE_REVISION', path: parsed.expectedRevision !== flow.revision ? 'expectedRevision' : 'actionId', requiredFacts: [], retryAction: 'get_ingestion', affectedIds: [flow.id, leaf.id] });
+    this.assertExclusionScope(flow, leaf.id, parsed.scope);
+    const artifact = disposition === 'materialized' ? { id: `artifact_${crypto.randomUUID().replace(/-/g, '')}`, revision: flow.revision, sourceLeafId: leaf.id, sourceFlowId: flow.id, target: parsed.target, scope: parsed.scope, predicate: parsed.predicate, evidenceRefs: parsed.evidenceRefs, idempotencyKey: parsed.idempotencyKey, payloadHash, status: 'candidate' as const } : undefined;
+    this.store.update((state) => {
+      const current = state.ingestionFlows.find((candidate) => candidate.id === flow.id && candidate.ownerUser === ownerUser);
+      if (!current || current.revision !== parsed.expectedRevision) throw new RewardServiceError('STALE_REVISION', 'exclusion leaf changed while materializing');
+      if (current.manifest) current.manifest = current.manifest.map((candidate) => candidate.id === leaf.id ? { ...candidate, disposition, ...(parsed.reason === undefined ? {} : { dispositionReason: parsed.reason, dispositionEvidence: parsed.evidenceRefs[0]! }) } : candidate);
+      if (artifact) current.exclusionArtifacts = [...(current.exclusionArtifacts ?? []), artifact];
+      current.revision += 1;
+      current.status = current.manifest?.every((candidate) => candidate.disposition !== undefined) ? 'ready_to_finalize' : 'processing_leaves';
+      current.lastActivityAt = this.workflowNow().toISOString();
+    });
+    return { ...(artifact === undefined ? {} : { artifact }), flow: this.inspectIngestion(flow.id) };
   }
 
   sweepExpiredIngestions(): { expired: number; purgedTombstones: number } {
@@ -224,8 +259,32 @@ export class RewardService {
     return capture.sourceType === 'user_input' || capture.sourceType === 'official';
   }
 
+  private dependencyClosure(flow: IngestionFlowRecord, leafId: string): readonly string[] {
+    const manifest = new Map((flow.manifest ?? []).map((leaf) => [leaf.id, leaf]));
+    const seen = new Set<string>();
+    const visit = (id: string): void => { for (const dependency of manifest.get(id)?.dependsOn ?? []) if (!seen.has(dependency)) { seen.add(dependency); visit(dependency); } };
+    visit(leafId);
+    return [...seen];
+  }
+
+  private assertExclusionScope(flow: IngestionFlowRecord, exclusionLeafId: string, scope: { kind: 'all_benefits' | 'benefit_ids'; benefitIds?: readonly string[] }): void {
+    const benefits = (flow.manifest ?? []).filter((leaf) => leaf.kind === 'benefit');
+    const targets = scope.kind === 'all_benefits' ? benefits.map((leaf) => leaf.id) : [...(scope.benefitIds ?? [])];
+    if (!targets.length || targets.some((id) => !benefits.some((leaf) => leaf.id === id))) throw new RewardServiceError('NEEDS_REVIEW', 'exclusion scope identifies an unknown or ambiguous benefit', { code: 'EXCLUSION_SCOPE_AMBIGUOUS', path: 'scope.benefitIds', requiredFacts: ['existing benefit leaf IDs'], retryAction: 'submit_exclusion_leaf', affectedIds: [flow.id, exclusionLeafId, ...targets] });
+    const uncovered = targets.filter((id) => !this.dependencyClosure(flow, id).includes(exclusionLeafId));
+    if (uncovered.length) throw new RewardServiceError('NEEDS_REVIEW', 'every scoped benefit must depend on its shared exclusion', { code: 'EXCLUSION_SCOPE_AMBIGUOUS', path: 'scope', requiredFacts: ['manifest dependency from each scoped benefit to the exclusion leaf'], retryAction: 'submit_ingestion_manifest', affectedIds: [flow.id, exclusionLeafId, ...uncovered] });
+  }
+
+  private appliedSharedExclusions(flow: IngestionFlowRecord, benefitLeafId: string): readonly AppliedExclusion[] {
+    const dependencies = new Set(this.dependencyClosure(flow, benefitLeafId));
+    const exclusions = (flow.exclusionArtifacts ?? []).filter((artifact) => dependencies.has(artifact.sourceLeafId) && (artifact.scope.kind === 'all_benefits' || artifact.scope.benefitIds?.includes(benefitLeafId)));
+    const unresolved = [...dependencies].filter((id) => flow.manifest?.find((leaf) => leaf.id === id)?.kind === 'exclusion' && !exclusions.some((artifact) => artifact.sourceLeafId === id));
+    if (unresolved.length) throw new RewardServiceError('NEEDS_REVIEW', 'benefit depends on an unresolved or ignored exclusion', { code: 'EXCLUSION_UNRESOLVED', path: 'manifest.dependsOn', requiredFacts: ['materialized shared exclusion'], retryAction: 'submit_exclusion_leaf', affectedIds: [flow.id, benefitLeafId, ...unresolved] });
+    return exclusions.map(({ sourceLeafId, sourceFlowId, target, predicate, evidenceRefs }) => ({ sourceLeafId, sourceFlowId, target, predicate, evidenceRefs }));
+  }
+
   private presentIngestion(flow: IngestionFlowRecord): { flow: IngestionFlowRecord; nextAction: { actionId: string; kind: 'SUBMIT_SOURCE' | 'SUBMIT_MANIFEST' | 'PROCESS_LEAF'; expectedRevision: number; completionCondition: string; leafId?: string } | undefined } {
-    const leaf = flow.status === 'processing_leaves' ? [...(flow.manifest ?? [])].sort((a, b) => a.id.localeCompare(b.id)).find((candidate) => candidate.dependsOn.every((dependency) => flow.manifest?.find((entry) => entry.id === dependency)?.disposition !== undefined)) : undefined;
+    const leaf = flow.status === 'processing_leaves' ? [...(flow.manifest ?? [])].sort((a, b) => a.id.localeCompare(b.id)).find((candidate) => candidate.disposition === undefined && candidate.dependsOn.every((dependency) => flow.manifest?.find((entry) => entry.id === dependency)?.disposition !== undefined)) : undefined;
     const kind = flow.status === 'awaiting_source' ? 'SUBMIT_SOURCE' : flow.status === 'awaiting_manifest' ? 'SUBMIT_MANIFEST' : leaf ? 'PROCESS_LEAF' : undefined;
     const nextAction = kind === undefined ? undefined : { actionId: `act_${crypto.createHash('sha256').update(`${flow.id}:${flow.revision}:${kind}:${leaf?.id ?? ''}`).digest('hex').slice(0, 24)}`, kind: kind as 'SUBMIT_SOURCE' | 'SUBMIT_MANIFEST' | 'PROCESS_LEAF', expectedRevision: flow.revision, completionCondition: kind === 'SUBMIT_SOURCE' ? 'Submit one immutable source capture for this flow.' : kind === 'SUBMIT_MANIFEST' ? 'Submit the complete source manifest for this flow.' : 'Materialize, ignore, or supersede this leaf.', ...(leaf ? { leafId: leaf.id } : {}) };
     return { flow: structuredClone(flow), nextAction };

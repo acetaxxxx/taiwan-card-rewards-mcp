@@ -663,6 +663,12 @@ export function evaluateOffer(
   if (rule.status !== 'active') {
     return { ...base, status: rule.status === 'stale' ? 'stale' : 'needs_review', ruleId: rule.id, unknownReasons: [`rule status is ${rule.status}`], diagnostics: [diagnostic(rule.status === 'stale' ? 'stale_rule' : 'needs_review', 'rule.status', ['rule confirmation'], 'refresh_or_confirm_offer')] };
   }
+  for (const exclusion of rule.sharedExclusions ?? []) {
+    const outcome = evaluatePredicate(exclusion.predicate, tx, context);
+    if (outcome.conflicts.length) return { ...base, status: 'needs_review', ruleId: rule.id, ruleVersion: rule.version, unknownReasons: outcome.conflicts, diagnostics: outcome.diagnostics };
+    if (outcome.missing.length) return { ...base, status: 'unknown', ruleId: rule.id, ruleVersion: rule.version, unknownReasons: outcome.missing, diagnostics: outcome.diagnostics };
+    if (outcome.matched) return { ...base, ruleId: rule.id, ruleVersion: rule.version, matchedExclusions: [exclusion] };
+  }
   const trustReasons: string[] = [];
   const source = context.sourceSnapshots?.[rule.sourceSnapshotId];
   if (!source) {
