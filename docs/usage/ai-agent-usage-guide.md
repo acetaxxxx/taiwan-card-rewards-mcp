@@ -79,6 +79,11 @@ response already carries every diagnostic an Agent needs.
 | `register_card` | Mutating | Register or update a card product descriptor (`id`, `issuer`, `productName`, `network`, `country`). | `INVALID_CARD`, `STORE_UNAVAILABLE` |
 | `list_cards` | Read-only | List all registered cards in the user's store. | `STORE_UNAVAILABLE` |
 | `upsert_offer` | Mutating | Ingest an official or candidate source snapshot and versioned rule; activates candidate if valid confirmation is supplied. | `INVALID_OFFER`, `INVALID_CONFIRMATION`, `STORE_UNAVAILABLE` |
+| `create_ingestion` | Mutating | Start or resume one source-scoped ingestion draft. | `UNAUTHENTICATED`, `IDEMPOTENCY_CONFLICT`, `STORE_UNAVAILABLE` |
+| `get_ingestion` | Read-only | Inspect the server-owned next ingestion action and manifest coverage. | `UNAUTHENTICATED`, `FLOW_NOT_FOUND`, `STORE_UNAVAILABLE` |
+| `submit_ingestion_source` | Mutating | Persist one immutable source capture; the MCP never fetches the URL. | `STALE_REVISION`, `INVALID_FLOW_ACTION`, `SOURCE_SCOPE_CONFLICT` |
+| `submit_ingestion_manifest` | Mutating | Submit the complete bounded manifest; the MCP rejects missing dependencies and cycles. | `STALE_REVISION`, `INVALID_FLOW_ACTION`, `INVALID_INPUT` |
+| `submit_benefit_leaf` | Mutating | Validate the server-selected benefit leaf and materialize one candidate rule plus its evidence/local exclusions. Candidate rules remain invisible until finalization. | `STALE_REVISION`, `INVALID_FLOW_ACTION`, `SOURCE_SCOPE_CONFLICT`, `NEEDS_REVIEW`, `IDEMPOTENCY_CONFLICT` |
 | `recommend` | Read-only | Merchant-first planned recommendation; reads registered cards and verified routes and returns direct-card and multi-layer payment-path candidates together in one ranked list. Results are bounded (default 10) and do not mutate usage. | `INSUFFICIENT_FACTS`, `NEEDS_REVIEW`, `STALE` |
 | `upsert_payment_route` | Mutating | Register a payment route; MCP assigns its route identity, trusts the caller's self-asserted `evidenceIds` directly, and stores no credentials. | `INVALID_INPUT`, `IDEMPOTENCY_CONFLICT`, `SENSITIVE_FIELD_FORBIDDEN` |
 | `list_payment_routes` | Read-only | List the current user's registered payment routes as bounded projections. | `INVALID_INPUT`, `STORE_UNAVAILABLE` |
@@ -95,6 +100,15 @@ response already carries every diagnostic an Agent needs.
 | `remaining_caps` | Read-only | Query remaining reward cap balances per rule and usageKey derived from actual transactions. | `INVALID_INPUT`, `STORE_UNAVAILABLE` |
 | `get_user_benefit_status` | Read-only | Show current benefit plus available-now and action-required candidates. | `CARD_NOT_FOUND`, `STORE_UNAVAILABLE` |
 | `upsert_user_benefit_status` | Mutating | Record or correct a user-confirmed completed card switch or campaign registration. | `CARD_NOT_FOUND`, `INVALID_CONFIRMATION`, `IDEMPOTENCY_CONFLICT` |
+
+### Ingestion action order
+
+For a complete official source, follow `create_ingestion` → `get_ingestion` →
+`submit_ingestion_source` → `submit_ingestion_manifest`. Then repeatedly call
+`get_ingestion` and submit exactly the returned `PROCESS_LEAF` using
+`submit_benefit_leaf` for benefit leaves. Never invent a leaf order or declare
+completion from source text alone. A materialized rule is a candidate artifact
+and must not be treated as recommendable until finalization proves coverage.
 
 ---
 

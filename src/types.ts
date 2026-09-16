@@ -849,6 +849,9 @@ export interface IngestionSourceScope { kind: 'official_url' | 'offer_family'; v
 export type IngestionFlowStatus = 'awaiting_source' | 'awaiting_manifest' | 'processing_leaves' | 'ready_to_finalize' | 'complete' | 'needs_review' | 'conflict' | 'failed' | 'cancelled' | 'expired';
 export interface IngestionSourceCapture { sourceType: 'official' | 'user_input'; url?: string; description?: string; retrievedAt: string; contentHash: string; artifactRef: string; submitter: string; submittedAt: string; }
 export interface IngestionManifestLeaf { id: string; kind: 'benefit' | 'exclusion'; summary: string; evidenceLocator: string; dependsOn: readonly string[]; disposition?: 'materialized' | 'ignored' | 'superseded'; dispositionReason?: string; dispositionEvidence?: string; }
+export interface IngestionLocalExclusion { scope: 'benefit'; predicate: Predicate; evidenceRefs: readonly string[]; }
+export interface IngestionBenefitLeafSubmission { flowId: string; actionId: string; expectedRevision: number; idempotencyKey: string; leafId: string; offer: { snapshot: OfferSourceSnapshot; rule: OfferRuleVersion; capPools?: readonly CapPoolDefinition[]; merchant?: Omit<MerchantIdentity, 'canonicalId'> & { canonicalId?: string }; }; evidenceRefs: readonly string[]; localExclusions?: readonly IngestionLocalExclusion[]; }
+export interface IngestionBenefitArtifact { id: string; flowId: string; revision: number; leafId: string; ruleId: string; ruleVersion: string; snapshotId: string; evidenceRefs: readonly string[]; localExclusions: readonly IngestionLocalExclusion[]; idempotencyKey: string; payloadHash: string; status: 'candidate'; }
 export interface IngestionFlowRecord {
   id: string;
   ownerUser: string;
@@ -861,6 +864,7 @@ export interface IngestionFlowRecord {
   expiresAt: string;
   sourceCapture?: IngestionSourceCapture;
   manifest?: readonly IngestionManifestLeaf[];
+  benefitArtifacts?: readonly IngestionBenefitArtifact[];
 }
 export interface IngestionDraftTombstone {
   id: string;
