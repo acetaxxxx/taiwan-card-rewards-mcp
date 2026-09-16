@@ -130,6 +130,18 @@ export interface RewardComponentRecord {
   appliedAtUtc: string;
 }
 export type PredicateValue = string | number | boolean | readonly string[];
+export const SUPPORTED_PREDICATE_FIELDS = [
+  'transaction.country',
+  'transaction.merchant',
+  'transaction.mcc',
+  'transaction.channel',
+  'transaction.amount.currency',
+  'transaction.routeContext.dcc',
+  'transaction.funding.kind',
+  'transaction.route.kind',
+  'transaction.paymentMethod',
+] as const;
+export type SupportedPredicateField = typeof SUPPORTED_PREDICATE_FIELDS[number];
 export type PredicateLeafOperator = 'EQUALS' | 'MATCH_ALLOWLIST';
 export type PredicateGroupOperator = 'AND' | 'OR';
 export type Predicate =
@@ -501,10 +513,12 @@ export interface ListTransactionsResult {
 }
 
 export interface Diagnostic {
-  code: 'missing_required_fact' | 'fx_missing' | 'fx_stale' | 'fx_pair_mismatch' | 'fx_scope_mismatch' | 'fx_conflict' | 'merchant_ambiguous' | 'merchant_not_found' | 'no_active_offer' | 'source_untrusted' | 'stale_rule' | 'invalid_input' | 'needs_review';
+  code: 'missing_required_fact' | 'invalid_fact' | 'conflicting_fact' | 'unsupported_field' | 'stale_fact' | 'fx_missing' | 'fx_stale' | 'fx_pair_mismatch' | 'fx_scope_mismatch' | 'fx_conflict' | 'merchant_ambiguous' | 'merchant_not_found' | 'no_active_offer' | 'source_untrusted' | 'stale_rule' | 'invalid_input' | 'needs_review';
   path: string;
   requiredFacts: readonly string[];
   retryAction: string;
+  message: string;
+  nextAction: string;
 }
 
 export interface FxResolutionRequest {

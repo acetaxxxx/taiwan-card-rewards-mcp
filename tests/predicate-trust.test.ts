@@ -36,6 +36,35 @@ describe('predicate AST and calculation trust gate', () => {
     expect(evaluateOffer(rule({ predicate }), { ...transaction, country: undefined }, context).unknownReasons).toContain('missing transaction.country');
   });
 
+  it('resolves nested transaction facts and reports actionable diagnostics', () => {
+    const overseas = {
+      ...transaction,
+      country: 'JP',
+      amount: { amountMinor: 10000, currency: 'JPY' },
+      routeContext: { transactionCurrency: 'JPY', dcc: false },
+    };
+    const predicate = { op: 'AND' as const, rules: [
+      { op: 'NOT' as const, rule: { field: 'transaction.country', op: 'EQUALS' as const, value: 'TW' } },
+      { field: 'transaction.amount.currency', op: 'EQUALS' as const, value: 'JPY' },
+      { field: 'transaction.routeContext.dcc', op: 'EQUALS' as const, value: false },
+    ] };
+    expect(evaluateOffer(rule({ predicate, settlementCurrency: 'JPY' }), overseas, context).status).toBe('ok');
+
+    const missing = evaluateOffer(rule({ predicate }), { ...overseas, amount: undefined as never }, context);
+    expect(missing.status).toBe('unknown');
+    expect(missing.diagnostics).toEqual(expect.arrayContaining([expect.objectContaining({ code: 'missing_required_fact', path: 'transaction.amount.currency', nextAction: 'ask_user' })]));
+  });
+
+  it('fails closed with conflict diagnostics for inconsistent currency facts', () => {
+    const result = evaluateOffer(rule({ predicate: { field: 'transaction.amount.currency', op: 'EQUALS', value: 'JPY' } }), {
+      ...transaction,
+      amount: { amountMinor: 10000, currency: 'JPY' },
+      routeContext: { transactionCurrency: 'TWD' },
+    }, context);
+    expect(result.status).toBe('needs_review');
+    expect(result.diagnostics).toEqual(expect.arrayContaining([expect.objectContaining({ code: 'conflicting_fact', path: 'transaction.amount.currency' })]));
+  });
+
   it('does not calculate confidently when required trust evidence is absent', () => {
     const trustedRule = rule({ requires: ['source_verified', 'user_confirmation'] });
     const result = evaluateOffer(trustedRule, transaction, context);
