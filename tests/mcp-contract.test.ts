@@ -232,7 +232,7 @@ describe("MCP Contract and Agent Boundary", () => {
       // 2. tools/list
       const listRes = await client.send({ id: 2, method: "tools/list" });
       expect(listRes.result).toBeDefined();
-      expect(listRes.result.tools).toHaveLength(23);
+      expect(listRes.result.tools).toHaveLength(24);
 
       const toolNames = listRes.result.tools.map((t: any) => t.name).sort();
       const expectedNames = [
@@ -259,9 +259,10 @@ describe("MCP Contract and Agent Boundary", () => {
         "create_ingestion",
         "get_ingestion",
         "submit_ingestion_source",
+        "submit_ingestion_manifest",
       ].sort();
       expect(toolNames).toEqual(expectedNames);
-      expect(mcpTools).toHaveLength(23);
+      expect(mcpTools).toHaveLength(24);
 
       // Verify schema properties of all tools
       for (const tool of listRes.result.tools) {

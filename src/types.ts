@@ -848,6 +848,7 @@ export interface PaymentPathRecommendation { status: 'ok' | 'partial' | 'needs_f
 export interface IngestionSourceScope { kind: 'official_url' | 'offer_family'; value: string; }
 export type IngestionFlowStatus = 'awaiting_source' | 'awaiting_manifest' | 'processing_leaves' | 'ready_to_finalize' | 'complete' | 'needs_review' | 'conflict' | 'failed' | 'cancelled' | 'expired';
 export interface IngestionSourceCapture { sourceType: 'official' | 'user_input'; url?: string; description?: string; retrievedAt: string; contentHash: string; artifactRef: string; submitter: string; submittedAt: string; }
+export interface IngestionManifestLeaf { id: string; kind: 'benefit' | 'exclusion'; summary: string; evidenceLocator: string; dependsOn: readonly string[]; disposition?: 'materialized' | 'ignored' | 'superseded'; dispositionReason?: string; dispositionEvidence?: string; }
 export interface IngestionFlowRecord {
   id: string;
   ownerUser: string;
@@ -859,6 +860,7 @@ export interface IngestionFlowRecord {
   lastActivityAt: string;
   expiresAt: string;
   sourceCapture?: IngestionSourceCapture;
+  manifest?: readonly IngestionManifestLeaf[];
 }
 export interface IngestionDraftTombstone {
   id: string;
