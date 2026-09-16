@@ -36,6 +36,30 @@ describe('deterministic public agent workflow trace', () => {
       const direct = await call('recommend', { merchant: 'Trace Shop', amount: { amountMinor: 1000, currency: 'TWD' }, occurredAt: '2026-09-10T00:00:00Z' });
       expect(direct.candidates.some((candidate: any) => candidate.status === 'ready')).toBe(true);
 
+      const missingAmount = await call('recommend', { merchant: 'Trace Shop', occurredAt: '2026-09-10T00:00:00Z' });
+      expect(missingAmount.requiredActions).toEqual(expect.arrayContaining([expect.objectContaining({ id: 'amount', submission: { tool: 'recommend', field: 'amount' } })]));
+      const retried = await call('recommend', {
+        merchant: 'Trace Shop',
+        occurredAt: '2026-09-10T00:00:00Z',
+        expectedResultVersion: missingAmount.resultVersion,
+        supplementalFacts: { amount: { amountMinor: 1000, currency: 'TWD' } },
+      });
+      expect(retried.candidates.some((candidate: any) => candidate.status === 'ready')).toBe(true);
+      const staleRetry = await client.call('recommend', {
+        merchant: 'Trace Shop',
+        occurredAt: '2026-09-10T00:00:00Z',
+        expectedResultVersion: missingAmount.resultVersion.slice(0, -1) + '0',
+        supplementalFacts: { amount: { amountMinor: 1000, currency: 'TWD' } },
+      });
+      expect(staleRetry.error?.data?.details).toEqual(expect.objectContaining({ code: 'stale_fact', path: 'expectedResultVersion' }));
+      const conflictingRetry = await client.call('recommend', {
+        merchant: 'Trace Shop',
+        amount: { amountMinor: 900, currency: 'TWD' },
+        occurredAt: '2026-09-10T00:00:00Z',
+        supplementalFacts: { amount: { amountMinor: 1000, currency: 'TWD' } },
+      });
+      expect(conflictingRetry.error?.data?.details).toEqual(expect.objectContaining({ code: 'conflicting_fact' }));
+
       await call('upsert_offer', { snapshot: snapshot('trace-jpy'), rule: { id: 'trace-jpy-rule', cardId: 'trace-card', version: '1', sourceSnapshotId: 'trace-jpy', status: 'active', validFrom: '2026-01-01T00:00:00Z', settlementCurrency: 'TWD', match: {}, reward: { kind: 'flat', amountMinor: 100, currency: 'TWD' } } });
       const missing = await call('recommend', { merchant: 'Trace Shop', amount: { amountMinor: 1000, currency: 'JPY' }, occurredAt: '2026-09-10T00:00:00Z' });
       expect(missing.requiredActions).toEqual(expect.arrayContaining([expect.objectContaining({ action: 'query_approved_fx_source', owner: 'agent', fxResolutionRequest: expect.objectContaining({ referenceSourceUrls: ['https://rate.bot.com.tw/xrt?Lang=zh-TW'] }) })]));

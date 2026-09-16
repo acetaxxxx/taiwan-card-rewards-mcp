@@ -8,7 +8,7 @@ import { RewardServiceError } from './errors.js';
 import { validateCard, validateCapPool, validateConfirmation, validateEligibilityFact, validateMerchant, validateRecommendationTransaction, validateRule, validateSnapshot, validateTransaction, validateEvidence, validateFactCandidate, validatePaymentRouteRecord, validatePaymentCapability, validatePaymentAccountRecord, validateEventRewardInput, validatePaymentEvent, validatePaymentEventChainRule, validatePaymentEventRule, validateRewardValuationSnapshot, validateListTransactionsOptions, validateIngestionSourceScope, validateIngestionSourceCapture, validateIngestionManifest, validateIngestionBenefitLeaf, validateIngestionExclusionLeaf } from './validation.js';
 import { cardSwitchStatus, projectionFromInput } from './card-switch.js';
 import { buildFxResolutionRequest, freezeAppliedFxRate, deriveConversionOwner, isFxFresh, isFxCompatible, getFxScopeSpecificity, findBestMatchingFx } from './fx.js';
-import { validateRecommendationIntent } from './validation.js';
+import { validateRecommendationIntent, validateRecommendationSupplementalFacts } from './validation.js';
 import { projectPage } from './projections.js';
 
 export { RewardServiceError } from './errors.js';
@@ -961,11 +961,11 @@ export class RewardService {
 
   /** Merchant-first recommendation entry point; the single public entry point for recommendations. */
   recommendIntent(value: unknown): RecommendationIntentResult {
-    const input = validateRecommendationIntent(value);
-    const details = typeof input.merchant === 'string' ? { name: input.merchant } : input.merchant;
-    const rawMerchant = details.canonicalId ?? details.name ?? details.rawStatement ?? details.canonicalNameZhHant!;
-    const country = input.country ?? details.country;
-    const market = input.market ?? details.market;
+    let input = validateRecommendationIntent(value);
+    let details = typeof input.merchant === 'string' ? { name: input.merchant } : input.merchant;
+    let rawMerchant = details.canonicalId ?? details.name ?? details.rawStatement ?? details.canonicalNameZhHant!;
+    let country = input.country ?? details.country;
+    let market = input.market ?? details.market;
     const state = this.store.read();
     let cursorOffset = 0;
     const pageSize = input.limit!;
@@ -987,13 +987,77 @@ export class RewardService {
       cursorOffset = (requestedPage - 1) * pageSize;
     }
     const evaluatedAt = input.occurredAt ?? cursorEvaluatedAt ?? nowIso();
+    const originalRetryIntent = { ...input };
+    const retryFacts = input.supplementalFacts === undefined ? undefined : validateRecommendationSupplementalFacts(input.supplementalFacts);
+    const conflict = (path: string, requiredFacts: readonly string[], message: string): never => {
+      throw new RewardServiceError('INVALID_INPUT', message, { code: 'conflicting_fact', path, requiredFacts, retryAction: 'resolve_conflict', nextAction: 'resolve_conflict', message });
+    };
+    if (retryFacts?.benefitEvidence) {
+      for (const fact of retryFacts.benefitEvidence) {
+        const evidence = state.evidence.find((candidate) => candidate.id === fact.evidenceId && (candidate.ownerUser === this.metadataUser || candidate.ownerUser === undefined));
+        if (!evidence) throw new RewardServiceError('INVALID_INPUT', `supplemental benefit evidence ${fact.evidenceId} is not available`, { code: 'invalid_fact', path: 'supplementalFacts.benefitEvidence', requiredFacts: ['accepted evidence owned by the current user or public evidence'], retryAction: 'submit_evidence', nextAction: 'submit_evidence', message: `supplemental benefit evidence ${fact.evidenceId} is not available` });
+        if (fact.contentHash !== undefined && evidence.contentHash !== fact.contentHash) conflict('supplementalFacts.benefitEvidence.contentHash', ['evidence contentHash matching the accepted record'], 'supplemental benefit evidence contentHash conflicts with the accepted record');
+      }
+    }
+    if (retryFacts?.merchant) {
+      if (typeof input.merchant !== 'string' && input.merchant.canonicalId !== undefined && input.merchant.canonicalId !== retryFacts.merchant.canonicalId) conflict('supplementalFacts.merchant.canonicalId', ['one canonical merchant identity'], 'supplemental merchant identity conflicts with the original intent');
+      input = { ...input, merchant: retryFacts.merchant, ...(input.country === undefined && retryFacts.merchant.country ? { country: retryFacts.merchant.country } : {}), ...(input.market === undefined && retryFacts.merchant.market ? { market: retryFacts.merchant.market } : {}) };
+    }
+    if (retryFacts?.amount) {
+      if (input.amount && !isDeepStrictEqual(input.amount, retryFacts.amount)) conflict('supplementalFacts.amount', ['one transaction amount and currency'], 'supplemental amount conflicts with the original intent');
+      input = { ...input, amount: retryFacts.amount };
+    }
+    if (retryFacts?.transaction) {
+      if (retryFacts.transaction.amount) {
+        if (input.amount && !isDeepStrictEqual(input.amount, retryFacts.transaction.amount)) conflict('supplementalFacts.transaction.amount', ['one transaction amount and currency'], 'supplemental transaction amount conflicts with the original intent');
+        input = { ...input, amount: retryFacts.transaction.amount };
+      }
+      for (const field of ['country', 'market', 'channel', 'paymentMethod', 'occurredAt'] as const) {
+        const supplied = retryFacts.transaction[field];
+        if (supplied !== undefined && input[field] !== undefined && input[field] !== supplied) conflict(`supplementalFacts.transaction.${field}`, [`one transaction ${field}`], `supplemental transaction ${field} conflicts with the original intent`);
+      }
+      const { amount: _amount, ...transactionFacts } = retryFacts.transaction;
+      input = { ...input, ...transactionFacts };
+    }
+    if (retryFacts?.fx) {
+      if (input.fx && !isDeepStrictEqual(input.fx, retryFacts.fx)) conflict('supplementalFacts.fx', ['one FX observation for the retry'], 'supplemental FX observation conflicts with the original intent');
+      input = { ...input, fx: retryFacts.fx };
+    }
+    if (retryFacts?.routeFacts) {
+      const existing = new Map((input.routeFacts ?? []).map((fact) => [`${fact.routeId}|${fact.edgeId ?? '*'}`, fact]));
+      for (const fact of retryFacts.routeFacts) {
+        const key = `${fact.routeId}|${fact.edgeId ?? '*'}`;
+        if (existing.has(key) && !isDeepStrictEqual(existing.get(key), fact)) conflict(`supplementalFacts.routeFacts.${key}`, ['one FX observation per route/edge scope'], 'supplemental route FX observation conflicts with the original intent');
+        existing.set(key, fact);
+      }
+      input = { ...input, routeFacts: [...existing.values()] };
+    }
+    if (retryFacts?.eligibilityFacts) {
+      const existing = [...(input.eligibilityFacts ?? [])];
+      for (const fact of retryFacts.eligibilityFacts) {
+        const sameKey = existing.filter((candidate) => candidate.factKey === fact.factKey && candidate.cardId === fact.cardId);
+        if (sameKey.some((candidate) => !isDeepStrictEqual(candidate.value, fact.value))) conflict(`supplementalFacts.eligibilityFacts.${fact.factKey}`, [`one value for ${fact.factKey}`], `supplemental eligibility fact ${fact.factKey} conflicts with the original intent`);
+        if (!sameKey.some((candidate) => isDeepStrictEqual(candidate, fact))) existing.push(fact);
+      }
+      input = { ...input, eligibilityFacts: existing };
+    }
+    details = typeof input.merchant === 'string' ? { name: input.merchant } : input.merchant;
+    rawMerchant = details.canonicalId ?? details.name ?? details.rawStatement ?? details.canonicalNameZhHant!;
+    country = input.country ?? details.country;
+    market = input.market ?? details.market;
+    const expectedResultVersion = input.expectedResultVersion ?? (retryFacts ? input.resultVersion : undefined);
+    const baselineIntent = { ...originalRetryIntent, expectedResultVersion: undefined, supplementalFacts: undefined, resultVersion: undefined, cursor: undefined, page: undefined };
+    const baselineVersion = crypto.createHash('sha256').update(JSON.stringify({ state, intent: baselineIntent, evaluatedAt })).digest('hex').slice(0, 16);
+    if (expectedResultVersion !== undefined && expectedResultVersion !== baselineVersion) {
+      throw new RewardServiceError('INVALID_INPUT', 'recommendation resultVersion is stale; restart the original intent', { code: 'stale_fact', path: 'expectedResultVersion', requiredFacts: ['current recommendation resultVersion'], retryAction: 'restart_recommendation', nextAction: 'restart_recommendation', message: 'the recommendation changed before the typed retry was submitted' });
+    }
     const resultVersion = crypto.createHash('sha256').update(JSON.stringify({
       state,
-      intent: { ...input, cursor: undefined, page: undefined, resultVersion: undefined },
+      intent: { ...input, cursor: undefined, page: undefined, resultVersion: undefined, expectedResultVersion: undefined, supplementalFacts: undefined },
       evaluatedAt,
     })).digest('hex').slice(0, 16);
     if (cursorVersion !== undefined && cursorVersion !== resultVersion) throw new RewardServiceError('INVALID_INPUT', 'recommendation resultVersion changed; restart the recommendation');
-    if (input.resultVersion !== undefined && input.resultVersion !== resultVersion) throw new RewardServiceError('INVALID_INPUT', 'recommendation resultVersion changed; restart the recommendation');
+    if (input.resultVersion !== undefined && !retryFacts && input.resultVersion !== resultVersion) throw new RewardServiceError('INVALID_INPUT', 'recommendation resultVersion changed; restart the recommendation');
     const resolution = this.resolveMerchant(rawMerchant, {
       ...(country ? { country } : {}), ...(market ? { market } : {}),
       ...(input.channel ? { channel: input.channel } : {}),

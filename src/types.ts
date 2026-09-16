@@ -733,6 +733,33 @@ export interface RecommendationIntent {
   fx?: FxSnapshot;
   routeFacts?: readonly { routeId: string; edgeId?: string; fx: FxSnapshot }[];
   eligibilityFacts?: readonly EligibilityFact[];
+  /** Typed facts supplied on a stateless retry; never persisted by recommendation. */
+  supplementalFacts?: RecommendationSupplementalFacts | undefined;
+  /** Version returned by the preceding recommendation that this retry expects. */
+  expectedResultVersion?: string | undefined;
+}
+
+export interface RecommendationSupplementalFacts {
+  merchant?: { canonicalId: string; canonicalNameZhHant?: string; country?: string; market?: string } | undefined;
+  amount?: Money | undefined;
+  transaction?: {
+    amount?: Money;
+    country?: string;
+    market?: string;
+    channel?: string;
+    paymentMethod?: string;
+    occurredAt?: string;
+  } | undefined;
+  fx?: FxSnapshot | undefined;
+  routeFacts?: readonly { routeId: string; edgeId?: string; fx: FxSnapshot }[] | undefined;
+  eligibilityFacts?: readonly EligibilityFact[] | undefined;
+  benefitEvidence?: readonly {
+    evidenceId: string;
+    observedAt: string;
+    sourceUrl?: string;
+    contentHash?: string;
+    scope?: string;
+  }[] | undefined;
 }
 export interface IntentCandidate {
   id: string;

@@ -3,7 +3,7 @@ import type { CardDescriptor, CardProduct, CapPeriod, CapPoolDefinition, CardSwi
 import type { StoredState } from './store.js';
 import type { EvidenceRecord, FactCandidate } from './types.js';
 import { RewardServiceError } from './errors.js';
-import type { RecommendationIntent } from './types.js';
+import type { RecommendationIntent, RecommendationSupplementalFacts } from './types.js';
 
 const ID = /^[A-Za-z0-9][A-Za-z0-9_:-]{0,127}$/;
 const HOST = /^(?=.{1,253}$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/;
@@ -1374,9 +1374,66 @@ export function validateToolArgs(name: string, value: unknown): Record<string, u
   return normalized;
 }
 
+export function validateRecommendationSupplementalFacts(value: unknown): RecommendationSupplementalFacts {
+  const item = object(value, 'recommend supplementalFacts');
+  keys(item, ['merchant', 'amount', 'transaction', 'fx', 'routeFacts', 'eligibilityFacts', 'benefitEvidence'], 'recommend supplementalFacts');
+  let merchant: RecommendationSupplementalFacts['merchant'];
+  if (item.merchant !== undefined) {
+    const candidate = object(item.merchant, 'recommend supplementalFacts.merchant');
+    keys(candidate, ['canonicalId', 'canonicalNameZhHant', 'country', 'market'], 'recommend supplementalFacts.merchant');
+    merchant = {
+      canonicalId: requiredString(candidate.canonicalId, 'recommend supplementalFacts.merchant.canonicalId', true),
+      ...(candidate.canonicalNameZhHant === undefined ? {} : { canonicalNameZhHant: requiredString(candidate.canonicalNameZhHant, 'recommend supplementalFacts.merchant.canonicalNameZhHant') }),
+      ...(candidate.country === undefined ? {} : { country: requiredString(candidate.country, 'recommend supplementalFacts.merchant.country') }),
+      ...(candidate.market === undefined ? {} : { market: requiredString(candidate.market, 'recommend supplementalFacts.merchant.market') }),
+    };
+  }
+  let transaction: RecommendationSupplementalFacts['transaction'];
+  if (item.transaction !== undefined) {
+    const candidate = object(item.transaction, 'recommend supplementalFacts.transaction');
+    keys(candidate, ['amount', 'country', 'market', 'channel', 'paymentMethod', 'occurredAt'], 'recommend supplementalFacts.transaction');
+    transaction = {
+      ...(candidate.amount === undefined ? {} : { amount: validateMoney(candidate.amount, 'recommend supplementalFacts.transaction.amount') }),
+      ...(candidate.country === undefined ? {} : { country: requiredString(candidate.country, 'recommend supplementalFacts.transaction.country') }),
+      ...(candidate.market === undefined ? {} : { market: requiredString(candidate.market, 'recommend supplementalFacts.transaction.market') }),
+      ...(candidate.channel === undefined ? {} : { channel: requiredString(candidate.channel, 'recommend supplementalFacts.transaction.channel') }),
+      ...(candidate.paymentMethod === undefined ? {} : { paymentMethod: requiredString(candidate.paymentMethod, 'recommend supplementalFacts.transaction.paymentMethod') }),
+      ...(candidate.occurredAt === undefined ? {} : { occurredAt: iso(candidate.occurredAt, 'recommend supplementalFacts.transaction.occurredAt') }),
+    };
+  }
+  const routeFacts = item.routeFacts === undefined ? undefined : (() => {
+    if (!Array.isArray(item.routeFacts) || item.routeFacts.length > 128) throw new RewardServiceError('INVALID_INPUT', 'recommend supplementalFacts.routeFacts must contain at most 128 entries');
+    const facts = item.routeFacts.map((entry, index) => { const row = object(entry, `recommend supplementalFacts.routeFacts[${index}]`); keys(row, ['routeId', 'edgeId', 'fx'], `recommend supplementalFacts.routeFacts[${index}]`); return { routeId: requiredString(row.routeId, `recommend supplementalFacts.routeFacts[${index}].routeId`, true), ...(row.edgeId === undefined ? {} : { edgeId: requiredString(row.edgeId, `recommend supplementalFacts.routeFacts[${index}].edgeId`, true) }), fx: validateFxSnapshot(row.fx, `recommend supplementalFacts.routeFacts[${index}].fx`) }; });
+    const scopes = facts.map((fact) => `${fact.routeId}|${fact.edgeId ?? '*'}`);
+    if (new Set(scopes).size !== scopes.length) throw new RewardServiceError('INVALID_INPUT', 'recommend supplementalFacts.routeFacts contains duplicate route/edge scope');
+    return facts;
+  })();
+  const eligibilityFacts = item.eligibilityFacts === undefined ? undefined : (() => {
+    if (!Array.isArray(item.eligibilityFacts) || item.eligibilityFacts.length > 128) throw new RewardServiceError('INVALID_INPUT', 'recommend supplementalFacts.eligibilityFacts must contain at most 128 entries');
+    return item.eligibilityFacts.map(validateEligibilityFact);
+  })();
+  const benefitEvidence = item.benefitEvidence === undefined ? undefined : (() => {
+    if (!Array.isArray(item.benefitEvidence) || item.benefitEvidence.length > 128) throw new RewardServiceError('INVALID_INPUT', 'recommend supplementalFacts.benefitEvidence must contain at most 128 entries');
+    return item.benefitEvidence.map((entry, index) => {
+      const row = object(entry, `recommend supplementalFacts.benefitEvidence[${index}]`);
+      keys(row, ['evidenceId', 'observedAt', 'sourceUrl', 'contentHash', 'scope'], `recommend supplementalFacts.benefitEvidence[${index}]`);
+      return { evidenceId: requiredString(row.evidenceId, `recommend supplementalFacts.benefitEvidence[${index}].evidenceId`, true), observedAt: iso(row.observedAt, `recommend supplementalFacts.benefitEvidence[${index}].observedAt`), ...(row.sourceUrl === undefined ? {} : { sourceUrl: requiredString(row.sourceUrl, `recommend supplementalFacts.benefitEvidence[${index}].sourceUrl`) }), ...(row.contentHash === undefined ? {} : { contentHash: requiredString(row.contentHash, `recommend supplementalFacts.benefitEvidence[${index}].contentHash`) }), ...(row.scope === undefined ? {} : { scope: requiredString(row.scope, `recommend supplementalFacts.benefitEvidence[${index}].scope`) }) };
+    });
+  })();
+  return {
+    ...(merchant ? { merchant } : {}),
+    ...(item.amount === undefined ? {} : { amount: validateMoney(item.amount, 'recommend supplementalFacts.amount') }),
+    ...(transaction ? { transaction } : {}),
+    ...(item.fx === undefined ? {} : { fx: validateFxSnapshot(item.fx, 'recommend supplementalFacts.fx') }),
+    ...(routeFacts ? { routeFacts } : {}),
+    ...(eligibilityFacts ? { eligibilityFacts } : {}),
+    ...(benefitEvidence ? { benefitEvidence } : {}),
+  };
+}
+
 export function validateRecommendationIntent(value: unknown): RecommendationIntent {
   const input = object(value, 'recommend intent');
-  keys(input, ['merchant', 'amount', 'country', 'market', 'channel', 'paymentMethod', 'occurredAt', 'cardIds', 'routeIds', 'limit', 'page', 'cursor', 'resultVersion', 'fx', 'routeFacts', 'eligibilityFacts'], 'recommend intent');
+  keys(input, ['merchant', 'amount', 'country', 'market', 'channel', 'paymentMethod', 'occurredAt', 'cardIds', 'routeIds', 'limit', 'page', 'cursor', 'resultVersion', 'expectedResultVersion', 'supplementalFacts', 'fx', 'routeFacts', 'eligibilityFacts'], 'recommend intent');
   let merchant: RecommendationIntent['merchant'];
   if (typeof input.merchant === 'string') merchant = requiredString(input.merchant, 'merchant');
   else {
@@ -1408,6 +1465,8 @@ export function validateRecommendationIntent(value: unknown): RecommendationInte
     ...(input.routeIds === undefined ? {} : { routeIds: list(input.routeIds, 'routeIds')! }),
     ...(input.cursor === undefined ? {} : { cursor: requiredString(input.cursor, 'cursor') }),
     ...(input.resultVersion === undefined ? {} : { resultVersion: requiredString(input.resultVersion, 'resultVersion') }),
+    ...(input.expectedResultVersion === undefined ? {} : { expectedResultVersion: requiredString(input.expectedResultVersion, 'expectedResultVersion') }),
+    ...(input.supplementalFacts === undefined ? {} : { supplementalFacts: validateRecommendationSupplementalFacts(input.supplementalFacts) }),
     ...(input.fx === undefined ? {} : { fx: validateFxSnapshot(input.fx, 'recommend fx') }),
     ...(input.routeFacts === undefined ? {} : { routeFacts: (() => {
       if (!Array.isArray(input.routeFacts)) throw new RewardServiceError('INVALID_INPUT', 'routeFacts must be an array');
