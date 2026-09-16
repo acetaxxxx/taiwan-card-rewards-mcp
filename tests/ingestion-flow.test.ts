@@ -65,6 +65,14 @@ describe('ingestion flow spine', () => {
     expect(submitted.flow.flow.status).toBe('ready_to_finalize');
     expect(service.searchActiveOffers({ cardId: 'card-1' }).offers).toHaveLength(0);
     expect(service.submitBenefitLeaf({ flowId: created.flow.id, actionId: manifested.nextAction?.actionId, expectedRevision: 3, idempotencyKey: 'leaf-1', leafId: 'benefit-1', evidenceRefs: ['page:1#benefit'], offer: { snapshot: { id: 'snapshot-benefit-1', url: 'https://bank.example/offers', fetchedAt: '2026-09-16T00:00:00.000Z', contentHash: 'source-hash', parserVersion: '1', verified: true, sourceType: 'official' }, rule: { id: 'rule-benefit-1', cardId: 'card-1', version: '1', sourceSnapshotId: 'snapshot-benefit-1', status: 'candidate', validFrom: '2026-01-01T00:00:00.000Z', settlementCurrency: 'TWD', match: { channels: ['online'] }, reward: { kind: 'percentage', rateBps: 300 } } }, localExclusions: [{ scope: 'benefit', predicate: { field: 'transaction.paymentMethod', op: 'EQUALS', value: 'excluded-pay' }, evidenceRefs: ['page:1#exclude'] }] })).toEqual(expect.objectContaining({ artifact: submitted.artifact }));
+    const action = submitted.flow.nextAction!;
+    expect(action).toEqual(expect.objectContaining({ kind: 'FINALIZE', expectedRevision: 4 }));
+    const finalized = service.finalizeIngestion({ flowId: created.flow.id, actionId: action.actionId, expectedRevision: action.expectedRevision });
+    expect(finalized.proof).toEqual(expect.objectContaining({ flowId: created.flow.id, leafTotals: { total: 1, materialized: 1, ignored: 0, superseded: 0 }, activatedRules: [{ ruleId: 'rule-benefit-1', ruleVersion: '1' }] }));
+    expect(finalized.flow.flow.status).toBe('complete');
+    expect(service.searchActiveOffers({ cardId: 'card-1' }).offers).toHaveLength(1);
+    expect(service.finalizeIngestion({ flowId: created.flow.id, actionId: action.actionId, expectedRevision: action.expectedRevision }).proof).toEqual(finalized.proof);
+    expect(service.createIngestion({ sourceScope: { kind: 'official_url', value: 'https://bank.example/offers' }, idempotencyKey: 'ingest-benefit-revision-2' }).flow.id).not.toBe(created.flow.id);
   });
 
   it('keeps a leaf pending with structured diagnostics when canonical references are missing', () => {
@@ -131,6 +139,16 @@ describe('ingestion flow spine', () => {
     expect(first.flow.nextAction?.leafId).toBe('benefit-b');
     const second = submitBenefit(first.flow.nextAction!.leafId!, 'rule-b', first.flow.nextAction!.actionId, first.flow.nextAction!.expectedRevision);
     expect(second.flow.flow.status).toBe('ready_to_finalize');
+    const pristine = store.read();
+    const interrupted = store.read();
+    interrupted.snapshots = interrupted.snapshots.filter((snapshot) => snapshot.id !== 'snapshot-benefit-b');
+    store.write(interrupted);
+    expect(() => service.finalizeIngestion({ flowId: created.flow.id, actionId: second.flow.nextAction!.actionId, expectedRevision: second.flow.nextAction!.expectedRevision })).toThrow(/candidate offer no longer matches/);
+    expect(store.read().rules.filter((rule) => rule.id === 'rule-a' || rule.id === 'rule-b').map((rule) => rule.status)).toEqual(['candidate', 'candidate']);
+    store.write(pristine);
+    const finalized = service.finalizeIngestion({ flowId: created.flow.id, actionId: second.flow.nextAction!.actionId, expectedRevision: second.flow.nextAction!.expectedRevision });
+    expect(finalized.proof.activatedRules).toEqual([{ ruleId: 'rule-a', ruleVersion: '1' }, { ruleId: 'rule-b', ruleVersion: '1' }]);
+    expect(service.searchActiveOffers({ cardId: 'card-1' }).offers).toHaveLength(2);
     const candidate = store.read().rules.find((rule) => rule.id === 'rule-a')!;
     expect(candidate.sharedExclusions).toEqual([expect.objectContaining({ sourceLeafId: 'exclude-wallet', evidenceRefs: ['page:1#exclude'] })]);
     const evaluated = evaluateOffer({ ...candidate, status: 'active' }, { cardId: 'card-1', kind: 'purchase', mode: 'planned', occurredAt: '2026-09-16T00:00:00.000Z', amount: { amountMinor: 10000, currency: 'TWD' }, paymentMethod: 'wallet-x' }, { sourceSnapshots: { [candidate.sourceSnapshotId]: store.read().snapshots.find((snapshot) => snapshot.id === candidate.sourceSnapshotId)! } });

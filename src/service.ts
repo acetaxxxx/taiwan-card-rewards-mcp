@@ -2,7 +2,7 @@ import * as crypto from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { type LedgerStore, type RecordedTransaction, type StoredState, contentHash } from './store.js';
 import { EventRewardLedger, convertMinor, createPaymentEventRewardCandidate, decidePaymentEventRewards, evaluateOffer, evaluatePredicate, matchPaymentEvent, matchPaymentEventChain, matchPaymentRouteSelector, rankCards, resolveCyclePeriodKey } from './evaluator.js';
-import type { CardDescriptor, CardSwitchInput, CardSwitchProjection, CardSwitchStatus, CapPeriod, CapPoolDefinition, EvaluationContext, MerchantIdentity, MerchantResolution, Money, OfferConfirmation, OfferRuleVersion, OfferSourceSnapshot, RewardBreakdown, RewardComponentRecord, TransactionTuple, UserBenefitInput, UserBenefitStatus, EvidenceRecord, PaymentRouteRecord, PaymentCapabilityRecord, PaymentAccountRecord, EventRewardLedgerRecord, EventRewardReversalRecord, PaymentPathRequest, PaymentPathRecommendation, PaymentPathCandidate, PaymentPathEvent, EligibilityFact, RewardValuationSnapshot, FxResolutionRequest, FxEvaluationContext, AppliedFxRate, RecommendationIntent, RecommendationIntentResult, IntentCandidate, FxSnapshot, ListTransactionsOptions, ListTransactionsResult, TransactionSummaryItem, TransactionDetailItem, FundingInstrument, TransactionListItem, IngestionFlowRecord, IngestionSourceScope, IngestionDraftTombstone, IngestionBenefitLeafSubmission, IngestionBenefitArtifact, IngestionExclusionArtifact, AppliedExclusion } from './types.js';
+import type { CardDescriptor, CardSwitchInput, CardSwitchProjection, CardSwitchStatus, CapPeriod, CapPoolDefinition, EvaluationContext, MerchantIdentity, MerchantResolution, Money, OfferConfirmation, OfferRuleVersion, OfferSourceSnapshot, RewardBreakdown, RewardComponentRecord, TransactionTuple, UserBenefitInput, UserBenefitStatus, EvidenceRecord, PaymentRouteRecord, PaymentCapabilityRecord, PaymentAccountRecord, EventRewardLedgerRecord, EventRewardReversalRecord, PaymentPathRequest, PaymentPathRecommendation, PaymentPathCandidate, PaymentPathEvent, EligibilityFact, RewardValuationSnapshot, FxResolutionRequest, FxEvaluationContext, AppliedFxRate, RecommendationIntent, RecommendationIntentResult, IntentCandidate, FxSnapshot, ListTransactionsOptions, ListTransactionsResult, TransactionSummaryItem, TransactionDetailItem, FundingInstrument, TransactionListItem, IngestionFlowRecord, IngestionSourceScope, IngestionDraftTombstone, IngestionBenefitLeafSubmission, IngestionBenefitArtifact, IngestionExclusionArtifact, AppliedExclusion, IngestionCompletionProof } from './types.js';
 import type { StartupConfig } from './startup.js';
 import { RewardServiceError } from './errors.js';
 import { validateCard, validateCapPool, validateConfirmation, validateEligibilityFact, validateMerchant, validateRecommendationTransaction, validateRule, validateSnapshot, validateTransaction, validateEvidence, validateFactCandidate, validatePaymentRouteRecord, validatePaymentCapability, validatePaymentAccountRecord, validateEventRewardInput, validatePaymentEvent, validatePaymentEventChainRule, validatePaymentEventRule, validateRewardValuationSnapshot, validateListTransactionsOptions, validateIngestionSourceScope, validateIngestionSourceCapture, validateIngestionManifest, validateIngestionBenefitLeaf, validateIngestionExclusionLeaf } from './validation.js';
@@ -82,17 +82,17 @@ export class RewardService {
       const byKey = state.ingestionFlows.find((flow) => flow.ownerUser === ownerUser && flow.idempotencyKey === idempotencyKey);
       if (byKey && !this.sameSourceScope(byKey.sourceScope, sourceScope)) throw new RewardServiceError('IDEMPOTENCY_CONFLICT', 'idempotencyKey already belongs to a different ingestion source scope', { code: 'IDEMPOTENCY_CONFLICT', path: 'idempotencyKey', requiredFacts: [], retryAction: 'create_ingestion_with_new_idempotency_key', affectedIds: [byKey.id] });
       if (byKey) return;
-      const existing = state.ingestionFlows.find((flow) => flow.ownerUser === ownerUser && this.sameSourceScope(flow.sourceScope, sourceScope));
+      const existing = state.ingestionFlows.find((flow) => flow.ownerUser === ownerUser && flow.status !== 'complete' && this.sameSourceScope(flow.sourceScope, sourceScope));
       if (existing) return;
       const stamp = now.toISOString();
       state.ingestionFlows.push({ id: `flow_${crypto.randomUUID().replace(/-/g, '')}`, ownerUser, sourceScope, revision: 1, status: 'awaiting_source', idempotencyKey, createdAt: stamp, lastActivityAt: stamp, expiresAt: new Date(now.getTime() + this.ingestionDraftTtlMs).toISOString() });
     });
-    const flow = result.ingestionFlows.find((candidate) => candidate.ownerUser === ownerUser && candidate.idempotencyKey === idempotencyKey) ?? result.ingestionFlows.find((candidate) => candidate.ownerUser === ownerUser && this.sameSourceScope(candidate.sourceScope, sourceScope));
+    const flow = result.ingestionFlows.find((candidate) => candidate.ownerUser === ownerUser && candidate.idempotencyKey === idempotencyKey) ?? result.ingestionFlows.find((candidate) => candidate.ownerUser === ownerUser && candidate.status !== 'complete' && this.sameSourceScope(candidate.sourceScope, sourceScope));
     if (!flow) throw new RewardServiceError('STORE_UNAVAILABLE', 'ingestion flow was not persisted');
     return this.presentIngestion(flow);
   }
 
-  inspectIngestion(flowId: string): { flow: IngestionFlowRecord | Omit<IngestionDraftTombstone, 'retentionExpiresAt'> & { status: 'expired' }; nextAction: { actionId: string; kind: 'SUBMIT_SOURCE' | 'SUBMIT_MANIFEST' | 'PROCESS_LEAF'; expectedRevision: number; completionCondition: string; leafId?: string } | undefined } {
+  inspectIngestion(flowId: string): { flow: IngestionFlowRecord | Omit<IngestionDraftTombstone, 'retentionExpiresAt'> & { status: 'expired' }; nextAction: { actionId: string; kind: 'SUBMIT_SOURCE' | 'SUBMIT_MANIFEST' | 'PROCESS_LEAF' | 'FINALIZE'; expectedRevision: number; completionCondition: string; leafId?: string } | undefined } {
     const ownerUser = this.requireIngestionOwner();
     if (!/^[A-Za-z0-9][A-Za-z0-9_:-]{0,127}$/.test(flowId)) throw new RewardServiceError('INVALID_INPUT', 'flowId is invalid');
     this.sweepExpiredIngestions();
@@ -228,6 +228,52 @@ export class RewardService {
     return { ...(artifact === undefined ? {} : { artifact }), flow: this.inspectIngestion(flow.id) };
   }
 
+  finalizeIngestion(input: unknown): { proof: IngestionCompletionProof; flow: ReturnType<RewardService['inspectIngestion']> } {
+    const ownerUser = this.requireIngestionOwner();
+    const item = input && typeof input === 'object' && !Array.isArray(input) ? input as Record<string, unknown> : (() => { throw new RewardServiceError('INVALID_INPUT', 'finalize input must be an object'); })();
+    const flowId = typeof item.flowId === 'string' ? item.flowId : (() => { throw new RewardServiceError('INVALID_INPUT', 'flowId is required'); })();
+    const actionId = typeof item.actionId === 'string' ? item.actionId : (() => { throw new RewardServiceError('INVALID_INPUT', 'actionId is required'); })();
+    const expectedRevision = typeof item.expectedRevision === 'number' && Number.isSafeInteger(item.expectedRevision) ? item.expectedRevision : (() => { throw new RewardServiceError('INVALID_INPUT', 'expectedRevision is required'); })();
+    this.sweepExpiredIngestions();
+    let proof: IngestionCompletionProof | undefined;
+    this.store.update((state) => {
+      const flow = state.ingestionFlows.find((candidate) => candidate.id === flowId && candidate.ownerUser === ownerUser);
+      if (!flow) throw new RewardServiceError('FLOW_NOT_FOUND', `ingestion flow ${flowId} not found`);
+      if (flow.status === 'complete' && flow.completionProof) {
+        if (actionId === flow.completionProof.finalizeActionId && expectedRevision === flow.completionProof.finalizedRevision) { proof = flow.completionProof; return; }
+        throw new RewardServiceError('STALE_REVISION', 'completed flow only accepts an exact finalize retry', { code: 'STALE_REVISION', path: actionId !== flow.completionProof.finalizeActionId ? 'actionId' : 'expectedRevision', requiredFacts: [], retryAction: 'create_ingestion', affectedIds: [flow.id] });
+      }
+      const action = this.presentIngestion(flow).nextAction;
+      if (!action || action.kind !== 'FINALIZE') throw new RewardServiceError('INVALID_FLOW_ACTION', 'flow is not ready to finalize', { code: 'INVALID_FLOW_ACTION', path: 'actionId', requiredFacts: ['a complete and materialized manifest'], retryAction: 'get_ingestion', affectedIds: [flow.id] });
+      if (actionId !== action.actionId || expectedRevision !== flow.revision) throw new RewardServiceError('STALE_REVISION', 'finalize action is stale', { code: 'STALE_REVISION', path: actionId !== action.actionId ? 'actionId' : 'expectedRevision', requiredFacts: [], retryAction: 'get_ingestion', affectedIds: [flow.id] });
+      this.assertFinalizeReady(state, flow);
+      const activatedRules: Array<{ ruleId: string; ruleVersion: string }> = [];
+      const awaitingConfirmationRules: Array<{ ruleId: string; ruleVersion: string; reason: string }> = [];
+      for (const artifact of flow.benefitArtifacts ?? []) {
+        const ruleIndex = state.rules.findIndex((rule) => rule.id === artifact.ruleId && rule.version === artifact.ruleVersion);
+        const rule = state.rules[ruleIndex]!;
+        const snapshot = state.snapshots.find((candidate) => candidate.id === artifact.snapshotId)!;
+        const activationReason = this.activationHoldReason(state, rule, snapshot);
+        if (activationReason) { awaitingConfirmationRules.push({ ruleId: rule.id, ruleVersion: rule.version, reason: activationReason }); continue; }
+        if (rule.supersedesRuleId) {
+          const predecessor = state.rules.find((candidate) => candidate.id === rule.supersedesRuleId);
+          if (!predecessor || predecessor.status !== 'active') throw new RewardServiceError('NEEDS_REVIEW', 'superseded active rule is missing or no longer active', { code: 'RULE_CONFLICT', path: 'rule.supersedesRuleId', requiredFacts: ['an active predecessor rule'], retryAction: 'get_ingestion', affectedIds: [flow.id, rule.id, rule.supersedesRuleId] });
+          predecessor.status = 'superseded';
+        }
+        state.rules[ruleIndex] = { ...rule, status: 'active', trustBasis: 'official_verified' };
+        activatedRules.push({ ruleId: rule.id, ruleVersion: rule.version });
+      }
+      const leaves = (flow.manifest ?? []).map((leaf) => ({ id: leaf.id, kind: leaf.kind, disposition: leaf.disposition!, ...(leaf.dispositionReason === undefined ? {} : { reason: leaf.dispositionReason }), evidenceLocator: leaf.evidenceLocator, evidenceRefs: leaf.kind === 'benefit' ? flow.benefitArtifacts?.find((artifact) => artifact.leafId === leaf.id)?.evidenceRefs ?? [] : flow.exclusionArtifacts?.find((artifact) => artifact.sourceLeafId === leaf.id)?.evidenceRefs ?? (leaf.dispositionEvidence === undefined ? [] : [leaf.dispositionEvidence]) }));
+      proof = { flowId: flow.id, finalizeActionId: actionId, finalizedRevision: flow.revision, completedAt: this.workflowNow().toISOString(), sourceCapture: { artifactRef: flow.sourceCapture!.artifactRef, contentHash: flow.sourceCapture!.contentHash, retrievedAt: flow.sourceCapture!.retrievedAt, sourceType: flow.sourceCapture!.sourceType }, leafTotals: { total: leaves.length, materialized: leaves.filter((leaf) => leaf.disposition === 'materialized').length, ignored: leaves.filter((leaf) => leaf.disposition === 'ignored').length, superseded: leaves.filter((leaf) => leaf.disposition === 'superseded').length }, leaves, activatedRules, awaitingConfirmationRules };
+      flow.completionProof = proof;
+      flow.status = 'complete';
+      flow.revision += 1;
+      flow.lastActivityAt = this.workflowNow().toISOString();
+    });
+    if (!proof) throw new RewardServiceError('STORE_UNAVAILABLE', 'finalization did not persist a completion proof');
+    return { proof, flow: this.inspectIngestion(flowId) };
+  }
+
   sweepExpiredIngestions(): { expired: number; purgedTombstones: number } {
     const now = this.workflowNow();
     let expired = 0;
@@ -235,7 +281,7 @@ export class RewardService {
     this.store.update((state) => {
       const retained: IngestionFlowRecord[] = [];
       for (const flow of state.ingestionFlows) {
-        if (Date.parse(flow.expiresAt) > now.getTime()) { retained.push(flow); continue; }
+        if (flow.status === 'complete' || Date.parse(flow.expiresAt) > now.getTime()) { retained.push(flow); continue; }
         expired += 1;
         state.ingestionDraftTombstones.push({ id: flow.id, ownerUser: flow.ownerUser, sourceScope: flow.sourceScope, revision: flow.revision, createdAt: flow.createdAt, expiredAt: now.toISOString(), retentionExpiresAt: new Date(now.getTime() + this.ingestionTombstoneRetentionMs).toISOString() });
       }
@@ -283,10 +329,33 @@ export class RewardService {
     return exclusions.map(({ sourceLeafId, sourceFlowId, target, predicate, evidenceRefs }) => ({ sourceLeafId, sourceFlowId, target, predicate, evidenceRefs }));
   }
 
-  private presentIngestion(flow: IngestionFlowRecord): { flow: IngestionFlowRecord; nextAction: { actionId: string; kind: 'SUBMIT_SOURCE' | 'SUBMIT_MANIFEST' | 'PROCESS_LEAF'; expectedRevision: number; completionCondition: string; leafId?: string } | undefined } {
+  private assertFinalizeReady(state: StoredState, flow: IngestionFlowRecord): void {
+    if (!flow.sourceCapture || !flow.manifest?.length || flow.manifest.some((leaf) => leaf.disposition === undefined)) throw new RewardServiceError('INVALID_FLOW_ACTION', 'finalization requires a source capture and a full manifest disposition');
+    for (const leaf of flow.manifest) {
+      if (leaf.kind === 'benefit' && leaf.disposition === 'materialized' && !(flow.benefitArtifacts ?? []).some((artifact) => artifact.leafId === leaf.id)) throw new RewardServiceError('NEEDS_REVIEW', 'materialized benefit has no candidate artifact', { code: 'MANIFEST_INCOMPLETE', path: 'manifest', requiredFacts: ['candidate benefit artifact'], retryAction: 'get_ingestion', affectedIds: [flow.id, leaf.id] });
+      if (leaf.kind === 'exclusion' && leaf.disposition === 'materialized' && !(flow.exclusionArtifacts ?? []).some((artifact) => artifact.sourceLeafId === leaf.id)) throw new RewardServiceError('NEEDS_REVIEW', 'materialized exclusion has no candidate artifact', { code: 'MANIFEST_INCOMPLETE', path: 'manifest', requiredFacts: ['candidate exclusion artifact'], retryAction: 'get_ingestion', affectedIds: [flow.id, leaf.id] });
+    }
+    for (const artifact of flow.benefitArtifacts ?? []) {
+      const rule = state.rules.find((candidate) => candidate.id === artifact.ruleId && candidate.version === artifact.ruleVersion);
+      const snapshot = state.snapshots.find((candidate) => candidate.id === artifact.snapshotId);
+      if (!rule || !snapshot || rule.status !== 'candidate' || rule.sourceSnapshotId !== snapshot.id || snapshot.contentHash !== flow.sourceCapture.contentHash || (flow.sourceCapture.url !== undefined && snapshot.url !== flow.sourceCapture.url)) throw new RewardServiceError('NEEDS_REVIEW', 'candidate offer no longer matches its immutable source capture', { code: 'SOURCE_STALE', path: 'benefitArtifacts', requiredFacts: ['candidate rule and immutable source snapshot matching the flow capture'], retryAction: 'get_ingestion', affectedIds: [flow.id, artifact.ruleId, artifact.snapshotId] });
+      validateRule(rule); validateSnapshot(snapshot);
+      for (const capPoolId of rule.capPoolRefs ?? []) if (!state.capPools.some((pool) => pool.id === capPoolId)) throw new RewardServiceError('NEEDS_REVIEW', 'candidate rule refers to a missing cap pool', { code: 'CANONICAL_REFERENCE_MISSING', path: 'rule.capPoolRefs', requiredFacts: ['existing cap pool'], retryAction: 'get_ingestion', affectedIds: [flow.id, rule.id, capPoolId] });
+      if (rule.routeId && !state.paymentRoutes.some((route) => route.id === rule.routeId && route.status === 'active')) throw new RewardServiceError('NEEDS_REVIEW', 'candidate rule refers to an unavailable payment route', { code: 'CANONICAL_REFERENCE_MISSING', path: 'rule.routeId', requiredFacts: ['active payment route'], retryAction: 'get_ingestion', affectedIds: [flow.id, rule.id, rule.routeId] });
+    }
+  }
+
+  private activationHoldReason(state: StoredState, rule: OfferRuleVersion, snapshot: OfferSourceSnapshot): string | undefined {
+    if (snapshot.sourceType !== 'official' || snapshot.verified !== true) return 'source is not an official verified snapshot';
+    if (rule.requires?.includes('user_confirmation')) return 'rule requires user confirmation';
+    if (rule.match.merchants?.some((id) => !state.merchants.some((merchant) => merchant.canonicalId === id && merchant.status === 'active'))) return 'canonical merchant is awaiting confirmation';
+    return undefined;
+  }
+
+  private presentIngestion(flow: IngestionFlowRecord): { flow: IngestionFlowRecord; nextAction: { actionId: string; kind: 'SUBMIT_SOURCE' | 'SUBMIT_MANIFEST' | 'PROCESS_LEAF' | 'FINALIZE'; expectedRevision: number; completionCondition: string; leafId?: string } | undefined } {
     const leaf = flow.status === 'processing_leaves' ? [...(flow.manifest ?? [])].sort((a, b) => a.id.localeCompare(b.id)).find((candidate) => candidate.disposition === undefined && candidate.dependsOn.every((dependency) => flow.manifest?.find((entry) => entry.id === dependency)?.disposition !== undefined)) : undefined;
-    const kind = flow.status === 'awaiting_source' ? 'SUBMIT_SOURCE' : flow.status === 'awaiting_manifest' ? 'SUBMIT_MANIFEST' : leaf ? 'PROCESS_LEAF' : undefined;
-    const nextAction = kind === undefined ? undefined : { actionId: `act_${crypto.createHash('sha256').update(`${flow.id}:${flow.revision}:${kind}:${leaf?.id ?? ''}`).digest('hex').slice(0, 24)}`, kind: kind as 'SUBMIT_SOURCE' | 'SUBMIT_MANIFEST' | 'PROCESS_LEAF', expectedRevision: flow.revision, completionCondition: kind === 'SUBMIT_SOURCE' ? 'Submit one immutable source capture for this flow.' : kind === 'SUBMIT_MANIFEST' ? 'Submit the complete source manifest for this flow.' : 'Materialize, ignore, or supersede this leaf.', ...(leaf ? { leafId: leaf.id } : {}) };
+    const kind = flow.status === 'awaiting_source' ? 'SUBMIT_SOURCE' : flow.status === 'awaiting_manifest' ? 'SUBMIT_MANIFEST' : leaf ? 'PROCESS_LEAF' : flow.status === 'ready_to_finalize' ? 'FINALIZE' : undefined;
+    const nextAction = kind === undefined ? undefined : { actionId: `act_${crypto.createHash('sha256').update(`${flow.id}:${flow.revision}:${kind}:${leaf?.id ?? ''}`).digest('hex').slice(0, 24)}`, kind: kind as 'SUBMIT_SOURCE' | 'SUBMIT_MANIFEST' | 'PROCESS_LEAF' | 'FINALIZE', expectedRevision: flow.revision, completionCondition: kind === 'SUBMIT_SOURCE' ? 'Submit one immutable source capture for this flow.' : kind === 'SUBMIT_MANIFEST' ? 'Submit the complete source manifest for this flow.' : kind === 'FINALIZE' ? 'Atomically validate and finalize the complete manifest.' : 'Materialize, ignore, or supersede this leaf.', ...(leaf ? { leafId: leaf.id } : {}) };
     return { flow: structuredClone(flow), nextAction };
   }
 

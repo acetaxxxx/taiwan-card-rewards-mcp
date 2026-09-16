@@ -15,7 +15,7 @@ export interface RecordedTransaction {
 }
 
 export interface StoredState {
-  schemaVersion: 3;
+  schemaVersion: 4;
   cards: CardDescriptor[];
   snapshots: OfferSourceSnapshot[];
   rules: OfferRuleVersion[];
@@ -40,7 +40,7 @@ export interface StoredState {
   ingestionDraftTombstones: IngestionDraftTombstone[];
 }
 
-export const emptyState = (): StoredState => ({ schemaVersion: 3, cards: [], snapshots: [], rules: [], transactions: [], campaigns: [], switchEnrollments: [], cardSwitches: [], capPools: [], rewardComponents: [], merchants: [], evidence: [], factCandidates: [], paymentRoutes: [], paymentCapabilities: [], paymentAccounts: [], valuationSnapshots: [], eventRewardSchemaVersion: 1, eventRewardLedger: [], eventRewardReversals: [], eventRewardCapUsage: [], ingestionFlows: [], ingestionDraftTombstones: [] });
+export const emptyState = (): StoredState => ({ schemaVersion: 4, cards: [], snapshots: [], rules: [], transactions: [], campaigns: [], switchEnrollments: [], cardSwitches: [], capPools: [], rewardComponents: [], merchants: [], evidence: [], factCandidates: [], paymentRoutes: [], paymentCapabilities: [], paymentAccounts: [], valuationSnapshots: [], eventRewardSchemaVersion: 1, eventRewardLedger: [], eventRewardReversals: [], eventRewardCapUsage: [], ingestionFlows: [], ingestionDraftTombstones: [] });
 
 export class StoreError extends Error {
   constructor(public readonly code: string, message: string) {

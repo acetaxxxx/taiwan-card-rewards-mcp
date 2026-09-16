@@ -722,9 +722,9 @@ describe('Ticket 03: 統一交易記錄與時間查詢 (Unified Transactions & T
       });
       expect(initRes.result?.serverInfo?.name).toBe('taiwan_card_rewards_mcp');
 
-      // 2. tools/list includes list_transactions with 26 total tools
+      // 2. tools/list includes list_transactions with 27 total tools
       const listRes = await client.send({ method: 'tools/list' });
-      expect(listRes.result.tools).toHaveLength(26);
+      expect(listRes.result.tools).toHaveLength(27);
       const listTxTool = listRes.result.tools.find((t: any) => t.name === 'list_transactions');
       expect(listTxTool).toBeDefined();
       expect(listTxTool.inputSchema.properties.limit.maximum).toBe(50);

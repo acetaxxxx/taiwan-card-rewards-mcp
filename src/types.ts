@@ -863,6 +863,17 @@ export interface IngestionExclusionArtifact extends AppliedExclusion { id: strin
 export interface IngestionMerchantReference { rawQuery: string; canonicalId?: string; country?: string; market?: string; mcc?: string; channel?: string; candidate?: Omit<MerchantIdentity, 'canonicalId' | 'status'> & { canonicalId?: string; status?: 'candidate' }; }
 export interface IngestionBenefitLeafSubmission { flowId: string; actionId: string; expectedRevision: number; idempotencyKey: string; leafId: string; offer: { snapshot: OfferSourceSnapshot; rule: OfferRuleVersion; capPools?: readonly CapPoolDefinition[]; merchant?: Omit<MerchantIdentity, 'canonicalId'> & { canonicalId?: string }; }; merchantRefs?: readonly IngestionMerchantReference[]; evidenceRefs: readonly string[]; localExclusions?: readonly IngestionLocalExclusion[]; }
 export interface IngestionBenefitArtifact { id: string; flowId: string; revision: number; leafId: string; ruleId: string; ruleVersion: string; snapshotId: string; evidenceRefs: readonly string[]; localExclusions: readonly IngestionLocalExclusion[]; idempotencyKey: string; payloadHash: string; status: 'candidate'; }
+export interface IngestionCompletionProof {
+  flowId: string;
+  finalizeActionId: string;
+  finalizedRevision: number;
+  completedAt: string;
+  sourceCapture: Pick<IngestionSourceCapture, 'artifactRef' | 'contentHash' | 'retrievedAt' | 'sourceType'>;
+  leafTotals: { total: number; materialized: number; ignored: number; superseded: number; };
+  leaves: readonly { id: string; kind: IngestionManifestLeaf['kind']; disposition: NonNullable<IngestionManifestLeaf['disposition']>; reason?: string; evidenceLocator: string; evidenceRefs: readonly string[]; }[];
+  activatedRules: readonly { ruleId: string; ruleVersion: string; }[];
+  awaitingConfirmationRules: readonly { ruleId: string; ruleVersion: string; reason: string; }[];
+}
 export interface IngestionFlowRecord {
   id: string;
   ownerUser: string;
@@ -877,6 +888,7 @@ export interface IngestionFlowRecord {
   manifest?: readonly IngestionManifestLeaf[];
   benefitArtifacts?: readonly IngestionBenefitArtifact[];
   exclusionArtifacts?: readonly IngestionExclusionArtifact[];
+  completionProof?: IngestionCompletionProof;
 }
 export interface IngestionDraftTombstone {
   id: string;
