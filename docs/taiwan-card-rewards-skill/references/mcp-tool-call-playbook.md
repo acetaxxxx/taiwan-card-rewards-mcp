@@ -1,6 +1,6 @@
 # MCP tool-call playbook
 
-這是給 Agent 的呼叫順序與 JSON 骨架；canonical 20-tool 清單與欄位定義在
+這是給 Agent 的呼叫順序與 JSON 骨架；canonical 25-tool 清單與欄位定義在
 [`mcp-tools.md`](mcp-tools.md)。每個 object 都是 closed schema。以下 ID、URL、rule、amount 是 illustrative，不能當成銀行產品或 production evidence。
 
 ## A. 商家消費意圖推薦（唯一入口）
@@ -222,9 +222,14 @@ Same-key same-payload retries replay; same-key different-payload retries fail.
 
 1. Agent obtains an official page/PDF and records snapshot URL, fetchedAt,
 contentHash, valid period, provenance, and excerpt.
-2. Call `resolve_merchant` before merchant-specific matching. Call `upsert_offer`
-only with the extracted rule and required user confirmation. A community page is
-lead-only, not authoritative activation evidence.
+2. For a complete source, use `create_ingestion`, submit one source capture and
+the complete manifest, then follow the server-owned `PROCESS_LEAF` actions.
+Submit each benefit through `submit_benefit_leaf`; include raw `merchantRefs` in
+that same call. MCP resolves known merchants and returns candidates inline when
+selection is needed. Do not make a separate `resolve_merchant` call first.
+3. Call `upsert_offer` directly only for legacy/non-ingestion offer writes, with
+the extracted rule and required user confirmation. A community page is lead-only,
+not authoritative activation evidence.
 3. For foreign currency, follow section B above — supply `fx` inline, never
 guess a rate or fall back to 1:1.
 4. If fee currency cannot be converted, or a reward unit lacks an authoritative
@@ -232,7 +237,7 @@ valuation snapshot, present blocked/unknown and ask for recovery.
 
 ## F. Retired names
 
-New agents call only the 19 names in `mcp-tools.md`. `upsert_fx_policy`,
+New agents call only the 25 names in `mcp-tools.md`. `upsert_fx_policy`,
 `list_fx_policies`, `upsert_fx_observation`, `list_fx_observations`,
 `recommendation_preflight`, `recommend_payment_paths_v1`,
 `record_event_reward_v1`, `record_event_reward_v2`, and `reverse_event_reward_v1`

@@ -155,7 +155,28 @@ export class RewardService {
     if (parsed.expectedRevision !== flow.revision || parsed.actionId !== action.actionId) throw new RewardServiceError('STALE_REVISION', 'benefit leaf action is stale', { code: 'STALE_REVISION', path: parsed.expectedRevision !== flow.revision ? 'expectedRevision' : 'actionId', requiredFacts: [], retryAction: 'get_ingestion', affectedIds: [flow.id] });
     if (!flow.sourceCapture || parsed.offer.snapshot.contentHash !== flow.sourceCapture.contentHash || (flow.sourceCapture.url !== undefined && parsed.offer.snapshot.url !== flow.sourceCapture.url)) throw new RewardServiceError('SOURCE_SCOPE_CONFLICT', 'benefit offer snapshot does not match the captured source', { code: 'SOURCE_SCOPE_CONFLICT', path: 'offer.snapshot', requiredFacts: ['source capture contentHash and URL'], retryAction: 'submit_benefit_leaf', affectedIds: [flow.id, parsed.leafId] });
     if (parsed.offer.rule.status !== 'candidate') throw new RewardServiceError('INVALID_OFFER', 'benefit leaf materialization must create a candidate rule');
-    const result = this.upsertOffer(parsed.offer.snapshot, parsed.offer.rule, undefined, parsed.offer.capPools, parsed.offer.merchant);
+    let materializedRule = parsed.offer.rule;
+    let merchant = parsed.offer.merchant;
+    if (parsed.merchantRefs?.length) {
+      const resolvedIds: string[] = [];
+      for (const [index, reference] of parsed.merchantRefs.entries()) {
+        const resolution = this.resolveMerchant(reference.canonicalId ?? reference.rawQuery, { ...(reference.country === undefined ? {} : { country: reference.country }), ...(reference.market === undefined ? {} : { market: reference.market }), ...(reference.mcc === undefined ? {} : { mcc: reference.mcc }), ...(reference.channel === undefined ? {} : { channel: reference.channel }) });
+        if (resolution.resolutionStatus === 'confirmed') { resolvedIds.push(resolution.merchant!.canonicalId); continue; }
+        if (resolution.resolutionStatus === 'ambiguous') throw new RewardServiceError('NEEDS_REVIEW', 'benefit leaf merchant reference is ambiguous; choose one returned candidate', { code: 'MERCHANT_AMBIGUOUS', path: `merchantRefs[${index}]`, requiredFacts: resolution.requiredFacts ?? ['one canonical merchant candidate'], retryAction: 'submit_benefit_leaf', affectedIds: [flow.id, parsed.leafId, ...resolution.boundedCandidates.map((candidate) => candidate.canonicalId)], merchantResolution: { rawQuery: reference.rawQuery, status: resolution.resolutionStatus, candidates: resolution.boundedCandidates } });
+        if (!reference.candidate) throw new RewardServiceError('NEEDS_REVIEW', 'benefit leaf merchant is not in the MCP catalog; provide the source-backed candidate merchant', { code: 'MERCHANT_UNRESOLVED', path: `merchantRefs[${index}]`, requiredFacts: ['source-backed merchant candidate'], retryAction: 'submit_benefit_leaf', affectedIds: [flow.id, parsed.leafId], merchantResolution: { rawQuery: reference.rawQuery, status: resolution.resolutionStatus, candidates: [] } });
+        merchant = { ...reference.candidate, status: 'candidate' };
+      }
+      if (resolvedIds.length) materializedRule = { ...materializedRule, match: { ...materializedRule.match, merchants: resolvedIds } };
+      else materializedRule = { ...materializedRule, match: { ...materializedRule.match, merchants: [] } };
+    }
+    const knownMerchants = new Set(before.merchants.map((candidate) => candidate.canonicalId));
+    const unresolvedMerchant = merchant === undefined ? materializedRule.match.merchants?.find((id) => !knownMerchants.has(id)) : undefined;
+    if (unresolvedMerchant !== undefined) throw new RewardServiceError('NEEDS_REVIEW', 'benefit leaf references an unresolved canonical merchant', { code: 'MERCHANT_UNRESOLVED', path: 'offer.rule.match.merchants', requiredFacts: [`confirmed canonical merchant ${unresolvedMerchant}`], retryAction: 'submit_benefit_leaf', affectedIds: [flow.id, parsed.leafId, unresolvedMerchant], merchantResolution: { rawQuery: unresolvedMerchant, status: 'unresolved', candidates: [] } });
+    const knownPools = new Set([...before.capPools, ...(parsed.offer.capPools ?? [])].map((pool) => pool.id));
+    const unresolvedPool = parsed.offer.rule.capPoolRefs?.find((id) => !knownPools.has(id));
+    if (unresolvedPool !== undefined) throw new RewardServiceError('NEEDS_REVIEW', 'benefit leaf references an unresolved cap pool', { code: 'NEEDS_REVIEW', path: 'offer.rule.capPoolRefs', requiredFacts: [`validated cap pool ${unresolvedPool}`], retryAction: 'submit_benefit_leaf', affectedIds: [flow.id, parsed.leafId, unresolvedPool] });
+    if (parsed.offer.rule.routeId !== undefined && !before.paymentRoutes.some((route) => route.id === parsed.offer.rule.routeId)) throw new RewardServiceError('NEEDS_REVIEW', 'benefit leaf references an unresolved payment route', { code: 'NEEDS_REVIEW', path: 'offer.rule.routeId', requiredFacts: [`validated payment route ${parsed.offer.rule.routeId}`], retryAction: 'submit_benefit_leaf', affectedIds: [flow.id, parsed.leafId, parsed.offer.rule.routeId] });
+    const result = this.upsertOffer(parsed.offer.snapshot, materializedRule, undefined, parsed.offer.capPools, merchant);
     const artifact: IngestionBenefitArtifact = { id: `artifact_${crypto.randomUUID().replace(/-/g, '')}`, flowId: flow.id, revision: flow.revision, leafId: leaf.id, ruleId: result.rule.id, ruleVersion: result.rule.version, snapshotId: result.snapshot.id, evidenceRefs: parsed.evidenceRefs, localExclusions: parsed.localExclusions ?? [], idempotencyKey: parsed.idempotencyKey, payloadHash, status: 'candidate' };
     this.store.update((state) => {
       const current = state.ingestionFlows.find((candidate) => candidate.id === flow.id && candidate.ownerUser === ownerUser);

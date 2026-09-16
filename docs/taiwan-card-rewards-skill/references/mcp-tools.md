@@ -1,8 +1,8 @@
 # Canonical MCP tools
 
-這份 reference 對應目前 source contract 的公開 surface：20 個工具。工具名稱、closed input、enum 與 fail-closed errors 以 `src/mcp-contract.ts`、`src/validation.ts` 和 `src/cli.ts` 為準；版本 tag 是發佈管理資訊，不是 public tool name。
+這份 reference 對應目前 source contract 的公開 surface：25 個工具。工具名稱、closed input、enum 與 fail-closed errors 以 `src/mcp-contract.ts`、`src/validation.ts` 和 `src/cli.ts` 為準；版本 tag 是發佈管理資訊，不是 public tool name。
 
-## 20-tool matrix
+## 25-tool matrix
 
 | Tool | Read/write | 用途 |
 |---|---|---|
@@ -26,8 +26,18 @@
 | `upsert_user_benefit_status` | write | 寫入 user-confirmed benefit action |
 | `resolve_merchant` | read | 驗證 Agent 提供的 merchant identity/candidate |
 | `search_active_offers` | read | 有界搜尋 active offer，不直接套用回饋 |
+| `create_ingestion` | write | 建立或恢復一個 source-scoped ingestion draft |
+| `get_ingestion` | read | 取得 MCP 決定的下一個 ingestion action 與 coverage |
+| `submit_ingestion_source` | write | 提交不可變 source capture；MCP 不會自行抓 URL |
+| `submit_ingestion_manifest` | write | 提交完整 manifest，驗證 dependency graph |
+| `submit_benefit_leaf` | write | 解析 merchant references、驗證並 materialize 單一 candidate benefit rule；未 finalize 前不可推薦 |
 
 每個工具的 input object 都是 `additionalProperties: false`。所有 arrays、page/limit、route graph、event source list 都有上限。
+
+`submit_benefit_leaf` 可在同一次提交帶入 `merchantRefs`。MCP 會直接執行 merchant
+resolution：唯一匹配時自動綁定 canonical ID；多重匹配時在 `NEEDS_REVIEW` details
+回傳候選清單，Agent 選定後以相同 leaf action 重試；完全未知時才需要附上來源支持的
+`candidate` merchant。Agent 不需要先額外呼叫 `resolve_merchant`。
 
 `upsert_fx_policy`、`list_fx_policies`、`upsert_fx_observation`、`list_fx_observations`、`recommendation_preflight` 已完全移除——FX 收斂成單一 inline snapshot（見下），`recommend` 本身就是唯一、完整的推薦入口，不再需要獨立的 preflight 呼叫。`rank_cards` 也已移除：它只是把呼叫端自帶的 cards/rules 排序，沒有存取 store，Agent 重複呼叫 `calculate_reward` 就能自己排序，因此收斂成單一用途的 `calculate_reward`。`recommend_payment_paths_v1`、`record_event_reward_v1`、`record_event_reward_v2`、`reverse_event_reward_v1` 這些版本化別名也一併移除；只使用上表的正式名稱。
 
