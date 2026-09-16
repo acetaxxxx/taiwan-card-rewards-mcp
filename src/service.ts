@@ -358,7 +358,21 @@ export class RewardService {
         if (activationReason) { awaitingConfirmationRules.push({ ruleId: rule.id, ruleVersion: rule.version, reason: activationReason }); continue; }
         if (rule.supersedesRuleId) {
           const predecessor = state.rules.find((candidate) => candidate.id === rule.supersedesRuleId);
-          if (!predecessor || predecessor.status !== 'active') throw new RewardServiceError('NEEDS_REVIEW', 'superseded active rule is missing or no longer active', { code: 'RULE_CONFLICT', path: 'rule.supersedesRuleId', requiredFacts: ['an active predecessor rule'], retryAction: 'get_ingestion', affectedIds: [flow.id, rule.id, rule.supersedesRuleId] });
+          if (
+            !predecessor ||
+            predecessor.status !== 'active' ||
+            predecessor.cardId !== rule.cardId ||
+            predecessor.componentKind !== rule.componentKind ||
+            (predecessor.ownerUser ?? undefined) !== (rule.ownerUser ?? undefined)
+          ) {
+            throw new RewardServiceError('NEEDS_REVIEW', 'superseded active rule is missing, card mismatched, or no longer active', {
+              code: 'RULE_CONFLICT',
+              path: 'rule.supersedesRuleId',
+              requiredFacts: ['an active predecessor rule on the same card and tenant'],
+              retryAction: 'get_ingestion',
+              affectedIds: [flow.id, rule.id, rule.supersedesRuleId],
+            });
+          }
           predecessor.status = 'superseded';
         }
         state.rules[ruleIndex] = { ...rule, status: 'active', trustBasis: 'official_verified' };
@@ -406,9 +420,8 @@ export class RewardService {
     if (snapshot?.url && /^https:\/\//i.test(snapshot.url)) {
       try {
         const parsed = new URL(snapshot.url);
-        if (parsed.protocol === 'https:' && !parsed.username && !parsed.password) {
-          return { kind: 'official_url', value: snapshot.url!.split('#')[0]! };
-        }
+        const urlPart = snapshot.url.split('#')[0];
+        if (urlPart) return { kind: 'official_url', value: urlPart };
       } catch {
         // ignore invalid URL
       }
@@ -476,6 +489,13 @@ export class RewardService {
       const snapshot = state.snapshots.find((candidate) => candidate.id === artifact.snapshotId);
       if (!rule || !snapshot || rule.status !== 'candidate' || rule.sourceSnapshotId !== snapshot.id || snapshot.contentHash !== flow.sourceCapture.contentHash || (flow.sourceCapture.url !== undefined && snapshot.url !== flow.sourceCapture.url)) throw new RewardServiceError('NEEDS_REVIEW', 'candidate offer no longer matches its immutable source capture', { code: 'SOURCE_STALE', path: 'benefitArtifacts', requiredFacts: ['candidate rule and immutable source snapshot matching the flow capture'], retryAction: 'get_ingestion', affectedIds: [flow.id, artifact.ruleId, artifact.snapshotId] });
       validateRule(rule); validateSnapshot(snapshot);
+      const nowMs = this.workflowNow().getTime();
+      if (snapshot.validTo !== undefined && Date.parse(snapshot.validTo) < nowMs) {
+        throw new RewardServiceError('NEEDS_REVIEW', 'candidate offer source snapshot is expired', { code: 'SOURCE_STALE', path: 'snapshot.validTo', requiredFacts: ['active, unexpired source snapshot'], retryAction: 'create_ingestion', affectedIds: [flow.id, artifact.ruleId, artifact.snapshotId] });
+      }
+      if (rule.validTo !== undefined && Date.parse(rule.validTo) < nowMs) {
+        throw new RewardServiceError('NEEDS_REVIEW', 'candidate rule is expired', { code: 'SOURCE_STALE', path: 'rule.validTo', requiredFacts: ['active, unexpired offer rule'], retryAction: 'create_ingestion', affectedIds: [flow.id, artifact.ruleId] });
+      }
       for (const capPoolId of rule.capPoolRefs ?? []) if (!state.capPools.some((pool) => pool.id === capPoolId)) throw new RewardServiceError('NEEDS_REVIEW', 'candidate rule refers to a missing cap pool', { code: 'CANONICAL_REFERENCE_MISSING', path: 'rule.capPoolRefs', requiredFacts: ['existing cap pool'], retryAction: 'get_ingestion', affectedIds: [flow.id, rule.id, capPoolId] });
       if (rule.routeId && !state.paymentRoutes.some((route) => route.id === rule.routeId && route.status === 'active')) throw new RewardServiceError('NEEDS_REVIEW', 'candidate rule refers to an unavailable payment route', { code: 'CANONICAL_REFERENCE_MISSING', path: 'rule.routeId', requiredFacts: ['active payment route'], retryAction: 'get_ingestion', affectedIds: [flow.id, rule.id, rule.routeId] });
     }
@@ -1073,9 +1093,11 @@ export class RewardService {
       if (ruleIndex >= 0) state.rules[ruleIndex] = storedRule;
       else {
         if (storedRule.supersedesRuleId !== undefined) {
-          const predecessorIndex = state.rules.findIndex((item) => item.id === storedRule.supersedesRuleId && item.ownerUser === storedRule.ownerUser && item.status === 'active');
+          const predecessorIndex = state.rules.findIndex((item) => item.id === storedRule.supersedesRuleId && (item.ownerUser ?? undefined) === (storedRule.ownerUser ?? undefined) && item.status === 'active');
           if (predecessorIndex < 0) throw new RewardServiceError('INVALID_OFFER', 'supersedesRuleId must reference an active rule owned by the same user');
-          state.rules[predecessorIndex] = { ...state.rules[predecessorIndex]!, status: 'superseded' };
+          if (storedRule.status === 'active') {
+            state.rules[predecessorIndex] = { ...state.rules[predecessorIndex]!, status: 'superseded' };
+          }
         }
         state.rules.push(storedRule);
       }
@@ -1540,7 +1562,7 @@ export class RewardService {
             const isTerminalChild = matchingChildFlow && ['failed', 'cancelled', 'needs_review'].includes(matchingChildFlow.status);
             const isIncompleteChild = matchingChildFlow && ['awaiting_source', 'awaiting_manifest', 'processing_leaves', 'ready_to_finalize'].includes(matchingChildFlow.status);
 
-            const diagCode = isTerminalChild ? (matchingChildFlow.status === 'cancelled' ? 'flow_cancelled' : matchingChildFlow.status === 'failed' ? 'flow_failed' : 'needs_review') : 'stale_rule';
+            const diagCode: Diagnostic['code'] = isTerminalChild ? (matchingChildFlow.status === 'cancelled' ? 'flow_cancelled' : matchingChildFlow.status === 'failed' ? 'flow_failed' : 'needs_review') : 'stale_rule';
             const reasonMsg = isTerminalChild
               ? `child ingestion flow ${matchingChildFlow.id} ${matchingChildFlow.status}: ${matchingChildFlow.terminalReason || 'terminal without update'}`
               : isIncompleteChild

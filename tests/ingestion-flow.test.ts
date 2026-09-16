@@ -154,6 +154,85 @@ describe('ingestion flow spine', () => {
     const evaluated = evaluateOffer({ ...candidate, status: 'active' }, { cardId: 'card-1', kind: 'purchase', mode: 'planned', occurredAt: '2026-09-16T00:00:00.000Z', amount: { amountMinor: 10000, currency: 'TWD' }, paymentMethod: 'wallet-x' }, { sourceSnapshots: { [candidate.sourceSnapshotId]: store.read().snapshots.find((snapshot) => snapshot.id === candidate.sourceSnapshotId)! } });
     expect(evaluated.status).toBe('no_match');
     expect(evaluated.matchedExclusions?.[0]).toEqual(expect.objectContaining({ sourceLeafId: 'exclude-wallet' }));
+
+    // Duplicate finalize idempotently returns the same proof
+    const duplicate = service.finalizeIngestion({ flowId: created.flow.id, actionId: second.flow.nextAction!.actionId, expectedRevision: second.flow.nextAction!.expectedRevision });
+    expect(duplicate.proof).toEqual(finalized.proof);
+
+    // Mismatched revision/actionId on completed flow fails closed with STALE_REVISION
+    expect(() => service.finalizeIngestion({ flowId: created.flow.id, actionId: second.flow.nextAction!.actionId, expectedRevision: 999 })).toThrow(/completed flow only accepts an exact finalize retry/);
+    expect(() => service.finalizeIngestion({ flowId: created.flow.id, actionId: 'act_wrong', expectedRevision: second.flow.nextAction!.expectedRevision })).toThrow(/completed flow only accepts an exact finalize retry/);
+
+    // Completed flow rejects subsequent leaf submissions
+    expect(() => service.submitBenefitLeaf({ flowId: created.flow.id, actionId: 'act_any', expectedRevision: 99, idempotencyKey: 'late-benefit', leafId: 'benefit-a', evidenceRefs: ['page:1'], offer: { snapshot: { id: 'snap-late', url: 'https://bank.example/shared-exclusion', fetchedAt: '2026-09-16T00:00:00.000Z', contentHash: 'shared-hash', parserVersion: '1', verified: true, sourceType: 'official' }, rule: { id: 'rule-late', cardId: 'card-1', version: '1', sourceSnapshotId: 'snap-late', status: 'candidate', validFrom: '2026-01-01T00:00:00.000Z', settlementCurrency: 'TWD', match: {}, reward: { kind: 'percentage', rateBps: 100 } } } })).toThrow(/benefit leaf is not the server-owned next action/);
+    expect(() => service.submitExclusionLeaf({ flowId: created.flow.id, actionId: 'act_any', expectedRevision: 99, idempotencyKey: 'late-exclusion', leafId: 'exclude-wallet', target: 'merchant', scope: { kind: 'all_benefits' }, predicate: { field: 'transaction.merchant', op: 'EQUALS', value: 'x' }, evidenceRefs: ['page:1'] })).toThrow(/exclusion leaf is not the server-owned next action/);
+  });
+
+  it('holds candidate rules awaiting confirmation when user confirmation or verified source is missing', () => {
+    const store = new MemoryStore();
+    const service = new RewardService(store, 'user-a');
+    const created = service.createIngestion({ sourceScope: { kind: 'official_url', value: 'https://bank.example/awaiting-conf' }, idempotencyKey: 'awaiting-conf' });
+    const sourced = service.submitIngestionSource({ flowId: created.flow.id, actionId: created.nextAction?.actionId, expectedRevision: 1, sourceCapture: { sourceType: 'official', url: 'https://bank.example/awaiting-conf', retrievedAt: '2026-09-16T00:00:00.000Z', contentHash: 'awaiting-conf-hash', artifactRef: 'artifact:awaiting-conf', submitter: 'agent', submittedAt: '2026-09-16T00:00:00.000Z' } });
+    const manifested = service.submitIngestionManifest({ flowId: created.flow.id, actionId: sourced.nextAction?.actionId, expectedRevision: 2, manifest: [{ id: 'benefit-awaiting', kind: 'benefit', summary: 'benefit awaiting confirmation', evidenceLocator: 'page:1', dependsOn: [] }] });
+    const next = manifested.nextAction!;
+    const leaf = service.submitBenefitLeaf({ flowId: created.flow.id, actionId: next.actionId, expectedRevision: next.expectedRevision, idempotencyKey: 'leaf-awaiting-1', leafId: 'benefit-awaiting', evidenceRefs: ['page:1'], offer: { snapshot: { id: 'snapshot-awaiting', url: 'https://bank.example/awaiting-conf', fetchedAt: '2026-09-16T00:00:00.000Z', contentHash: 'awaiting-conf-hash', parserVersion: '1', verified: true, sourceType: 'official' }, rule: { id: 'rule-awaiting', cardId: 'card-1', version: '1', sourceSnapshotId: 'snapshot-awaiting', status: 'candidate', validFrom: '2026-01-01T00:00:00.000Z', settlementCurrency: 'TWD', match: {}, reward: { kind: 'percentage', rateBps: 200 }, requires: ['user_confirmation'] } } });
+    const finalizeAction = leaf.flow.nextAction!;
+    const finalized = service.finalizeIngestion({ flowId: created.flow.id, actionId: finalizeAction.actionId, expectedRevision: finalizeAction.expectedRevision });
+    expect(finalized.proof.activatedRules).toEqual([]);
+    expect(finalized.proof.awaitingConfirmationRules).toEqual([{ ruleId: 'rule-awaiting', ruleVersion: '1', reason: 'rule requires user confirmation' }]);
+    expect(store.read().rules.find((r) => r.id === 'rule-awaiting')?.status).toBe('candidate');
+  });
+
+  it('supersedes matching predecessor rules atomically and rejects cross-card supersession', () => {
+    const store = new MemoryStore();
+    const service = new RewardService(store, 'user-a');
+    // Seed existing active rule on card-1 and active rule on card-2
+    service.upsertOffer(
+      { id: 'snap-seed-1', url: 'https://bank.example/seed-1', fetchedAt: '2026-01-01T00:00:00.000Z', contentHash: 'seed-hash-1', parserVersion: '1', verified: true, sourceType: 'official' },
+      { id: 'rule-seed-card1', cardId: 'card-1', version: '1', sourceSnapshotId: 'snap-seed-1', status: 'active', validFrom: '2026-01-01T00:00:00.000Z', settlementCurrency: 'TWD', match: {}, reward: { kind: 'percentage', rateBps: 100 } }
+    );
+    service.upsertOffer(
+      { id: 'snap-seed-2', url: 'https://bank.example/seed-2', fetchedAt: '2026-01-01T00:00:00.000Z', contentHash: 'seed-hash-2', parserVersion: '1', verified: true, sourceType: 'official' },
+      { id: 'rule-seed-card2', cardId: 'card-2', version: '1', sourceSnapshotId: 'snap-seed-2', status: 'active', validFrom: '2026-01-01T00:00:00.000Z', settlementCurrency: 'TWD', match: {}, reward: { kind: 'percentage', rateBps: 100 } }
+    );
+
+    // 1. Cross-card supersession fails closed
+    const crossIngestion = service.createIngestion({ sourceScope: { kind: 'official_url', value: 'https://bank.example/cross' }, idempotencyKey: 'cross-ingest' });
+    const crossSourced = service.submitIngestionSource({ flowId: crossIngestion.flow.id, actionId: crossIngestion.nextAction?.actionId, expectedRevision: 1, sourceCapture: { sourceType: 'official', url: 'https://bank.example/cross', retrievedAt: '2026-09-16T00:00:00.000Z', contentHash: 'cross-hash', artifactRef: 'artifact:cross', submitter: 'agent', submittedAt: '2026-09-16T00:00:00.000Z' } });
+    const crossManifested = service.submitIngestionManifest({ flowId: crossIngestion.flow.id, actionId: crossSourced.nextAction?.actionId, expectedRevision: 2, manifest: [{ id: 'leaf-cross', kind: 'benefit', summary: 'cross-card attempt', evidenceLocator: 'page:1', dependsOn: [] }] });
+    const crossLeaf = service.submitBenefitLeaf({ flowId: crossIngestion.flow.id, actionId: crossManifested.nextAction!.actionId, expectedRevision: crossManifested.nextAction!.expectedRevision, idempotencyKey: 'cross-leaf-1', leafId: 'leaf-cross', evidenceRefs: ['page:1'], offer: { snapshot: { id: 'snap-cross', url: 'https://bank.example/cross', fetchedAt: '2026-09-16T00:00:00.000Z', contentHash: 'cross-hash', parserVersion: '1', verified: true, sourceType: 'official' }, rule: { id: 'rule-new-card1', cardId: 'card-1', version: '1', sourceSnapshotId: 'snap-cross', status: 'candidate', validFrom: '2026-01-01T00:00:00.000Z', settlementCurrency: 'TWD', match: {}, reward: { kind: 'percentage', rateBps: 300 }, supersedesRuleId: 'rule-seed-card2' } } });
+    expect(() => service.finalizeIngestion({ flowId: crossIngestion.flow.id, actionId: crossLeaf.flow.nextAction!.actionId, expectedRevision: crossLeaf.flow.nextAction!.expectedRevision })).toThrow(/superseded active rule is missing, card mismatched, or no longer active/);
+    expect(store.read().rules.find((r) => r.id === 'rule-seed-card2')?.status).toBe('active');
+
+    // 2. Matching card supersession succeeds and supersedes predecessor
+    const validIngestion = service.createIngestion({ sourceScope: { kind: 'official_url', value: 'https://bank.example/valid-super' }, idempotencyKey: 'valid-super' });
+    const validSourced = service.submitIngestionSource({ flowId: validIngestion.flow.id, actionId: validIngestion.nextAction?.actionId, expectedRevision: 1, sourceCapture: { sourceType: 'official', url: 'https://bank.example/valid-super', retrievedAt: '2026-09-16T00:00:00.000Z', contentHash: 'valid-super-hash', artifactRef: 'artifact:valid-super', submitter: 'agent', submittedAt: '2026-09-16T00:00:00.000Z' } });
+    const validManifested = service.submitIngestionManifest({ flowId: validIngestion.flow.id, actionId: validSourced.nextAction?.actionId, expectedRevision: 2, manifest: [{ id: 'leaf-valid', kind: 'benefit', summary: 'valid supersession', evidenceLocator: 'page:1', dependsOn: [] }] });
+    const validLeaf = service.submitBenefitLeaf({ flowId: validIngestion.flow.id, actionId: validManifested.nextAction!.actionId, expectedRevision: validManifested.nextAction!.expectedRevision, idempotencyKey: 'valid-leaf-1', leafId: 'leaf-valid', evidenceRefs: ['page:1'], offer: { snapshot: { id: 'snap-valid-super', url: 'https://bank.example/valid-super', fetchedAt: '2026-09-16T00:00:00.000Z', contentHash: 'valid-super-hash', parserVersion: '1', verified: true, sourceType: 'official' }, rule: { id: 'rule-seed-card1-v2', cardId: 'card-1', version: '2', sourceSnapshotId: 'snap-valid-super', status: 'candidate', validFrom: '2026-01-01T00:00:00.000Z', settlementCurrency: 'TWD', match: {}, reward: { kind: 'percentage', rateBps: 300 }, supersedesRuleId: 'rule-seed-card1' } } });
+    const finalized = service.finalizeIngestion({ flowId: validIngestion.flow.id, actionId: validLeaf.flow.nextAction!.actionId, expectedRevision: validLeaf.flow.nextAction!.expectedRevision });
+    expect(finalized.proof.activatedRules).toEqual([{ ruleId: 'rule-seed-card1-v2', ruleVersion: '2' }]);
+    expect(store.read().rules.find((r) => r.id === 'rule-seed-card1')?.status).toBe('superseded');
+    expect(store.read().rules.find((r) => r.id === 'rule-seed-card1-v2')?.status).toBe('active');
+  });
+
+  it('fails closed when snapshot or rule validTo is expired at finalization', () => {
+    const fixedNow = new Date('2026-09-16T12:00:00.000Z');
+    const store = new MemoryStore();
+    const service = new RewardService(store, 'user-a', { now: () => fixedNow });
+
+    // Expired snapshot
+    const expiredSnapFlow = service.createIngestion({ sourceScope: { kind: 'official_url', value: 'https://bank.example/expired-snap' }, idempotencyKey: 'exp-snap' });
+    const snapSourced = service.submitIngestionSource({ flowId: expiredSnapFlow.flow.id, actionId: expiredSnapFlow.nextAction?.actionId, expectedRevision: 1, sourceCapture: { sourceType: 'official', url: 'https://bank.example/expired-snap', retrievedAt: '2026-09-16T00:00:00.000Z', contentHash: 'exp-snap-hash', artifactRef: 'artifact:exp-snap', submitter: 'agent', submittedAt: '2026-09-16T00:00:00.000Z' } });
+    const snapManifested = service.submitIngestionManifest({ flowId: expiredSnapFlow.flow.id, actionId: snapSourced.nextAction?.actionId, expectedRevision: 2, manifest: [{ id: 'leaf-exp-snap', kind: 'benefit', summary: 'expired snapshot', evidenceLocator: 'p:1', dependsOn: [] }] });
+    const snapLeaf = service.submitBenefitLeaf({ flowId: expiredSnapFlow.flow.id, actionId: snapManifested.nextAction!.actionId, expectedRevision: snapManifested.nextAction!.expectedRevision, idempotencyKey: 'exp-snap-leaf', leafId: 'leaf-exp-snap', evidenceRefs: ['p:1'], offer: { snapshot: { id: 'snap-expired', url: 'https://bank.example/expired-snap', fetchedAt: '2026-08-01T00:00:00.000Z', validTo: '2026-09-01T00:00:00.000Z', contentHash: 'exp-snap-hash', parserVersion: '1', verified: true, sourceType: 'official' }, rule: { id: 'rule-exp-snap', cardId: 'card-1', version: '1', sourceSnapshotId: 'snap-expired', status: 'candidate', validFrom: '2026-01-01T00:00:00.000Z', settlementCurrency: 'TWD', match: {}, reward: { kind: 'percentage', rateBps: 100 } } } });
+    expect(() => service.finalizeIngestion({ flowId: expiredSnapFlow.flow.id, actionId: snapLeaf.flow.nextAction!.actionId, expectedRevision: snapLeaf.flow.nextAction!.expectedRevision })).toThrow(/candidate offer source snapshot is expired/);
+
+    // Expired rule
+    const expiredRuleFlow = service.createIngestion({ sourceScope: { kind: 'official_url', value: 'https://bank.example/expired-rule' }, idempotencyKey: 'exp-rule' });
+    const ruleSourced = service.submitIngestionSource({ flowId: expiredRuleFlow.flow.id, actionId: expiredRuleFlow.nextAction?.actionId, expectedRevision: 1, sourceCapture: { sourceType: 'official', url: 'https://bank.example/expired-rule', retrievedAt: '2026-09-16T00:00:00.000Z', contentHash: 'exp-rule-hash', artifactRef: 'artifact:exp-rule', submitter: 'agent', submittedAt: '2026-09-16T00:00:00.000Z' } });
+    const ruleManifested = service.submitIngestionManifest({ flowId: expiredRuleFlow.flow.id, actionId: ruleSourced.nextAction?.actionId, expectedRevision: 2, manifest: [{ id: 'leaf-exp-rule', kind: 'benefit', summary: 'expired rule', evidenceLocator: 'p:1', dependsOn: [] }] });
+    const ruleLeaf = service.submitBenefitLeaf({ flowId: expiredRuleFlow.flow.id, actionId: ruleManifested.nextAction!.actionId, expectedRevision: ruleManifested.nextAction!.expectedRevision, idempotencyKey: 'exp-rule-leaf', leafId: 'leaf-exp-rule', evidenceRefs: ['p:1'], offer: { snapshot: { id: 'snap-ok', url: 'https://bank.example/expired-rule', fetchedAt: '2026-08-01T00:00:00.000Z', contentHash: 'exp-rule-hash', parserVersion: '1', verified: true, sourceType: 'official' }, rule: { id: 'rule-expired', cardId: 'card-1', version: '1', sourceSnapshotId: 'snap-ok', status: 'candidate', validFrom: '2026-01-01T00:00:00.000Z', validTo: '2026-09-01T00:00:00.000Z', settlementCurrency: 'TWD', match: {}, reward: { kind: 'percentage', rateBps: 100 } } } });
+    expect(() => service.finalizeIngestion({ flowId: expiredRuleFlow.flow.id, actionId: ruleLeaf.flow.nextAction!.actionId, expectedRevision: ruleLeaf.flow.nextAction!.expectedRevision })).toThrow(/candidate rule is expired/);
   });
 
   it('rejects ambiguous shared-exclusion scope and requires a reason to ignore an exclusion', () => {
