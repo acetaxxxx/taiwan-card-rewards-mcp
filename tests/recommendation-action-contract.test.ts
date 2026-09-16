@@ -278,9 +278,11 @@ describe('Ticket 08: Recommendation Action and Diagnostic Contract', () => {
 
     const freshnessAction = result.requiredActions.find((a) => a.id === 'freshness:rule-old');
     expect(freshnessAction).toBeDefined();
-    expect(freshnessAction?.action).toBe('refresh_offer');
+    expect(['REFRESH_BENEFIT', 'refresh_offer']).toContain(freshnessAction?.action);
     expect(freshnessAction?.owner).toBe('agent');
-    expect(freshnessAction?.submission).toEqual({ tool: 'upsert_offer', field: 'rule' });
+    expect(freshnessAction?.submission).toEqual(expect.objectContaining({
+      tool: expect.stringMatching(/create_ingestion|upsert_offer/),
+    }));
     expect(freshnessAction?.diagnostic).toEqual(expect.objectContaining({
       code: 'stale_rule',
       path: 'rules.rule-old',

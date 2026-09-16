@@ -2,16 +2,31 @@ import * as crypto from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { type LedgerStore, type RecordedTransaction, type StoredState, contentHash } from './store.js';
 import { EventRewardLedger, convertMinor, createPaymentEventRewardCandidate, decidePaymentEventRewards, evaluateOffer, evaluatePredicate, matchPaymentEvent, matchPaymentEventChain, matchPaymentRouteSelector, rankCards, resolveCyclePeriodKey } from './evaluator.js';
-import type { CardDescriptor, CardSwitchInput, CardSwitchProjection, CardSwitchStatus, CapPeriod, CapPoolDefinition, Diagnostic, EvaluationContext, MerchantIdentity, MerchantResolution, Money, OfferConfirmation, OfferRuleVersion, OfferSourceSnapshot, RewardBreakdown, RewardComponentRecord, TransactionTuple, UserBenefitInput, UserBenefitStatus, EvidenceRecord, PaymentRouteRecord, PaymentCapabilityRecord, PaymentAccountRecord, EventRewardLedgerRecord, EventRewardReversalRecord, PaymentPathRequest, PaymentPathRecommendation, PaymentPathCandidate, PaymentPathEvent, EligibilityFact, RewardValuationSnapshot, FxResolutionRequest, FxEvaluationContext, AppliedFxRate, RecommendationIntent, RecommendationIntentResult, IntentCandidate, FxSnapshot, ListTransactionsOptions, ListTransactionsResult, TransactionSummaryItem, TransactionDetailItem, FundingInstrument, TransactionListItem, IngestionFlowRecord, IngestionSourceScope, IngestionDraftTombstone, IngestionBenefitLeafSubmission, IngestionBenefitArtifact, IngestionExclusionArtifact, AppliedExclusion, IngestionCompletionProof } from './types.js';
+import type { CardDescriptor, CardSwitchInput, CardSwitchProjection, CardSwitchStatus, CapPeriod, CapPoolDefinition, Diagnostic, EvaluationContext, MerchantIdentity, MerchantResolution, Money, OfferConfirmation, OfferRuleVersion, OfferSourceSnapshot, RewardBreakdown, RewardComponentRecord, TransactionTuple, UserBenefitInput, UserBenefitStatus, EvidenceRecord, PaymentRouteRecord, PaymentCapabilityRecord, PaymentAccountRecord, EventRewardLedgerRecord, EventRewardReversalRecord, PaymentPathRequest, PaymentPathRecommendation, PaymentPathCandidate, PaymentPathEvent, EligibilityFact, RewardValuationSnapshot, FxResolutionRequest, FxEvaluationContext, AppliedFxRate, RecommendationIntent, RecommendationIntentResult, IntentCandidate, FxSnapshot, ListTransactionsOptions, ListTransactionsResult, TransactionSummaryItem, TransactionDetailItem, FundingInstrument, TransactionListItem, IngestionFlowRecord, IngestionSourceScope, IngestionDraftTombstone, IngestionBenefitLeafSubmission, IngestionBenefitArtifact, IngestionExclusionArtifact, AppliedExclusion, IngestionCompletionProof, IngestionParentContinuation } from './types.js';
 import type { StartupConfig } from './startup.js';
 import { RewardServiceError } from './errors.js';
-import { validateCard, validateCapPool, validateConfirmation, validateEligibilityFact, validateMerchant, validateRecommendationTransaction, validateRule, validateSnapshot, validateTransaction, validateEvidence, validateFactCandidate, validatePaymentRouteRecord, validatePaymentCapability, validatePaymentAccountRecord, validateEventRewardInput, validatePaymentEvent, validatePaymentEventChainRule, validatePaymentEventRule, validateRewardValuationSnapshot, validateListTransactionsOptions, validateIngestionSourceScope, validateIngestionSourceCapture, validateIngestionManifest, validateIngestionBenefitLeaf, validateIngestionExclusionLeaf } from './validation.js';
+import { validateCard, validateCapPool, validateConfirmation, validateEligibilityFact, validateMerchant, validateRecommendationTransaction, validateRule, validateSnapshot, validateTransaction, validateEvidence, validateFactCandidate, validatePaymentRouteRecord, validatePaymentCapability, validatePaymentAccountRecord, validateEventRewardInput, validatePaymentEvent, validatePaymentEventChainRule, validatePaymentEventRule, validateRewardValuationSnapshot, validateListTransactionsOptions, validateIngestionSourceScope, validateIngestionSourceCapture, validateIngestionManifest, validateIngestionBenefitLeaf, validateIngestionExclusionLeaf, validateIngestionParentContinuation } from './validation.js';
 import { cardSwitchStatus, projectionFromInput } from './card-switch.js';
 import { buildFxResolutionRequest, freezeAppliedFxRate, deriveConversionOwner, isFxFresh, isFxCompatible, getFxScopeSpecificity, findBestMatchingFx } from './fx.js';
 import { validateRecommendationIntent, validateRecommendationSupplementalFacts } from './validation.js';
 import { projectPage } from './projections.js';
 
 export { RewardServiceError } from './errors.js';
+
+export function computeIntentFingerprint(intent: RecommendationIntent): string {
+  const normalized = {
+    merchant: intent.merchant,
+    amount: intent.amount,
+    country: intent.country,
+    market: intent.market,
+    channel: intent.channel,
+    paymentMethod: intent.paymentMethod,
+    occurredAt: intent.occurredAt,
+    cardIds: intent.cardIds,
+    routeIds: intent.routeIds,
+  };
+  return crypto.createHash('sha256').update(JSON.stringify(normalized)).digest('hex').slice(0, 16);
+}
 
 export interface RemainingCap { ruleId: string; usageKey: string; remaining: Money; }
 
@@ -76,20 +91,106 @@ export class RewardService {
     const item = input && typeof input === 'object' && !Array.isArray(input) ? input as Record<string, unknown> : (() => { throw new RewardServiceError('INVALID_INPUT', 'ingestion create input must be an object'); })();
     const sourceScope = validateIngestionSourceScope(item.sourceScope);
     const idempotencyKey = typeof item.idempotencyKey === 'string' && /^[A-Za-z0-9][A-Za-z0-9_:-]{0,127}$/.test(item.idempotencyKey) ? item.idempotencyKey : (() => { throw new RewardServiceError('INVALID_INPUT', 'idempotencyKey must be a valid identifier'); })();
+    let parentContinuation: IngestionParentContinuation | undefined;
+    if (item.parentContinuation !== undefined) {
+      parentContinuation = validateIngestionParentContinuation(item.parentContinuation);
+      if (parentContinuation.sourceScope && !this.sameSourceScope(parentContinuation.sourceScope, sourceScope)) {
+        throw new RewardServiceError('INVALID_INPUT', 'parent continuation source scope does not match ingestion source scope');
+      }
+    }
     this.sweepExpiredIngestions();
     const now = this.workflowNow();
     const result = this.store.update((state) => {
       const byKey = state.ingestionFlows.find((flow) => flow.ownerUser === ownerUser && flow.idempotencyKey === idempotencyKey);
       if (byKey && !this.sameSourceScope(byKey.sourceScope, sourceScope)) throw new RewardServiceError('IDEMPOTENCY_CONFLICT', 'idempotencyKey already belongs to a different ingestion source scope', { code: 'IDEMPOTENCY_CONFLICT', path: 'idempotencyKey', requiredFacts: [], retryAction: 'create_ingestion_with_new_idempotency_key', affectedIds: [byKey.id] });
-      if (byKey) return;
+      if (byKey) {
+        if (parentContinuation?.childFlowId && parentContinuation.childFlowId !== byKey.id) {
+          throw new RewardServiceError('INVALID_INPUT', 'childFlowId in continuation does not match existing flow');
+        }
+        if (parentContinuation && !byKey.parentContinuation) {
+          byKey.parentContinuation = { ...parentContinuation, childFlowId: byKey.id };
+        }
+        return;
+      }
       const existing = state.ingestionFlows.find((flow) => flow.ownerUser === ownerUser && flow.status !== 'complete' && this.sameSourceScope(flow.sourceScope, sourceScope));
-      if (existing) return;
+      if (existing) {
+        if (parentContinuation?.childFlowId && parentContinuation.childFlowId !== existing.id) {
+          throw new RewardServiceError('INVALID_INPUT', 'childFlowId in continuation does not match existing flow');
+        }
+        if (parentContinuation && !existing.parentContinuation) {
+          existing.parentContinuation = { ...parentContinuation, childFlowId: existing.id };
+        }
+        return;
+      }
       const stamp = now.toISOString();
-      state.ingestionFlows.push({ id: `flow_${crypto.randomUUID().replace(/-/g, '')}`, ownerUser, sourceScope, revision: 1, status: 'awaiting_source', idempotencyKey, createdAt: stamp, lastActivityAt: stamp, expiresAt: new Date(now.getTime() + this.ingestionDraftTtlMs).toISOString() });
+      const flowId = `flow_${crypto.randomUUID().replace(/-/g, '')}`;
+      if (parentContinuation?.childFlowId && parentContinuation.childFlowId !== flowId) {
+        throw new RewardServiceError('INVALID_INPUT', 'childFlowId in continuation does not match newly created flow');
+      }
+      state.ingestionFlows.push({
+        id: flowId,
+        ownerUser,
+        sourceScope,
+        revision: 1,
+        status: 'awaiting_source',
+        idempotencyKey,
+        createdAt: stamp,
+        lastActivityAt: stamp,
+        expiresAt: new Date(now.getTime() + this.ingestionDraftTtlMs).toISOString(),
+        ...(parentContinuation ? { parentContinuation: { ...parentContinuation, childFlowId: flowId } } : {}),
+      });
     });
     const flow = result.ingestionFlows.find((candidate) => candidate.ownerUser === ownerUser && candidate.idempotencyKey === idempotencyKey) ?? result.ingestionFlows.find((candidate) => candidate.ownerUser === ownerUser && candidate.status !== 'complete' && this.sameSourceScope(candidate.sourceScope, sourceScope));
     if (!flow) throw new RewardServiceError('STORE_UNAVAILABLE', 'ingestion flow was not persisted');
     return this.presentIngestion(flow);
+  }
+
+  flagIngestionReview(flowId: string, reason = 'ingestion requires review'): IngestionFlowRecord {
+    const ownerUser = this.requireIngestionOwner();
+    let updated: IngestionFlowRecord | undefined;
+    this.store.update((state) => {
+      const flow = state.ingestionFlows.find((c) => c.id === flowId && c.ownerUser === ownerUser);
+      if (!flow) throw new RewardServiceError('FLOW_NOT_FOUND', `ingestion flow ${flowId} not found`);
+      if (flow.status === 'complete') throw new RewardServiceError('INVALID_FLOW_ACTION', 'completed flow cannot be marked needs_review');
+      flow.status = 'needs_review';
+      flow.terminalReason = reason;
+      flow.lastActivityAt = this.workflowNow().toISOString();
+      updated = flow;
+    });
+    if (!updated) throw new RewardServiceError('STORE_UNAVAILABLE', 'failed to update flow status');
+    return updated;
+  }
+
+  failIngestion(flowId: string, reason = 'ingestion failed'): IngestionFlowRecord {
+    const ownerUser = this.requireIngestionOwner();
+    let updated: IngestionFlowRecord | undefined;
+    this.store.update((state) => {
+      const flow = state.ingestionFlows.find((c) => c.id === flowId && c.ownerUser === ownerUser);
+      if (!flow) throw new RewardServiceError('FLOW_NOT_FOUND', `ingestion flow ${flowId} not found`);
+      if (flow.status === 'complete') throw new RewardServiceError('INVALID_FLOW_ACTION', 'completed flow cannot be failed');
+      flow.status = 'failed';
+      flow.terminalReason = reason;
+      flow.lastActivityAt = this.workflowNow().toISOString();
+      updated = flow;
+    });
+    if (!updated) throw new RewardServiceError('STORE_UNAVAILABLE', 'failed to update flow status');
+    return updated;
+  }
+
+  cancelIngestion(flowId: string, reason = 'ingestion cancelled'): IngestionFlowRecord {
+    const ownerUser = this.requireIngestionOwner();
+    let updated: IngestionFlowRecord | undefined;
+    this.store.update((state) => {
+      const flow = state.ingestionFlows.find((c) => c.id === flowId && c.ownerUser === ownerUser);
+      if (!flow) throw new RewardServiceError('FLOW_NOT_FOUND', `ingestion flow ${flowId} not found`);
+      if (flow.status === 'complete') throw new RewardServiceError('INVALID_FLOW_ACTION', 'completed flow cannot be cancelled');
+      flow.status = 'cancelled';
+      flow.terminalReason = reason;
+      flow.lastActivityAt = this.workflowNow().toISOString();
+      updated = flow;
+    });
+    if (!updated) throw new RewardServiceError('STORE_UNAVAILABLE', 'failed to update flow status');
+    return updated;
   }
 
   inspectIngestion(flowId: string): { flow: IngestionFlowRecord | Omit<IngestionDraftTombstone, 'retentionExpiresAt'> & { status: 'expired' }; nextAction: { actionId: string; kind: 'SUBMIT_SOURCE' | 'SUBMIT_MANIFEST' | 'PROCESS_LEAF' | 'FINALIZE'; expectedRevision: number; completionCondition: string; leafId?: string } | undefined } {
@@ -299,6 +400,41 @@ export class RewardService {
   }
 
   private sameSourceScope(a: IngestionSourceScope, b: IngestionSourceScope): boolean { return a.kind === b.kind && a.value === b.value; }
+
+  getRuleSourceScope(state: StoredState, rule: OfferRuleVersion, cardId: string): IngestionSourceScope {
+    const snapshot = state.snapshots.find((s) => s.id === rule.sourceSnapshotId);
+    if (snapshot?.url && /^https:\/\//i.test(snapshot.url)) {
+      try {
+        const parsed = new URL(snapshot.url);
+        if (parsed.protocol === 'https:' && !parsed.username && !parsed.password) {
+          return { kind: 'official_url', value: snapshot.url!.split('#')[0]! };
+        }
+      } catch {
+        // ignore invalid URL
+      }
+    }
+    const rawFamily = rule.familyId || `card-${cardId}`;
+    const normalizedFamily = rawFamily.toLowerCase().replace(/[^a-z0-9_:-]/g, '-');
+    return { kind: 'offer_family', value: normalizedFamily };
+  }
+
+  collectRecommendationSourceScopes(state: StoredState): IngestionSourceScope[] {
+    const scopes: IngestionSourceScope[] = [];
+    for (const card of state.cards) {
+      const cardRules = state.rules.filter((r) => r.cardId === card.id && (r.ownerUser === this.metadataUser || r.ownerUser === undefined));
+      for (const rule of cardRules) {
+        const scope = this.getRuleSourceScope(state, rule, card.id);
+        if (!scopes.some((s) => this.sameSourceScope(s, scope))) {
+          scopes.push(scope);
+        }
+      }
+      const defaultCardScope: IngestionSourceScope = { kind: 'offer_family', value: `card-${card.id}`.toLowerCase().replace(/[^a-z0-9_:-]/g, '-') };
+      if (!scopes.some((s) => this.sameSourceScope(s, defaultCardScope))) {
+        scopes.push(defaultCardScope);
+      }
+    }
+    return scopes;
+  }
 
   private captureMatchesScope(capture: NonNullable<IngestionFlowRecord['sourceCapture']>, scope: IngestionSourceScope): boolean {
     if (scope.kind === 'official_url') return capture.sourceType === 'official' && capture.url === scope.value;
@@ -1045,15 +1181,56 @@ export class RewardService {
     rawMerchant = details.canonicalId ?? details.name ?? details.rawStatement ?? details.canonicalNameZhHant!;
     country = input.country ?? details.country;
     market = input.market ?? details.market;
+    const targetChildFlowId = input.childFlowId ?? input.resumedFlowId ?? retryFacts?.childFlowId ?? retryFacts?.resumedFlowId;
+    let targetChildFlow: IngestionFlowRecord | undefined;
+    if (targetChildFlowId !== undefined) {
+      const flow = state.ingestionFlows.find((c) => c.id === targetChildFlowId);
+      if (!flow) {
+        throw new RewardServiceError('FLOW_NOT_FOUND', `child ingestion flow ${targetChildFlowId} not found`);
+      }
+      if (this.metadataUser && flow.ownerUser !== this.metadataUser) {
+        throw new RewardServiceError('UNAUTHORIZED', `child ingestion flow ${targetChildFlowId} belongs to another user`);
+      }
+      const {
+        expectedResultVersion: _expectedResultVersion,
+        supplementalFacts: _supplementalFacts,
+        resultVersion: _resultVersion,
+        cursor: _cursor,
+        page: _page,
+        childFlowId: _childFlowId,
+        resumedFlowId: _resumedFlowId,
+        ...baselineIntentForFingerprint
+      } = originalRetryIntent;
+      if (flow.parentContinuation) {
+        const currentFingerprint = computeIntentFingerprint(baselineIntentForFingerprint);
+        if (flow.parentContinuation.intentFingerprint !== currentFingerprint) {
+          throw new RewardServiceError('INVALID_INPUT', `child ingestion flow ${targetChildFlowId} continuation does not match recommendation intent fingerprint`);
+        }
+      }
+      const validScopes = this.collectRecommendationSourceScopes(state);
+      if (!validScopes.some((s) => this.sameSourceScope(s, flow.sourceScope))) {
+        throw new RewardServiceError('INVALID_INPUT', `child ingestion flow ${targetChildFlowId} source scope does not match any card or rule in this recommendation`);
+      }
+      targetChildFlow = flow;
+    }
     const expectedResultVersion = input.expectedResultVersion ?? (retryFacts ? input.resultVersion : undefined);
-    const baselineIntent = { ...originalRetryIntent, expectedResultVersion: undefined, supplementalFacts: undefined, resultVersion: undefined, cursor: undefined, page: undefined };
+    const {
+      expectedResultVersion: _baselineExpectedResultVersion,
+      supplementalFacts: _baselineSupplementalFacts,
+      resultVersion: _baselineResultVersion,
+      cursor: _baselineCursor,
+      page: _baselinePage,
+      childFlowId: _baselineChildFlowId,
+      resumedFlowId: _baselineResumedFlowId,
+      ...baselineIntent
+    } = originalRetryIntent;
     const baselineVersion = crypto.createHash('sha256').update(JSON.stringify({ state, intent: baselineIntent, evaluatedAt })).digest('hex').slice(0, 16);
     if (expectedResultVersion !== undefined && expectedResultVersion !== baselineVersion) {
       throw new RewardServiceError('INVALID_INPUT', 'recommendation resultVersion is stale; restart the original intent', { code: 'stale_fact', path: 'expectedResultVersion', requiredFacts: ['current recommendation resultVersion'], retryAction: 'restart_recommendation', nextAction: 'restart_recommendation', message: 'the recommendation changed before the typed retry was submitted' });
     }
     const resultVersion = crypto.createHash('sha256').update(JSON.stringify({
       state,
-      intent: { ...input, cursor: undefined, page: undefined, resultVersion: undefined, expectedResultVersion: undefined, supplementalFacts: undefined },
+      intent: { ...input, cursor: undefined, page: undefined, resultVersion: undefined, expectedResultVersion: undefined, supplementalFacts: undefined, childFlowId: undefined, resumedFlowId: undefined },
       evaluatedAt,
     })).digest('hex').slice(0, 16);
     if (cursorVersion !== undefined && cursorVersion !== resultVersion) throw new RewardServiceError('INVALID_INPUT', 'recommendation resultVersion changed; restart the recommendation');
@@ -1257,7 +1434,7 @@ export class RewardService {
         if (!rule.familyId) return true;
         const family = rules.filter(candidate => candidate.familyId === rule.familyId && candidate.status === 'active');
         const latest = family.at(-1);
-        return latest?.id === rule.id && latest.version === rule.version;
+        return latest ? (latest.id === rule.id && latest.version === rule.version) : (rules.filter(candidate => candidate.familyId === rule.familyId).at(-1)?.id === rule.id);
       });
     const projectRule = (rule: OfferRuleVersion, result?: RewardBreakdown): IntentCandidate['matchedRules'][number] => ({
       ruleId: rule.id, ruleVersion: rule.version, component: rule.componentKind ?? 'card_issuer',
@@ -1355,23 +1532,55 @@ export class RewardService {
             }
           }
           if (diagnostic.code === 'stale_rule' || rule.status === 'stale') {
+            const sourceScope = this.getRuleSourceScope(state, rule, card.id);
+            const matchingChildFlow = (targetChildFlow && this.sameSourceScope(targetChildFlow.sourceScope, sourceScope))
+              ? targetChildFlow
+              : state.ingestionFlows.find((flow) => flow.ownerUser === this.metadataUser && this.sameSourceScope(flow.sourceScope, sourceScope) && flow.status !== 'complete');
+
+            const isTerminalChild = matchingChildFlow && ['failed', 'cancelled', 'needs_review'].includes(matchingChildFlow.status);
+            const isIncompleteChild = matchingChildFlow && ['awaiting_source', 'awaiting_manifest', 'processing_leaves', 'ready_to_finalize'].includes(matchingChildFlow.status);
+
+            const diagCode = isTerminalChild ? (matchingChildFlow.status === 'cancelled' ? 'flow_cancelled' : matchingChildFlow.status === 'failed' ? 'flow_failed' : 'needs_review') : 'stale_rule';
+            const reasonMsg = isTerminalChild
+              ? `child ingestion flow ${matchingChildFlow.id} ${matchingChildFlow.status}: ${matchingChildFlow.terminalReason || 'terminal without update'}`
+              : isIncompleteChild
+              ? `child ingestion flow ${matchingChildFlow.id} is in progress (${matchingChildFlow.status})`
+              : `offer rule ${rule.id} is stale and requires freshness verification`;
+
             addAction({
               id: `freshness:${rule.id}`,
-              action: 'refresh_offer',
+              action: 'REFRESH_BENEFIT',
               owner: 'agent',
               path: `rules.${rule.id}`,
               requiredFacts: ['current verified offer terms', 'rule confirmation'],
               candidateIds: [`card:${card.id}`],
-              submission: { tool: 'upsert_offer', field: 'rule' },
-              completionCondition: `repeat recommend after refreshing offer terms or confirming current benefit validity for rule ${rule.id}`,
+              submission: isIncompleteChild ? { tool: 'get_ingestion', field: 'flowId' } : { tool: 'create_ingestion', field: 'sourceScope' },
+              completionCondition: isIncompleteChild
+                ? `complete ingestion flow ${matchingChildFlow.id} to refresh rule ${rule.id}`
+                : isTerminalChild
+                ? `child ingestion flow ${matchingChildFlow.id} ${matchingChildFlow.status}; restart ingestion to refresh rule ${rule.id}`
+                : `repeat recommend after refreshing offer terms via ingestion for rule ${rule.id}`,
               diagnostic: {
-                code: 'stale_rule',
+                code: diagCode,
                 path: `rules.${rule.id}`,
                 requiredFacts: ['current verified offer terms'],
-                retryAction: 'refresh_or_confirm_offer',
-                nextAction: 'refresh_or_confirm_offer',
-                message: `offer rule ${rule.id} is stale and requires freshness verification`,
+                retryAction: isIncompleteChild ? 'complete_ingestion' : 'create_ingestion',
+                nextAction: isIncompleteChild ? 'complete_ingestion' : 'create_ingestion',
+                message: reasonMsg,
                 candidateIds: [`card:${card.id}`],
+              },
+              refreshBenefit: {
+                sourceScope,
+                familyId: rule.familyId || `card-${card.id}`,
+                sourceSnapshotId: rule.sourceSnapshotId,
+                ruleId: rule.id,
+                cardId: card.id,
+                reason: reasonMsg,
+                freshnessRequired: {
+                  asOf: evaluatedAt,
+                  maxAgeSeconds: 86400,
+                },
+                ...(matchingChildFlow ? { childFlowId: matchingChildFlow.id, flowStatus: matchingChildFlow.status } : {}),
               },
             });
             continue;
@@ -1419,6 +1628,17 @@ export class RewardService {
             : 'using the card scheme exchange rate for planned estimate',
         };
       })();
+      const terminalChildFlows = rules.map((r) => {
+        const scope = this.getRuleSourceScope(state, r, card.id);
+        return (targetChildFlow && this.sameSourceScope(targetChildFlow.sourceScope, scope))
+          ? targetChildFlow
+          : state.ingestionFlows.find((f) => f.ownerUser === this.metadataUser && this.sameSourceScope(f.sourceScope, scope) && ['failed', 'cancelled', 'needs_review'].includes(f.status));
+      }).filter((f): f is IngestionFlowRecord => Boolean(f));
+      const terminalReasons = terminalChildFlows.map((f) => `child ingestion flow ${f.id} ${f.status}: ${f.terminalReason || 'terminal without update'}`);
+      const exclusionReasons = [
+        ...(row?.unknownReasons ?? (!rules.length ? ['no known offer rules'] : [])),
+        ...terminalReasons,
+      ];
       candidates.push({
         id: `card:${card.id}`, kind: 'direct_card', cardId: card.id,
         fundingSource: { kind: 'credit_card', cardId: card.id },
@@ -1429,7 +1649,7 @@ export class RewardService {
         ...(row?.status === 'ok' && row.cappedReward ? { reward: row.cappedReward } : {}),
         ...(row?.status === 'ok' && row.cappedReward && row.cappedReward.currency === transaction?.amount.currency ? { netSpend: { amountMinor: Math.max(0, (transaction?.amount.amountMinor ?? 0) - row.cappedReward.amountMinor), currency: transaction.amount.currency } } : {}),
         ...(fxEst ? { fxEstimate: fxEst } : {}),
-        exclusionReasons: row?.unknownReasons ?? (!rules.length ? ['no known offer rules'] : []),
+        exclusionReasons,
       });
     }
     let pathTruncated = false;

@@ -1,5 +1,5 @@
 import { SUPPORTED_PREDICATE_FIELDS } from './types.js';
-import type { CardDescriptor, CardProduct, CapPeriod, CapPoolDefinition, CardSwitchCampaign, CardSwitchConfirmation, CardSwitchInput, CardSwitchEnrollment, CardSwitchProjection, EligibilityFact, EvaluationContext, FxSnapshot, HeldCard, MerchantIdentity, MerchantProvenance, Money, OfferConfirmation, OfferProvenance, OfferRuleVersion, OfferSourceSnapshot, Predicate, PredicateValue, RewardBreakdown, RewardSpec, RuleMatch, TransactionTuple, PaymentRouteKind, RewardComponentKind, RewardComponentRecord, PaymentRouteContext, PaymentRouteRecord, PaymentCapabilityRecord, PaymentAccountRecord, PaymentEvent, PaymentEventKind, PaymentEventRule, PaymentEventChainRule, EventRewardLedgerRecord, EventRewardReversalRecord, EventRewardCapUsageRecord, PaymentEventRewardCandidate, PaymentEventRewardCandidateInput, PaymentEventMatch, RewardValuationSnapshot, PaymentRouteSelector, FundingInstrument, ListTransactionsOptions, TransactionTimeBasis, AppliedFxRate, FxRateType, IngestionSourceScope, IngestionFlowRecord, IngestionDraftTombstone, IngestionManifestLeaf, IngestionBenefitLeafSubmission, IngestionLocalExclusion, IngestionMerchantReference, AppliedExclusion, IngestionExclusionArtifact, IngestionExclusionLeafSubmission, IngestionExclusionScope, IngestionExclusionTarget } from './types.js';
+import type { CardDescriptor, CardProduct, CapPeriod, CapPoolDefinition, CardSwitchCampaign, CardSwitchConfirmation, CardSwitchInput, CardSwitchEnrollment, CardSwitchProjection, EligibilityFact, EvaluationContext, FxSnapshot, HeldCard, MerchantIdentity, MerchantProvenance, Money, OfferConfirmation, OfferProvenance, OfferRuleVersion, OfferSourceSnapshot, Predicate, PredicateValue, RewardBreakdown, RewardSpec, RuleMatch, TransactionTuple, PaymentRouteKind, RewardComponentKind, RewardComponentRecord, PaymentRouteContext, PaymentRouteRecord, PaymentCapabilityRecord, PaymentAccountRecord, PaymentEvent, PaymentEventKind, PaymentEventRule, PaymentEventChainRule, EventRewardLedgerRecord, EventRewardReversalRecord, EventRewardCapUsageRecord, PaymentEventRewardCandidate, PaymentEventRewardCandidateInput, PaymentEventMatch, RewardValuationSnapshot, PaymentRouteSelector, FundingInstrument, ListTransactionsOptions, TransactionTimeBasis, AppliedFxRate, FxRateType, IngestionSourceScope, IngestionFlowRecord, IngestionDraftTombstone, IngestionManifestLeaf, IngestionBenefitLeafSubmission, IngestionLocalExclusion, IngestionMerchantReference, AppliedExclusion, IngestionExclusionArtifact, IngestionExclusionLeafSubmission, IngestionExclusionScope, IngestionExclusionTarget, IngestionParentContinuation } from './types.js';
 import type { StoredState } from './store.js';
 import type { EvidenceRecord, FactCandidate } from './types.js';
 import { RewardServiceError } from './errors.js';
@@ -999,12 +999,41 @@ function validateIngestionCompletionProof(value: unknown): import('./types.js').
   };
 }
 
+export function validateIngestionParentContinuation(value: unknown): IngestionParentContinuation {
+  const item = object(value, 'ingestion parentContinuation');
+  keys(item, ['intentFingerprint', 'parentResultVersion', 'childFlowId', 'sourceScope', 'ruleFamily'], 'ingestion parentContinuation');
+  return {
+    intentFingerprint: requiredString(item.intentFingerprint, 'ingestion parentContinuation.intentFingerprint', true),
+    parentResultVersion: requiredString(item.parentResultVersion, 'ingestion parentContinuation.parentResultVersion', true),
+    ...(item.childFlowId === undefined ? {} : { childFlowId: requiredString(item.childFlowId, 'ingestion parentContinuation.childFlowId', true) }),
+    ...(item.sourceScope === undefined ? {} : { sourceScope: validateIngestionSourceScope(item.sourceScope) }),
+    ...(item.ruleFamily === undefined ? {} : { ruleFamily: requiredString(item.ruleFamily, 'ingestion parentContinuation.ruleFamily', true) }),
+  };
+}
+
 function validateIngestionFlow(value: unknown): IngestionFlowRecord {
   const item = object(value, 'ingestion flow');
-  keys(item, ['id', 'ownerUser', 'sourceScope', 'revision', 'status', 'idempotencyKey', 'createdAt', 'lastActivityAt', 'expiresAt', 'sourceCapture', 'manifest', 'benefitArtifacts', 'exclusionArtifacts', 'completionProof'], 'ingestion flow');
+  keys(item, ['id', 'ownerUser', 'sourceScope', 'revision', 'status', 'idempotencyKey', 'createdAt', 'lastActivityAt', 'expiresAt', 'sourceCapture', 'manifest', 'benefitArtifacts', 'exclusionArtifacts', 'completionProof', 'parentContinuation', 'terminalReason'], 'ingestion flow');
   const status = requiredString(item.status, 'ingestion flow.status');
   if (!['awaiting_source', 'awaiting_manifest', 'processing_leaves', 'ready_to_finalize', 'complete', 'needs_review', 'conflict', 'failed', 'cancelled', 'expired'].includes(status)) throw new RewardServiceError('INVALID_INPUT', 'ingestion flow.status is invalid');
-  return { id: requiredString(item.id, 'ingestion flow.id', true), ownerUser: requiredString(item.ownerUser, 'ingestion flow.ownerUser', true), sourceScope: validateIngestionSourceScope(item.sourceScope), revision: safeInt(item.revision, 'ingestion flow.revision', 1), status: status as IngestionFlowRecord['status'], idempotencyKey: requiredString(item.idempotencyKey, 'ingestion flow.idempotencyKey', true), createdAt: iso(item.createdAt, 'ingestion flow.createdAt'), lastActivityAt: iso(item.lastActivityAt, 'ingestion flow.lastActivityAt'), expiresAt: iso(item.expiresAt, 'ingestion flow.expiresAt'), ...(item.sourceCapture === undefined ? {} : { sourceCapture: validateIngestionSourceCapture(item.sourceCapture) }), ...(item.manifest === undefined ? {} : { manifest: validateIngestionManifest(item.manifest) }), ...(item.benefitArtifacts === undefined ? {} : { benefitArtifacts: validateIngestionBenefitArtifacts(item.benefitArtifacts) }), ...(item.exclusionArtifacts === undefined ? {} : { exclusionArtifacts: validateIngestionExclusionArtifacts(item.exclusionArtifacts) }), ...(item.completionProof === undefined ? {} : { completionProof: validateIngestionCompletionProof(item.completionProof) }) };
+  return {
+    id: requiredString(item.id, 'ingestion flow.id', true),
+    ownerUser: requiredString(item.ownerUser, 'ingestion flow.ownerUser', true),
+    sourceScope: validateIngestionSourceScope(item.sourceScope),
+    revision: safeInt(item.revision, 'ingestion flow.revision', 1),
+    status: status as IngestionFlowRecord['status'],
+    idempotencyKey: requiredString(item.idempotencyKey, 'ingestion flow.idempotencyKey', true),
+    createdAt: iso(item.createdAt, 'ingestion flow.createdAt'),
+    lastActivityAt: iso(item.lastActivityAt, 'ingestion flow.lastActivityAt'),
+    expiresAt: iso(item.expiresAt, 'ingestion flow.expiresAt'),
+    ...(item.sourceCapture === undefined ? {} : { sourceCapture: validateIngestionSourceCapture(item.sourceCapture) }),
+    ...(item.manifest === undefined ? {} : { manifest: validateIngestionManifest(item.manifest) }),
+    ...(item.benefitArtifacts === undefined ? {} : { benefitArtifacts: validateIngestionBenefitArtifacts(item.benefitArtifacts) }),
+    ...(item.exclusionArtifacts === undefined ? {} : { exclusionArtifacts: validateIngestionExclusionArtifacts(item.exclusionArtifacts) }),
+    ...(item.completionProof === undefined ? {} : { completionProof: validateIngestionCompletionProof(item.completionProof) }),
+    ...(item.parentContinuation === undefined ? {} : { parentContinuation: validateIngestionParentContinuation(item.parentContinuation) }),
+    ...(item.terminalReason === undefined ? {} : { terminalReason: requiredString(item.terminalReason, 'ingestion flow.terminalReason') }),
+  };
 }
 
 function validateIngestionLocalExclusion(value: unknown, name: string): IngestionLocalExclusion {
@@ -1366,7 +1395,7 @@ function validateRewardComponentRecord(value: unknown, index: number): RewardCom
 export function validateToolArgs(name: string, value: unknown): Record<string, unknown> {
   const args = object(value, 'tool arguments');
   if (name === 'recommend') return { ...validateRecommendationIntent(args) };
-  const allowed: Record<string, string[]> = { create_ingestion: ['sourceScope', 'idempotencyKey'], get_ingestion: ['flowId'], submit_ingestion_source: ['flowId', 'actionId', 'expectedRevision', 'sourceCapture'], submit_ingestion_manifest: ['flowId', 'actionId', 'expectedRevision', 'manifest'], submit_benefit_leaf: ['flowId', 'actionId', 'expectedRevision', 'idempotencyKey', 'leafId', 'offer', 'merchantRefs', 'evidenceRefs', 'localExclusions'], submit_exclusion_leaf: ['flowId', 'actionId', 'expectedRevision', 'idempotencyKey', 'leafId', 'target', 'scope', 'predicate', 'evidenceRefs', 'disposition', 'reason'], finalize_ingestion: ['flowId', 'actionId', 'expectedRevision'], register_card: ['card'], list_cards: ['limit', 'page', 'projection'], upsert_offer: ['snapshot', 'rule', 'confirmation', 'capPools', 'merchant'], upsert_payment_route: ['route'], list_payment_routes: ['limit', 'page', 'projection'], upsert_payment_capability: ['capability'], list_payment_capabilities: [], register_payment_account: ['account'], list_payment_accounts: ['limit', 'page', 'projection'], record_transaction: ['transaction'], list_transactions: ['startDate', 'endDate', 'timeBasis', 'fundingKind', 'cardId', 'limit', 'page', 'projection'], record_event_reward: ['event', 'sourceEvents', 'rule', 'chainRule', 'candidate', 'idempotencyKey'], reverse_event_reward: ['event', 'idempotencyKey'], remaining_caps: ['cardId', 'asOf', 'limit', 'page', 'projection'], calculate_reward: ['rule', 'transaction', 'context'], get_user_benefit_status: ['kind', 'cardId', 'asOfUtc', 'projection'], upsert_user_benefit_status: ['input'], resolve_merchant: ['rawQuery', 'country', 'market', 'mcc', 'channel'], search_active_offers: ['rawQuery', 'cardId', 'canonicalMerchantId', 'country', 'market', 'mcc', 'channel', 'asOf', 'limit', 'page', 'projection'] };
+  const allowed: Record<string, string[]> = { create_ingestion: ['sourceScope', 'idempotencyKey', 'parentContinuation'], get_ingestion: ['flowId'], submit_ingestion_source: ['flowId', 'actionId', 'expectedRevision', 'sourceCapture'], submit_ingestion_manifest: ['flowId', 'actionId', 'expectedRevision', 'manifest'], submit_benefit_leaf: ['flowId', 'actionId', 'expectedRevision', 'idempotencyKey', 'leafId', 'offer', 'merchantRefs', 'evidenceRefs', 'localExclusions'], submit_exclusion_leaf: ['flowId', 'actionId', 'expectedRevision', 'idempotencyKey', 'leafId', 'target', 'scope', 'predicate', 'evidenceRefs', 'disposition', 'reason'], finalize_ingestion: ['flowId', 'actionId', 'expectedRevision'], register_card: ['card'], list_cards: ['limit', 'page', 'projection'], upsert_offer: ['snapshot', 'rule', 'confirmation', 'capPools', 'merchant'], upsert_payment_route: ['route'], list_payment_routes: ['limit', 'page', 'projection'], upsert_payment_capability: ['capability'], list_payment_capabilities: [], register_payment_account: ['account'], list_payment_accounts: ['limit', 'page', 'projection'], record_transaction: ['transaction'], list_transactions: ['startDate', 'endDate', 'timeBasis', 'fundingKind', 'cardId', 'limit', 'page', 'projection'], record_event_reward: ['event', 'sourceEvents', 'rule', 'chainRule', 'candidate', 'idempotencyKey'], reverse_event_reward: ['event', 'idempotencyKey'], remaining_caps: ['cardId', 'asOf', 'limit', 'page', 'projection'], calculate_reward: ['rule', 'transaction', 'context'], get_user_benefit_status: ['kind', 'cardId', 'asOfUtc', 'projection'], upsert_user_benefit_status: ['input'], resolve_merchant: ['rawQuery', 'country', 'market', 'mcc', 'channel'], search_active_offers: ['rawQuery', 'cardId', 'canonicalMerchantId', 'country', 'market', 'mcc', 'channel', 'asOf', 'limit', 'page', 'projection'] };
   if (!allowed[name]) throw new RewardServiceError('TOOL_NOT_FOUND', `unknown tool: ${name}`);
   keys(args, allowed[name], `tool ${name}`);
   const normalized: Record<string, unknown> = {};
@@ -1376,7 +1405,7 @@ export function validateToolArgs(name: string, value: unknown): Record<string, u
 
 export function validateRecommendationSupplementalFacts(value: unknown): RecommendationSupplementalFacts {
   const item = object(value, 'recommend supplementalFacts');
-  keys(item, ['merchant', 'amount', 'transaction', 'fx', 'routeFacts', 'eligibilityFacts', 'benefitEvidence'], 'recommend supplementalFacts');
+  keys(item, ['merchant', 'amount', 'transaction', 'fx', 'routeFacts', 'eligibilityFacts', 'benefitEvidence', 'childFlowId', 'resumedFlowId'], 'recommend supplementalFacts');
   let merchant: RecommendationSupplementalFacts['merchant'];
   if (item.merchant !== undefined) {
     const candidate = object(item.merchant, 'recommend supplementalFacts.merchant');
@@ -1428,12 +1457,14 @@ export function validateRecommendationSupplementalFacts(value: unknown): Recomme
     ...(routeFacts ? { routeFacts } : {}),
     ...(eligibilityFacts ? { eligibilityFacts } : {}),
     ...(benefitEvidence ? { benefitEvidence } : {}),
+    ...(item.childFlowId === undefined ? {} : { childFlowId: requiredString(item.childFlowId, 'recommend supplementalFacts.childFlowId', true) }),
+    ...(item.resumedFlowId === undefined ? {} : { resumedFlowId: requiredString(item.resumedFlowId, 'recommend supplementalFacts.resumedFlowId', true) }),
   };
 }
 
 export function validateRecommendationIntent(value: unknown): RecommendationIntent {
   const input = object(value, 'recommend intent');
-  keys(input, ['merchant', 'amount', 'country', 'market', 'channel', 'paymentMethod', 'occurredAt', 'cardIds', 'routeIds', 'limit', 'page', 'cursor', 'resultVersion', 'expectedResultVersion', 'supplementalFacts', 'fx', 'routeFacts', 'eligibilityFacts'], 'recommend intent');
+  keys(input, ['merchant', 'amount', 'country', 'market', 'channel', 'paymentMethod', 'occurredAt', 'cardIds', 'routeIds', 'limit', 'page', 'cursor', 'resultVersion', 'expectedResultVersion', 'childFlowId', 'resumedFlowId', 'supplementalFacts', 'fx', 'routeFacts', 'eligibilityFacts'], 'recommend intent');
   let merchant: RecommendationIntent['merchant'];
   if (typeof input.merchant === 'string') merchant = requiredString(input.merchant, 'merchant');
   else {
@@ -1466,6 +1497,8 @@ export function validateRecommendationIntent(value: unknown): RecommendationInte
     ...(input.cursor === undefined ? {} : { cursor: requiredString(input.cursor, 'cursor') }),
     ...(input.resultVersion === undefined ? {} : { resultVersion: requiredString(input.resultVersion, 'resultVersion') }),
     ...(input.expectedResultVersion === undefined ? {} : { expectedResultVersion: requiredString(input.expectedResultVersion, 'expectedResultVersion') }),
+    ...(input.childFlowId === undefined ? {} : { childFlowId: requiredString(input.childFlowId, 'childFlowId', true) }),
+    ...(input.resumedFlowId === undefined ? {} : { resumedFlowId: requiredString(input.resumedFlowId, 'resumedFlowId', true) }),
     ...(input.supplementalFacts === undefined ? {} : { supplementalFacts: validateRecommendationSupplementalFacts(input.supplementalFacts) }),
     ...(input.fx === undefined ? {} : { fx: validateFxSnapshot(input.fx, 'recommend fx') }),
     ...(input.routeFacts === undefined ? {} : { routeFacts: (() => {

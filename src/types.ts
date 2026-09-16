@@ -517,7 +517,7 @@ export interface ListTransactionsResult {
 }
 
 export interface Diagnostic {
-  code: 'missing_required_fact' | 'invalid_fact' | 'conflicting_fact' | 'unsupported_field' | 'stale_fact' | 'fx_missing' | 'fx_stale' | 'fx_pair_mismatch' | 'fx_scope_mismatch' | 'fx_conflict' | 'merchant_ambiguous' | 'merchant_not_found' | 'no_active_offer' | 'source_untrusted' | 'stale_rule' | 'invalid_input' | 'needs_review';
+  code: 'missing_required_fact' | 'invalid_fact' | 'conflicting_fact' | 'unsupported_field' | 'stale_fact' | 'fx_missing' | 'fx_stale' | 'fx_pair_mismatch' | 'fx_scope_mismatch' | 'fx_conflict' | 'merchant_ambiguous' | 'merchant_not_found' | 'no_active_offer' | 'source_untrusted' | 'stale_rule' | 'invalid_input' | 'needs_review' | 'flow_failed' | 'flow_cancelled';
   path: string;
   requiredFacts: readonly string[];
   retryAction: string;
@@ -737,6 +737,8 @@ export interface RecommendationIntent {
   supplementalFacts?: RecommendationSupplementalFacts | undefined;
   /** Version returned by the preceding recommendation that this retry expects. */
   expectedResultVersion?: string | undefined;
+  childFlowId?: string | undefined;
+  resumedFlowId?: string | undefined;
 }
 
 export interface RecommendationSupplementalFacts {
@@ -760,6 +762,8 @@ export interface RecommendationSupplementalFacts {
     contentHash?: string;
     scope?: string;
   }[] | undefined;
+  childFlowId?: string | undefined;
+  resumedFlowId?: string | undefined;
 }
 export interface IntentCandidate {
   id: string;
@@ -807,6 +811,17 @@ export interface RecommendationAction {
   completionCondition?: string | undefined;
   diagnostic?: Diagnostic | undefined;
   fxResolutionRequest?: FxResolutionRequest | undefined;
+  refreshBenefit?: {
+    sourceScope: IngestionSourceScope;
+    familyId?: string | undefined;
+    sourceSnapshotId?: string | undefined;
+    ruleId?: string | undefined;
+    cardId?: string | undefined;
+    reason: string;
+    freshnessRequired: { asOf: string; maxAgeSeconds?: number | undefined };
+    childFlowId?: string | undefined;
+    flowStatus?: IngestionFlowStatus | undefined;
+  } | undefined;
 }
 
 export interface RecommendationIntentResult {
@@ -926,6 +941,13 @@ export interface IngestionCompletionProof {
   activatedRules: readonly { ruleId: string; ruleVersion: string; }[];
   awaitingConfirmationRules: readonly { ruleId: string; ruleVersion: string; reason: string; }[];
 }
+export interface IngestionParentContinuation {
+  intentFingerprint: string;
+  parentResultVersion: string;
+  childFlowId?: string | undefined;
+  sourceScope?: IngestionSourceScope | undefined;
+  ruleFamily?: string | undefined;
+}
 export interface IngestionFlowRecord {
   id: string;
   ownerUser: string;
@@ -941,6 +963,8 @@ export interface IngestionFlowRecord {
   benefitArtifacts?: readonly IngestionBenefitArtifact[];
   exclusionArtifacts?: readonly IngestionExclusionArtifact[];
   completionProof?: IngestionCompletionProof;
+  parentContinuation?: IngestionParentContinuation | undefined;
+  terminalReason?: string | undefined;
 }
 export interface IngestionDraftTombstone {
   id: string;
