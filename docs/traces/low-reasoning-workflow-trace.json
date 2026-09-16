@@ -4,6 +4,8 @@
   "description": "End-to-end workflow trace for a low-reasoning model interacting with taiwan-card-rewards-mcp over stdio JSON-RPC 2.0.",
   "metadata": {
     "modelProfile": "low_reasoning",
+    "traceType": "synthetic-example",
+    "executionProvenance": "Illustrative transcript maintained alongside deterministic public-contract tests; no live model run or compatibility claim is implied.",
     "protocol": "stdio-jsonrpc-2.0",
     "guidanceDocument": "docs/taiwan-card-rewards-skill/references/low-reasoning-playbook.md",
     "recordedAt": "2026-09-14T15:40:00Z",

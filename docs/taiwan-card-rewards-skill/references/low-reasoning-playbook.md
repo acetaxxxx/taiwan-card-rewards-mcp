@@ -16,6 +16,12 @@ controls routing and high-risk choices.
    provider or scheme, scope, and freshness are compatible.
 5. When external evidence or FX lookup fails, stop retrying; return the known
    result, its estimate/unknown status, and unresolved `requiredActions`.
+6. For any returned action, execute only its named MCP tool, then reread the
+   returned state. For `recommend` retries preserve the original intent and use
+   typed `supplementalFacts` plus `expectedResultVersion`; stale/conflicting
+   retries restart instead of being patched by the Agent.
+7. For ingestion, resume the existing source scope. An expired action requires
+   the new revision returned by MCP; never resend it or create a duplicate draft.
 
 | Intent | First tool | Completion criterion |
 |---|---|---|
@@ -103,3 +109,5 @@ Transaction history:
 
 For correction payloads, FX snapshots, generated routes, event rewards, and
 refunds, load the matching workflow from `../workflows/` before calling a tool.
+All field schemas remain in the public `tools/list` contract; examples here are
+semantic minimal payloads and are not a second schema.

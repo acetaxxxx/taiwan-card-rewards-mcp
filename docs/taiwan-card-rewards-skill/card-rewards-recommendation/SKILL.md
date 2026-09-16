@@ -12,4 +12,11 @@ Before constructing an MCP payload, read the shared [`mcp-tools.md`](../referenc
 - For a wallet, payment route, or foreign currency, read [`workflows/payment-route-and-fx.md`](workflows/payment-route-and-fx.md).
 - When `recommend` returns `requiredActions`, follow [`workflows/preflight-and-required-actions.md`](workflows/preflight-and-required-actions.md) and retry only after the required facts or official evidence are available.
 
+For a typed retry, preserve the original intent, put only newly obtained facts
+in `supplementalFacts`, and send the returned `resultVersion` as
+`expectedResultVersion`. A stale version or conflicting fact is a failed
+validation: reread/restart the original intent and do not merge facts locally.
+Every retry is a complete MCP re-evaluation; present `ready` candidates while
+keeping unresolved actions and partial delivery visible.
+
 Return a recommendation only at the certainty represented by the MCP response. A blocked or unknown candidate is useful output when the missing fact matters.

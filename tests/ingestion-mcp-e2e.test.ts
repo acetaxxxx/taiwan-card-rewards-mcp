@@ -188,6 +188,13 @@ describe('Ticket 07 Public MCP Ingestion E2E Workflow', () => {
             dependsOn: ['ex-wallet'],
           },
           {
+            id: 'ex-legacy',
+            kind: 'exclusion',
+            summary: 'Legacy exclusion outside the current offer scope',
+            evidenceLocator: 'page:4#legacy-exclusion',
+            dependsOn: ['ben-online'],
+          },
+          {
             id: 'ben-online',
             kind: 'benefit',
             summary: '3% Online shopping reward',
@@ -215,7 +222,7 @@ describe('Ticket 07 Public MCP Ingestion E2E Workflow', () => {
       expect(exclusionRes.flow.flow.status).toBe('processing_leaves');
       expect(exclusionRes.flow.nextAction.leafId).toBe('ben-dining');
 
-      // 7. Submit benefit leaf: ben-dining (supersedes rule-baseline)
+      // 8. Submit benefit leaf: ben-dining (supersedes rule-baseline)
       const diningRes = await client.callTool('submit_benefit_leaf', {
         flowId,
         actionId: exclusionRes.flow.nextAction.actionId,
@@ -250,7 +257,7 @@ describe('Ticket 07 Public MCP Ingestion E2E Workflow', () => {
       expect(diningRes.flow.flow.status).toBe('processing_leaves');
       expect(diningRes.flow.nextAction.leafId).toBe('ben-online');
 
-      // 8. Submit benefit leaf: ben-online
+      // 9. Submit benefit leaf: ben-online
       const onlineRes = await client.callTool('submit_benefit_leaf', {
         flowId,
         actionId: diningRes.flow.nextAction.actionId,
@@ -281,14 +288,32 @@ describe('Ticket 07 Public MCP Ingestion E2E Workflow', () => {
           },
         },
       });
-      expect(onlineRes.flow.flow.status).toBe('ready_to_finalize');
-      expect(onlineRes.flow.nextAction.kind).toBe('FINALIZE');
+      expect(onlineRes.flow.flow.status).toBe('processing_leaves');
+      expect(onlineRes.flow.nextAction.leafId).toBe('ex-legacy');
+
+      // 10. Submit an explicitly ignored leaf with a durable reason.
+      const ignoredRes = await client.callTool('submit_exclusion_leaf', {
+        flowId,
+        actionId: onlineRes.flow.nextAction.actionId,
+        expectedRevision: onlineRes.flow.nextAction.expectedRevision,
+        idempotencyKey: 'ex-legacy-key',
+        leafId: 'ex-legacy',
+        target: 'payment_method',
+        scope: { kind: 'all_benefits' },
+        predicate: { field: 'transaction.paymentMethod', op: 'EQUALS', value: 'legacy-wallet' },
+        evidenceRefs: ['page:4#legacy-exclusion'],
+        disposition: 'ignored',
+        reason: 'Outside the declared offer scope',
+      });
+      expect(ignoredRes.artifact).toBeUndefined();
+      expect(ignoredRes.flow.flow.status).toBe('ready_to_finalize');
+      expect(ignoredRes.flow.nextAction.kind).toBe('FINALIZE');
 
       // Candidate rules must remain invisible before finalization
       const activeOffersBefore = await client.callTool('search_active_offers', { cardId: 'card-premium' });
       expect(activeOffersBefore.offers.map((o: any) => o.id)).toEqual(['rule-baseline']);
 
-      // 9. Atomic Rollback Test
+      // 11. Atomic Rollback Test
       // Simulate an interrupted process whose persisted candidate snapshot was
       // corrupted before it resumed and tried to finalize.
       await client.close();
@@ -303,8 +328,8 @@ describe('Ticket 07 Public MCP Ingestion E2E Workflow', () => {
       await expect(
         client.callTool('finalize_ingestion', {
           flowId,
-          actionId: onlineRes.flow.nextAction.actionId,
-          expectedRevision: onlineRes.flow.nextAction.expectedRevision,
+          actionId: ignoredRes.flow.nextAction.actionId,
+          expectedRevision: ignoredRes.flow.nextAction.expectedRevision,
         })
       ).rejects.toThrow('NEEDS_REVIEW');
 
@@ -319,14 +344,14 @@ describe('Ticket 07 Public MCP Ingestion E2E Workflow', () => {
       client = createMcpClient(dataDir, 'workflow-user');
       await client.send('initialize');
 
-      // 10. Atomic Finalization & Supersession
+      // 12. Atomic Finalization & Supersession
       const finalizeRes = await client.callTool('finalize_ingestion', {
         flowId,
-        actionId: onlineRes.flow.nextAction.actionId,
-        expectedRevision: onlineRes.flow.nextAction.expectedRevision,
+        actionId: ignoredRes.flow.nextAction.actionId,
+        expectedRevision: ignoredRes.flow.nextAction.expectedRevision,
       });
       expect(finalizeRes.proof).toBeDefined();
-      expect(finalizeRes.proof.leafTotals).toEqual({ total: 3, materialized: 3, ignored: 0, superseded: 0 });
+      expect(finalizeRes.proof.leafTotals).toEqual({ total: 4, materialized: 3, ignored: 1, superseded: 0 });
       expect(finalizeRes.proof.activatedRules).toEqual([
         { ruleId: 'rule-dining', ruleVersion: '1' },
         { ruleId: 'rule-online', ruleVersion: '1' },
@@ -334,7 +359,7 @@ describe('Ticket 07 Public MCP Ingestion E2E Workflow', () => {
       expect(finalizeRes.proof.awaitingConfirmationRules).toEqual([]);
       expect(finalizeRes.flow.flow.status).toBe('complete');
 
-      // 11. Verify Recommendation Visibility & Exclusion Enforcement
+      // 13. Verify Recommendation Visibility & Exclusion Enforcement
       // A) Dining with credit_card: rule-dining matches (5% = 500 minor); superseded rule-baseline is invisible
       const diningRec = await client.callTool('recommend', {
         country: 'TW',

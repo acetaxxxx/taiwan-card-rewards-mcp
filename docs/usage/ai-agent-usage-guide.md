@@ -43,7 +43,7 @@ npx --yes github:acetaxxxx/taiwan-card-rewards-mcp#main \
 Pin a release tag for repeatable use:
 
 ```bash
-npx --yes github:acetaxxxx/taiwan-card-rewards-mcp#v0.14.1 \
+npx --yes github:acetaxxxx/taiwan-card-rewards-mcp#v0.15.0 \
   --data-dir /absolute/tenant-directory
 ```
 
@@ -84,6 +84,8 @@ response already carries every diagnostic an Agent needs.
 | `submit_ingestion_source` | Mutating | Persist one immutable source capture; the MCP never fetches the URL. | `STALE_REVISION`, `INVALID_FLOW_ACTION`, `SOURCE_SCOPE_CONFLICT` |
 | `submit_ingestion_manifest` | Mutating | Submit the complete bounded manifest; the MCP rejects missing dependencies and cycles. | `STALE_REVISION`, `INVALID_FLOW_ACTION`, `INVALID_INPUT` |
 | `submit_benefit_leaf` | Mutating | Validate the server-selected benefit leaf and materialize one candidate rule plus its evidence/local exclusions. Candidate rules remain invisible until finalization. | `STALE_REVISION`, `INVALID_FLOW_ACTION`, `SOURCE_SCOPE_CONFLICT`, `NEEDS_REVIEW`, `IDEMPOTENCY_CONFLICT` |
+| `submit_exclusion_leaf` | Mutating | Materialize or explicitly ignore the server-selected shared exclusion; ignored leaves require a reason. | `STALE_REVISION`, `INVALID_FLOW_ACTION`, `NEEDS_REVIEW`, `IDEMPOTENCY_CONFLICT` |
+| `finalize_ingestion` | Mutating | Atomically revalidate the complete manifest, activate verified candidates, and return a durable completion proof. | `STALE_REVISION`, `INVALID_FLOW_ACTION`, `NEEDS_REVIEW`, `STORE_UNAVAILABLE` |
 | `recommend` | Read-only | Merchant-first planned recommendation; reads registered cards and verified routes and returns direct-card and multi-layer payment-path candidates together in one ranked list. Results are bounded (default 10) and do not mutate usage. | `INSUFFICIENT_FACTS`, `NEEDS_REVIEW`, `STALE` |
 | `upsert_payment_route` | Mutating | Register a payment route; MCP assigns its route identity, trusts the caller's self-asserted `evidenceIds` directly, and stores no credentials. | `INVALID_INPUT`, `IDEMPOTENCY_CONFLICT`, `SENSITIVE_FIELD_FORBIDDEN` |
 | `list_payment_routes` | Read-only | List the current user's registered payment routes as bounded projections. | `INVALID_INPUT`, `STORE_UNAVAILABLE` |
@@ -106,9 +108,12 @@ response already carries every diagnostic an Agent needs.
 For a complete official source, follow `create_ingestion` → `get_ingestion` →
 `submit_ingestion_source` → `submit_ingestion_manifest`. Then repeatedly call
 `get_ingestion` and submit exactly the returned `PROCESS_LEAF` using
-`submit_benefit_leaf` for benefit leaves. Never invent a leaf order or declare
+`submit_benefit_leaf` or `submit_exclusion_leaf` for the returned leaf kind;
+ignored exclusions must carry a reason. Never invent a leaf order or declare
 completion from source text alone. A materialized rule is a candidate artifact
-and must not be treated as recommendable until finalization proves coverage.
+and must not be treated as recommendable until `finalize_ingestion` returns its
+completion proof. After every write, call `get_ingestion` again; expired actions
+require the new revision rather than resending the old payload.
 
 ---
 

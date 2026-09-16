@@ -85,6 +85,16 @@ Agent 在建立卡片、權益、支付路徑或促銷規則前，必須落實**
 
 ---
 
+## 4.5 Ingestion action discipline
+
+When the source is represented by an ingestion draft, call `get_ingestion` after
+each submission and execute only its returned action. The MCP owns phase,
+dependency order, leaf disposition, and finalization; the Agent must not infer
+that a manifest is complete from the source text. Reusing the same source scope
+resumes the existing draft. If MCP reports an expired action, reread the flow
+and use the new revision/action; do not resend the expired action or create a
+second draft.
+
 ## 5. 商家實體解析與規則提交 (`upsert_offer`)
 
 在提交促銷規則前，必須先完成 **Merchant Identity Gate**：

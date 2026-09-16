@@ -315,7 +315,9 @@ export class RewardService {
     const leaf = flow.manifest?.find((candidate) => candidate.id === parsed.leafId);
     if (!action || action.kind !== 'PROCESS_LEAF' || action.leafId !== parsed.leafId || !leaf || leaf.kind !== 'exclusion' || leaf.disposition !== undefined) throw new RewardServiceError('INVALID_FLOW_ACTION', 'exclusion leaf is not the server-owned next action', { code: 'INVALID_FLOW_ACTION', path: 'leafId', requiredFacts: ['get_ingestion.nextAction.leafId'], retryAction: 'get_ingestion', affectedIds: [flow.id] });
     if (parsed.expectedRevision !== flow.revision || parsed.actionId !== action.actionId) throw new RewardServiceError('STALE_REVISION', 'exclusion leaf action is stale', { code: 'STALE_REVISION', path: parsed.expectedRevision !== flow.revision ? 'expectedRevision' : 'actionId', requiredFacts: [], retryAction: 'get_ingestion', affectedIds: [flow.id, leaf.id] });
-    this.assertExclusionScope(flow, leaf.id, parsed.scope);
+    // An ignored exclusion is retained as an audit decision but does not apply
+    // to benefits, so it must not require dependency coverage for every target.
+    if (disposition === 'materialized') this.assertExclusionScope(flow, leaf.id, parsed.scope);
     const artifact = disposition === 'materialized' ? { id: `artifact_${crypto.randomUUID().replace(/-/g, '')}`, revision: flow.revision, sourceLeafId: leaf.id, sourceFlowId: flow.id, target: parsed.target, scope: parsed.scope, predicate: parsed.predicate, evidenceRefs: parsed.evidenceRefs, idempotencyKey: parsed.idempotencyKey, payloadHash, status: 'candidate' as const } : undefined;
     this.store.update((state) => {
       const current = state.ingestionFlows.find((candidate) => candidate.id === flow.id && candidate.ownerUser === ownerUser);

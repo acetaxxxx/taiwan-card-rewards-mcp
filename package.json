@@ -17,7 +17,8 @@
     "prebuild": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
     "build": "tsc -p tsconfig.json",
     "prepare": "npm run build",
-    "test": "vitest run"
+    "test": "vitest run",
+    "docs:check": "npm run build && node scripts/validate-skill-docs.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

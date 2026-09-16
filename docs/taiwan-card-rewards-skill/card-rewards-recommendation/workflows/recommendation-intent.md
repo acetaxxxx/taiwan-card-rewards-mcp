@@ -36,7 +36,9 @@ payment-path results in one ranked list.
    - `no_match`: report no match only within `coverage`; do not claim the
      market has no offer.
 5. Preserve the original intent on every retry. Apply only the new fact/evidence
-   or FX data; call the same `recommend` entry again and let MCP recompute.
+   or FX data; call the same `recommend` entry again and let MCP recompute. For
+   typed fact recovery, send `supplementalFacts` and the prior response's
+   `expectedResultVersion`; never copy a stale result into a new evaluation.
    If the response has the same unresolved action(s) and no new evidence or
    user fact is available, stop: report the partial/unknown result and ask only
    the needed user fact. Do not retry endlessly.

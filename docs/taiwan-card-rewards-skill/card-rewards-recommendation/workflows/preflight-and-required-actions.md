@@ -14,6 +14,12 @@ sent), and `completionCondition`. Never guess past a `completionCondition`;
 if no new fact or evidence is available, stop and report the partial/unknown
 result instead of retrying endlessly.
 
+For a `recommend` retry, preserve the original intent and submit only new facts
+under `supplementalFacts`, together with the response's `resultVersion` as
+`expectedResultVersion`. MCP validates the typed facts and reruns the complete
+evaluation. A stale version, conflicting fact, or unsupported field is a
+structured failure; reread/restart rather than guessing or merging locally.
+
 ## Action types
 
 | `action` | `owner` | Meaning | Resolution |

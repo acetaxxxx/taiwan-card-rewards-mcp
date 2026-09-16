@@ -78,4 +78,53 @@ describe('deterministic public agent workflow trace', () => {
       rmSync(dataDir, { recursive: true, force: true });
     }
   }, 20_000);
+
+  it('hands a stale benefit to source-scoped ingestion and preserves the parent result version', async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'agent-refresh-trace-'));
+    const client = mcp(dataDir);
+    const call = async (name: string, args: Record<string, unknown>) => {
+      const response = await client.call(name, args);
+      expect(response.error).toBeUndefined();
+      return response.result.structuredContent;
+    };
+    try {
+      await call('register_card', { card: { id: 'stale-card', issuer: 'Example Bank', productName: 'Stale Card' } });
+      await call('upsert_offer', {
+        snapshot: { ...snapshot('stale-source'), fetchedAt: '2025-01-01T00:00:00Z' },
+        rule: {
+          id: 'stale-rule',
+          familyId: 'stale-family',
+          cardId: 'stale-card',
+          version: '1',
+          sourceSnapshotId: 'stale-source',
+          status: 'stale',
+          validFrom: '2025-01-01T00:00:00Z',
+          validTo: '2025-12-31T23:59:59Z',
+          settlementCurrency: 'TWD',
+          match: {},
+          reward: { kind: 'percentage', rateBps: 300 },
+        },
+      });
+      const intent = { merchant: 'Stale Shop', amount: { amountMinor: 1000, currency: 'TWD' }, occurredAt: '2026-09-10T00:00:00Z' };
+      const stale = await call('recommend', intent);
+      const refresh = stale.requiredActions.find((action: any) => action.action === 'REFRESH_BENEFIT');
+      expect(refresh).toEqual(expect.objectContaining({ submission: { tool: 'create_ingestion', field: 'sourceScope' } }));
+      const child = await call('create_ingestion', {
+        sourceScope: refresh.refreshBenefit.sourceScope,
+        idempotencyKey: 'refresh-trace-1',
+        parentContinuation: {
+          intentFingerprint: 'trace-parent-intent',
+          parentResultVersion: stale.resultVersion,
+          sourceScope: refresh.refreshBenefit.sourceScope,
+          ruleFamily: refresh.refreshBenefit.familyId,
+        },
+      });
+      expect(child.flow.parentContinuation.parentResultVersion).toBe(stale.resultVersion);
+      expect(child.flow.parentContinuation.sourceScope).toEqual(refresh.refreshBenefit.sourceScope);
+      expect(child.nextAction.kind).toBe('SUBMIT_SOURCE');
+    } finally {
+      await client.close();
+      rmSync(dataDir, { recursive: true, force: true });
+    }
+  }, 20_000);
 });
