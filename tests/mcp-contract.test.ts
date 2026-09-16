@@ -5,6 +5,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import * as readline from "node:readline";
 import { describe, expect, it } from "vitest";
 import { mcpTools, failClosedErrors, normalizeMcpToolArguments } from "../src/index.js";
+import packageJson from "../package.json" with { type: "json" };
 
 interface JsonRpcResponse {
   jsonrpc: string;
@@ -224,7 +225,7 @@ describe("MCP Contract and Agent Boundary", () => {
       expect(initRes.result).toBeDefined();
       expect(initRes.result.protocolVersion).toBe("2024-11-05");
       expect(initRes.result.serverInfo.name).toBe("taiwan_card_rewards_mcp");
-      expect(initRes.result.serverInfo.version).toBe("0.14.1");
+      expect(initRes.result.serverInfo.version).toBe(packageJson.version);
       expect(initRes.result.instructions).toContain("single-user durable ledger");
       expect(initRes.result.instructions).toContain("fail-closed");
 
