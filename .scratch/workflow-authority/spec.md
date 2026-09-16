@@ -80,6 +80,16 @@ Manifest leaf types initially cover benefit and exclusion units. Each leaf has a
 
 Shared exclusions are first-class leaves. Benefit leaves reference them through manifest dependencies. Finalization fails closed when a required leaf is unresolved, a dependency is cyclic or missing, canonical references are ambiguous, or candidate rules conflict.
 
+## Draft ownership, expiry, and cleanup
+
+An unfinished ingestion is a durable draft, so an Agent can recover from an interrupted turn without recreating evidence. A draft carries `lastActivityAt` and `expiresAt`; activity only extends the expiry after the MCP accepts an expected action result.
+
+The MCP permits one active draft per `(ownerUser, normalized source scope)`, where source scope identifies the official source or a declared target family. A repeated create returns the existing flow rather than opening a duplicate. This is deliberately not a global one-card lock: one official source can cover multiple products, and a user must remain able to register a Held Card while benefit research is incomplete.
+
+Expired drafts move to a terminal `expired` state. They can no longer accept submissions. Their incomplete candidate artifacts and unreferenced source payloads are purged; a minimal tenant-scoped tombstone remains for an operator-configured retention period to explain why a retry must create a new revision. Active rules, historical transactions, completion proofs, and evidence referenced by completed work are never cleanup targets.
+
+Expiry is enforced during MCP startup and mutating flow operations, so it remains safe without a background worker. A maintenance sweep is also available to an operator or scheduler for timely cleanup while the MCP is idle. The TTL, tombstone retention, and sweep cadence are configuration with documented defaults and testable clock injection.
+
 ## Atomic visibility
 
 Source capture, manifest work, and leaf materialization may persist durable workflow state and candidate artifacts. They must not make incomplete rules visible to the active offer index. Finalization validates the complete dependency closure and activates all accepted Rule Versions in one store update. Failure leaves the prior active catalog unchanged.
@@ -133,11 +143,13 @@ A benefit-refresh action may create a linked child ingestion. The parent continu
 - [ ] Public MCP schema, dispatcher, service behavior, storage validation, and documentation agree.
 - [ ] A public MCP trace ingests a multi-benefit source with a shared exclusion and proves full manifest coverage.
 - [ ] Interrupted and duplicate submissions resume idempotently; stale or conflicting submissions fail without partial activation.
+- [ ] Same-source draft creation returns the existing active flow; expiry purges only incomplete artifacts and leaves active/historical data intact.
 - [ ] Recommendation fast path remains a single read-only call.
 - [ ] Missing merchant, FX, transaction, or benefit freshness returns structured reasons and executable actions.
 - [ ] A benefit refresh completes through child ingestion and a fresh recommendation evaluation.
 - [ ] Existing storage, transaction, refund, cap, route, FX, predicate, and recommendation behavior remains compatible.
 - [ ] Typecheck, build, full tests, public MCP contract tests, migration tests, and Agent workflow traces pass.
+- [ ] The installed bundle at `docs/taiwan-card-rewards-skill/` teaches the workflow through MCP actions and does not duplicate payload schemas.
 
 ## Non-goals
 

@@ -624,6 +624,12 @@ MCP 明確回：
 
 Agent 再負責取得。
 
+7. Durable Drafts Have Bounded Lifetime
+
+Ingestion draft 讓 Agent 中斷後可恢復，但 MCP 以 owner 與 normalized source scope 去重，避免同一來源累積多個未完成流程。Draft 逾期後進入 `expired`，清理 incomplete candidate artifacts 與未參照 payload，保留最小 audit tombstone；active rules、completed evidence 與歷史交易不可被清理。
+
+此限制不是「全系統一次只能註冊一張卡」。一份官方來源可涵蓋多個產品，Held Card 註冊與 benefit ingestion 是不同責任；只限制同一 owner 的同一來源／目標範圍不能同時有多個 active draft。
+
 最終 interaction model：
 
 Agent:

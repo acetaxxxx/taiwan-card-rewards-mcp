@@ -10,6 +10,7 @@ Status: ready-for-agent
 
 - [ ] ADR 記錄 MCP workflow authority、Agent semantic worker、零網路與 deterministic evaluation 邊界。
 - [ ] 定義 durable ingestion lifecycle、合法狀態轉移、terminal/intervention states 與 correction revision 規則。
+- [ ] 定義 source-scope draft lock、expiry、minimal tombstone retention 與 sweep 邊界；Held Card 註冊不被未完成 offer ingestion 阻擋。
 - [ ] 定義 action envelope、submission correlation、optimistic revision 與 idempotency/conflict 語意。
 - [ ] 定義 `code`、`path`、`message`、`requiredFacts`、`retryAction` 及 affected IDs 的共用診斷契約。
 - [ ] 定義 candidate artifacts 與 active offer index 的可見性邊界，以及 finalize 的原子啟用保證。

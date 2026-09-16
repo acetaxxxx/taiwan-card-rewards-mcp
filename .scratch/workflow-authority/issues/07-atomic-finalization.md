@@ -15,4 +15,5 @@ Status: ready-for-agent
 - [ ] Completion proof 包含 source/manifest revision、leaf totals、每個 disposition、activated rule IDs/versions、ignored reasons 與 evidence coverage。
 - [ ] Duplicate finalize idempotently 回傳同一 proof；不同 revision 或已修改 candidate 會 fail closed。
 - [ ] Completed flow 不再接受 leaf submissions；correction/official refresh 使用明確的新 ingestion revision。
+- [ ] Finalize 取消同 source scope 的 draft lock；completion proof、active artifacts 與已被引用的 evidence 不可被 draft sweep 清除。
 - [ ] Public MCP E2E 驗證多 benefit＋shared exclusion、interrupted resume、atomic rollback、supersession 與 recommendation visibility。
