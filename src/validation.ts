@@ -980,10 +980,24 @@ export function validateIngestionSourceScope(value: unknown): IngestionSourceSco
 
 function validateIngestionFlow(value: unknown): IngestionFlowRecord {
   const item = object(value, 'ingestion flow');
-  keys(item, ['id', 'ownerUser', 'sourceScope', 'revision', 'status', 'idempotencyKey', 'createdAt', 'lastActivityAt', 'expiresAt'], 'ingestion flow');
+  keys(item, ['id', 'ownerUser', 'sourceScope', 'revision', 'status', 'idempotencyKey', 'createdAt', 'lastActivityAt', 'expiresAt', 'sourceCapture'], 'ingestion flow');
   const status = requiredString(item.status, 'ingestion flow.status');
   if (!['awaiting_source', 'awaiting_manifest', 'processing_leaves', 'ready_to_finalize', 'complete', 'needs_review', 'conflict', 'failed', 'cancelled', 'expired'].includes(status)) throw new RewardServiceError('INVALID_INPUT', 'ingestion flow.status is invalid');
-  return { id: requiredString(item.id, 'ingestion flow.id', true), ownerUser: requiredString(item.ownerUser, 'ingestion flow.ownerUser', true), sourceScope: validateIngestionSourceScope(item.sourceScope), revision: safeInt(item.revision, 'ingestion flow.revision', 1), status: status as IngestionFlowRecord['status'], idempotencyKey: requiredString(item.idempotencyKey, 'ingestion flow.idempotencyKey', true), createdAt: iso(item.createdAt, 'ingestion flow.createdAt'), lastActivityAt: iso(item.lastActivityAt, 'ingestion flow.lastActivityAt'), expiresAt: iso(item.expiresAt, 'ingestion flow.expiresAt') };
+  return { id: requiredString(item.id, 'ingestion flow.id', true), ownerUser: requiredString(item.ownerUser, 'ingestion flow.ownerUser', true), sourceScope: validateIngestionSourceScope(item.sourceScope), revision: safeInt(item.revision, 'ingestion flow.revision', 1), status: status as IngestionFlowRecord['status'], idempotencyKey: requiredString(item.idempotencyKey, 'ingestion flow.idempotencyKey', true), createdAt: iso(item.createdAt, 'ingestion flow.createdAt'), lastActivityAt: iso(item.lastActivityAt, 'ingestion flow.lastActivityAt'), expiresAt: iso(item.expiresAt, 'ingestion flow.expiresAt'), ...(item.sourceCapture === undefined ? {} : { sourceCapture: validateIngestionSourceCapture(item.sourceCapture) }) };
+}
+
+export function validateIngestionSourceCapture(value: unknown): NonNullable<IngestionFlowRecord['sourceCapture']> {
+  const item = object(value, 'ingestion source capture');
+  keys(item, ['sourceType', 'url', 'description', 'retrievedAt', 'contentHash', 'artifactRef', 'submitter', 'submittedAt'], 'ingestion source capture');
+  const sourceType = requiredString(item.sourceType, 'sourceCapture.sourceType');
+  if (sourceType !== 'official' && sourceType !== 'user_input') throw new RewardServiceError('INVALID_INPUT', 'sourceCapture.sourceType is invalid');
+  const url = item.url === undefined ? undefined : requiredString(item.url, 'sourceCapture.url');
+  if (sourceType === 'official' && url === undefined) throw new RewardServiceError('INVALID_INPUT', 'sourceCapture.url is required for official sources');
+  if (url !== undefined) { let parsed: URL; try { parsed = new URL(url); } catch { throw new RewardServiceError('INVALID_INPUT', 'sourceCapture.url must be a URL'); } if (parsed.protocol !== 'https:' || parsed.username || parsed.password) throw new RewardServiceError('INVALID_INPUT', 'sourceCapture.url must be a credential-free HTTPS URL'); }
+  if (sourceType === 'user_input' && item.description === undefined) throw new RewardServiceError('INVALID_INPUT', 'sourceCapture.description is required for user_input sources');
+  const artifactRef = requiredString(item.artifactRef, 'sourceCapture.artifactRef');
+  if (!/^artifact:[A-Za-z0-9][A-Za-z0-9_:-]{0,127}$/.test(artifactRef)) throw new RewardServiceError('INVALID_INPUT', 'sourceCapture.artifactRef must be an opaque artifact reference');
+  return { sourceType, ...(url === undefined ? {} : { url: new URL(url).toString() }), ...(item.description === undefined ? {} : { description: requiredString(item.description, 'sourceCapture.description') }), retrievedAt: iso(item.retrievedAt, 'sourceCapture.retrievedAt'), contentHash: requiredString(item.contentHash, 'sourceCapture.contentHash'), artifactRef, submitter: requiredString(item.submitter, 'sourceCapture.submitter', true), submittedAt: iso(item.submittedAt, 'sourceCapture.submittedAt') };
 }
 
 function validateIngestionDraftTombstone(value: unknown): IngestionDraftTombstone {

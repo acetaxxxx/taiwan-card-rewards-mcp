@@ -847,6 +847,7 @@ export interface PaymentPathRecommendation { status: 'ok' | 'partial' | 'needs_f
 /** A non-sensitive, canonical handle used to deduplicate unfinished source ingestion. */
 export interface IngestionSourceScope { kind: 'official_url' | 'offer_family'; value: string; }
 export type IngestionFlowStatus = 'awaiting_source' | 'awaiting_manifest' | 'processing_leaves' | 'ready_to_finalize' | 'complete' | 'needs_review' | 'conflict' | 'failed' | 'cancelled' | 'expired';
+export interface IngestionSourceCapture { sourceType: 'official' | 'user_input'; url?: string; description?: string; retrievedAt: string; contentHash: string; artifactRef: string; submitter: string; submittedAt: string; }
 export interface IngestionFlowRecord {
   id: string;
   ownerUser: string;
@@ -857,6 +858,7 @@ export interface IngestionFlowRecord {
   createdAt: string;
   lastActivityAt: string;
   expiresAt: string;
+  sourceCapture?: IngestionSourceCapture;
 }
 export interface IngestionDraftTombstone {
   id: string;

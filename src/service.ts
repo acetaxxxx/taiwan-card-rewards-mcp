@@ -5,7 +5,7 @@ import { EventRewardLedger, convertMinor, createPaymentEventRewardCandidate, dec
 import type { CardDescriptor, CardSwitchInput, CardSwitchProjection, CardSwitchStatus, CapPeriod, CapPoolDefinition, EvaluationContext, MerchantIdentity, MerchantResolution, Money, OfferConfirmation, OfferRuleVersion, OfferSourceSnapshot, RewardBreakdown, RewardComponentRecord, TransactionTuple, UserBenefitInput, UserBenefitStatus, EvidenceRecord, PaymentRouteRecord, PaymentCapabilityRecord, PaymentAccountRecord, EventRewardLedgerRecord, EventRewardReversalRecord, PaymentPathRequest, PaymentPathRecommendation, PaymentPathCandidate, PaymentPathEvent, EligibilityFact, RewardValuationSnapshot, FxResolutionRequest, FxEvaluationContext, AppliedFxRate, RecommendationIntent, RecommendationIntentResult, IntentCandidate, FxSnapshot, ListTransactionsOptions, ListTransactionsResult, TransactionSummaryItem, TransactionDetailItem, FundingInstrument, TransactionListItem, IngestionFlowRecord, IngestionSourceScope, IngestionDraftTombstone } from './types.js';
 import type { StartupConfig } from './startup.js';
 import { RewardServiceError } from './errors.js';
-import { validateCard, validateCapPool, validateConfirmation, validateEligibilityFact, validateMerchant, validateRecommendationTransaction, validateRule, validateSnapshot, validateTransaction, validateEvidence, validateFactCandidate, validatePaymentRouteRecord, validatePaymentCapability, validatePaymentAccountRecord, validateEventRewardInput, validatePaymentEvent, validatePaymentEventChainRule, validatePaymentEventRule, validateRewardValuationSnapshot, validateListTransactionsOptions, validateIngestionSourceScope } from './validation.js';
+import { validateCard, validateCapPool, validateConfirmation, validateEligibilityFact, validateMerchant, validateRecommendationTransaction, validateRule, validateSnapshot, validateTransaction, validateEvidence, validateFactCandidate, validatePaymentRouteRecord, validatePaymentCapability, validatePaymentAccountRecord, validateEventRewardInput, validatePaymentEvent, validatePaymentEventChainRule, validatePaymentEventRule, validateRewardValuationSnapshot, validateListTransactionsOptions, validateIngestionSourceScope, validateIngestionSourceCapture } from './validation.js';
 import { cardSwitchStatus, projectionFromInput } from './card-switch.js';
 import { buildFxResolutionRequest, freezeAppliedFxRate, deriveConversionOwner, isFxFresh, isFxCompatible, getFxScopeSpecificity, findBestMatchingFx } from './fx.js';
 import { validateRecommendationIntent } from './validation.js';
@@ -92,7 +92,7 @@ export class RewardService {
     return this.presentIngestion(flow);
   }
 
-  inspectIngestion(flowId: string): { flow: IngestionFlowRecord | Omit<IngestionDraftTombstone, 'retentionExpiresAt'> & { status: 'expired' }; nextAction: { actionId: string; kind: 'SUBMIT_SOURCE'; expectedRevision: number; completionCondition: string } | undefined } {
+  inspectIngestion(flowId: string): { flow: IngestionFlowRecord | Omit<IngestionDraftTombstone, 'retentionExpiresAt'> & { status: 'expired' }; nextAction: { actionId: string; kind: 'SUBMIT_SOURCE' | 'SUBMIT_MANIFEST'; expectedRevision: number; completionCondition: string } | undefined } {
     const ownerUser = this.requireIngestionOwner();
     if (!/^[A-Za-z0-9][A-Za-z0-9_:-]{0,127}$/.test(flowId)) throw new RewardServiceError('INVALID_INPUT', 'flowId is invalid');
     this.sweepExpiredIngestions();
@@ -102,6 +102,30 @@ export class RewardService {
     const tombstone = state.ingestionDraftTombstones.find((candidate) => candidate.id === flowId && candidate.ownerUser === ownerUser);
     if (tombstone) return { flow: { id: tombstone.id, ownerUser: tombstone.ownerUser, sourceScope: tombstone.sourceScope, revision: tombstone.revision, createdAt: tombstone.createdAt, expiredAt: tombstone.expiredAt, status: 'expired' }, nextAction: undefined };
     throw new RewardServiceError('FLOW_NOT_FOUND', `ingestion flow ${flowId} not found`);
+  }
+
+  submitIngestionSource(input: unknown): ReturnType<RewardService['inspectIngestion']> {
+    const ownerUser = this.requireIngestionOwner();
+    const item = input && typeof input === 'object' && !Array.isArray(input) ? input as Record<string, unknown> : (() => { throw new RewardServiceError('INVALID_INPUT', 'source submission must be an object'); })();
+    const flowId = typeof item.flowId === 'string' ? item.flowId : (() => { throw new RewardServiceError('INVALID_INPUT', 'flowId is required'); })();
+    const actionId = typeof item.actionId === 'string' ? item.actionId : (() => { throw new RewardServiceError('INVALID_INPUT', 'actionId is required'); })();
+    const expectedRevision = typeof item.expectedRevision === 'number' && Number.isSafeInteger(item.expectedRevision) ? item.expectedRevision : (() => { throw new RewardServiceError('INVALID_INPUT', 'expectedRevision is required'); })();
+    const capture = validateIngestionSourceCapture(item.sourceCapture);
+    this.sweepExpiredIngestions();
+    this.store.update((state) => {
+      const flow = state.ingestionFlows.find((candidate) => candidate.id === flowId && candidate.ownerUser === ownerUser);
+      if (!flow) throw new RewardServiceError('FLOW_NOT_FOUND', `ingestion flow ${flowId} not found`);
+      if (flow.status === 'awaiting_manifest' && flow.sourceCapture && JSON.stringify(flow.sourceCapture) === JSON.stringify(capture)) return;
+      const action = this.presentIngestion(flow).nextAction;
+      if (!action || flow.status !== 'awaiting_source') throw new RewardServiceError('INVALID_FLOW_ACTION', 'flow does not accept source submission', { code: 'INVALID_FLOW_ACTION', path: 'actionId', requiredFacts: [], retryAction: 'get_ingestion', affectedIds: [flow.id] });
+      if (expectedRevision !== flow.revision || actionId !== action.actionId) throw new RewardServiceError('STALE_REVISION', 'source submission action is stale', { code: 'STALE_REVISION', path: expectedRevision !== flow.revision ? 'expectedRevision' : 'actionId', requiredFacts: [], retryAction: 'get_ingestion', affectedIds: [flow.id] });
+      if (!this.captureMatchesScope(capture, flow.sourceScope)) throw new RewardServiceError('SOURCE_SCOPE_CONFLICT', 'source capture does not match the flow source scope', { code: 'SOURCE_SCOPE_CONFLICT', path: 'sourceCapture.url', requiredFacts: ['sourceScope-compatible identity'], retryAction: 'submit_ingestion_source', affectedIds: [flow.id] });
+      flow.sourceCapture = capture;
+      flow.status = 'awaiting_manifest';
+      flow.revision += 1;
+      flow.lastActivityAt = this.workflowNow().toISOString();
+    });
+    return this.inspectIngestion(flowId);
   }
 
   sweepExpiredIngestions(): { expired: number; purgedTombstones: number } {
@@ -130,8 +154,14 @@ export class RewardService {
 
   private sameSourceScope(a: IngestionSourceScope, b: IngestionSourceScope): boolean { return a.kind === b.kind && a.value === b.value; }
 
-  private presentIngestion(flow: IngestionFlowRecord): { flow: IngestionFlowRecord; nextAction: { actionId: string; kind: 'SUBMIT_SOURCE'; expectedRevision: number; completionCondition: string } | undefined } {
-    const nextAction = flow.status === 'awaiting_source' ? { actionId: `act_${crypto.createHash('sha256').update(`${flow.id}:${flow.revision}:SUBMIT_SOURCE`).digest('hex').slice(0, 24)}`, kind: 'SUBMIT_SOURCE' as const, expectedRevision: flow.revision, completionCondition: 'Submit one immutable source capture for this flow.' } : undefined;
+  private captureMatchesScope(capture: NonNullable<IngestionFlowRecord['sourceCapture']>, scope: IngestionSourceScope): boolean {
+    if (scope.kind === 'official_url') return capture.sourceType === 'official' && capture.url === scope.value;
+    return capture.sourceType === 'user_input' || capture.sourceType === 'official';
+  }
+
+  private presentIngestion(flow: IngestionFlowRecord): { flow: IngestionFlowRecord; nextAction: { actionId: string; kind: 'SUBMIT_SOURCE' | 'SUBMIT_MANIFEST'; expectedRevision: number; completionCondition: string } | undefined } {
+    const kind = flow.status === 'awaiting_source' ? 'SUBMIT_SOURCE' : flow.status === 'awaiting_manifest' ? 'SUBMIT_MANIFEST' : undefined;
+    const nextAction = kind === undefined ? undefined : { actionId: `act_${crypto.createHash('sha256').update(`${flow.id}:${flow.revision}:${kind}`).digest('hex').slice(0, 24)}`, kind: kind as 'SUBMIT_SOURCE' | 'SUBMIT_MANIFEST', expectedRevision: flow.revision, completionCondition: kind === 'SUBMIT_SOURCE' ? 'Submit one immutable source capture for this flow.' : 'Submit the complete source manifest for this flow.' };
     return { flow: structuredClone(flow), nextAction };
   }
 
