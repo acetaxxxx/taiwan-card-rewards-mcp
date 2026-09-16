@@ -87,4 +87,32 @@ describe('ingestion flow spine', () => {
     service.submitBenefitLeaf({ flowId: created.flow.id, actionId: manifested.nextAction?.actionId, expectedRevision: 3, idempotencyKey: 'merchant-ref-1', leafId: 'benefit-merchant-ref', merchantRefs: [{ rawQuery: '測試商家', market: 'TW' }], evidenceRefs: ['page:3#benefit'], offer: { snapshot: { id: 'snapshot-merchant-ref', url: 'https://bank.example/merchant-ref', fetchedAt: '2026-09-16T00:00:00.000Z', contentHash: 'merchant-ref-hash', parserVersion: '1', verified: true, sourceType: 'official' }, rule: { id: 'rule-merchant-ref', cardId: 'card-1', version: '1', sourceSnapshotId: 'snapshot-merchant-ref', status: 'candidate', validFrom: '2026-01-01T00:00:00.000Z', settlementCurrency: 'TWD', match: {}, reward: { kind: 'percentage', rateBps: 300 } } } });
     expect(store.read().rules[0]?.match.merchants).toEqual([store.read().merchants[0]?.canonicalId]);
   });
+
+  it('returns inline merchant candidates and accepts the selected candidate on retry', () => {
+    const service = new RewardService(new MemoryStore(), 'user-a');
+    for (const market of ['TW', 'JP']) service.registerMerchant({ canonicalNameZhHant: '同名商家', canonicalNameLocale: 'zh-Hant-TW', status: 'candidate', operatingMarkets: [market], provenance: { version: '1', updatedAt: '2026-09-16T00:00:00.000Z', sourceSnapshotId: 'merchant-source' } });
+    const created = service.createIngestion({ sourceScope: { kind: 'official_url', value: 'https://bank.example/ambiguous' }, idempotencyKey: 'ingest-ambiguous' });
+    const sourced = service.submitIngestionSource({ flowId: created.flow.id, actionId: created.nextAction?.actionId, expectedRevision: 1, sourceCapture: { sourceType: 'official', url: 'https://bank.example/ambiguous', retrievedAt: '2026-09-16T00:00:00.000Z', contentHash: 'ambiguous-hash', artifactRef: 'artifact:ambiguous', submitter: 'agent', submittedAt: '2026-09-16T00:00:00.000Z' } });
+    const manifested = service.submitIngestionManifest({ flowId: created.flow.id, actionId: sourced.nextAction?.actionId, expectedRevision: 2, manifest: [{ id: 'benefit-ambiguous', kind: 'benefit', summary: 'ambiguous merchant reward', evidenceLocator: 'page:4', dependsOn: [] }] });
+    const base = { flowId: created.flow.id, actionId: manifested.nextAction?.actionId, expectedRevision: 3, idempotencyKey: 'ambiguous-1', leafId: 'benefit-ambiguous', evidenceRefs: ['page:4#benefit'], offer: { snapshot: { id: 'snapshot-ambiguous', url: 'https://bank.example/ambiguous', fetchedAt: '2026-09-16T00:00:00.000Z', contentHash: 'ambiguous-hash', parserVersion: '1', verified: true, sourceType: 'official' as const }, rule: { id: 'rule-ambiguous', cardId: 'card-1', version: '1', sourceSnapshotId: 'snapshot-ambiguous', status: 'candidate' as const, validFrom: '2026-01-01T00:00:00.000Z', settlementCurrency: 'TWD' as const, match: {}, reward: { kind: 'percentage', rateBps: 300 } } } };
+    let error: any;
+    try { service.submitBenefitLeaf({ ...base, merchantRefs: [{ rawQuery: '同名商家' }] }); } catch (caught) { error = caught; }
+    expect(error?.code).toBe('NEEDS_REVIEW');
+    expect(error?.details).toEqual(expect.objectContaining({ code: 'MERCHANT_AMBIGUOUS', retryAction: 'submit_benefit_leaf', merchantResolution: expect.objectContaining({ status: 'ambiguous', candidates: expect.arrayContaining([expect.objectContaining({ canonicalNameZhHant: '同名商家' })]) }) }));
+    const selected = error.details.merchantResolution.candidates[0].canonicalId;
+    service.submitBenefitLeaf({ ...base, merchantRefs: [{ rawQuery: '同名商家', canonicalId: selected }] });
+    expect(service.inspectIngestion(created.flow.id).flow.manifest?.[0]?.disposition).toBe('materialized');
+  });
+
+  it('keeps a leaf pending when reward semantics are unsupported', () => {
+    const service = new RewardService(new MemoryStore(), 'user-a');
+    const created = service.createIngestion({ sourceScope: { kind: 'official_url', value: 'https://bank.example/unsupported-reward' }, idempotencyKey: 'ingest-unsupported-reward' });
+    const sourced = service.submitIngestionSource({ flowId: created.flow.id, actionId: created.nextAction?.actionId, expectedRevision: 1, sourceCapture: { sourceType: 'official', url: 'https://bank.example/unsupported-reward', retrievedAt: '2026-09-16T00:00:00.000Z', contentHash: 'unsupported-reward-hash', artifactRef: 'artifact:unsupported-reward', submitter: 'agent', submittedAt: '2026-09-16T00:00:00.000Z' } });
+    const manifested = service.submitIngestionManifest({ flowId: created.flow.id, actionId: sourced.nextAction?.actionId, expectedRevision: 2, manifest: [{ id: 'benefit-unsupported-reward', kind: 'benefit', summary: 'points reward', evidenceLocator: 'page:5', dependsOn: [] }] });
+    let error: any;
+    try { service.submitBenefitLeaf({ flowId: created.flow.id, actionId: manifested.nextAction?.actionId, expectedRevision: 3, idempotencyKey: 'unsupported-reward-1', leafId: 'benefit-unsupported-reward', evidenceRefs: ['page:5#benefit'], offer: { snapshot: { id: 'snapshot-unsupported-reward', url: 'https://bank.example/unsupported-reward', fetchedAt: '2026-09-16T00:00:00.000Z', contentHash: 'unsupported-reward-hash', parserVersion: '1', verified: true, sourceType: 'official' }, rule: { id: 'rule-unsupported-reward', cardId: 'card-1', version: '1', sourceSnapshotId: 'snapshot-unsupported-reward', status: 'candidate', validFrom: '2026-01-01T00:00:00.000Z', settlementCurrency: 'TWD', match: {}, reward: { kind: 'points', code: 'bank-points' } } } }); } catch (caught) { error = caught; }
+    expect(error?.code).toBe('NEEDS_REVIEW');
+    expect(error?.details).toEqual(expect.objectContaining({ code: 'UNSUPPORTED_REWARD_UNIT', path: 'offer.rule.reward.kind', retryAction: 'submit_benefit_leaf' }));
+    expect(service.inspectIngestion(created.flow.id).flow.manifest?.[0]).not.toHaveProperty('disposition');
+  });
 });
