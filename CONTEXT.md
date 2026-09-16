@@ -177,6 +177,40 @@ The derived index of Offer Rules that are active, source-trusted, time-valid,
 and evaluable for recommendation or reward calculation.
 _Avoid_: all merchant catalog, candidate offer list, search result cache
 
+## Workflow control
+
+**Ingestion Flow**:
+A tenant-scoped, MCP-controlled lifecycle that turns one complete offer source into accounted-for semantic units and candidate Rule Versions.
+_Avoid_: agent checklist, card registration, generic workflow
+
+**Ingestion Draft**:
+An incomplete, resumable Ingestion Flow whose source or manifest work is not yet finalized and whose artifacts cannot affect the Active Offer Index.
+_Avoid_: active offer, temporary card, abandoned source
+
+**Source Scope**:
+The normalized non-sensitive identity of the source or declared offer family used to deduplicate active Ingestion Drafts for one tenant.
+_Avoid_: card ID lock, URL text alone, global mutex
+
+**Manifest**:
+The immutable, revision-scoped inventory of semantic units discovered in one Offer Source Snapshot, including their identities, types, evidence locations, and dependencies.
+_Avoid_: merchant batch, inferred completion list, free-form notes
+
+**Manifest Leaf**:
+One source-local semantic unit in a Manifest, such as a benefit or shared exclusion, with one explicit terminal disposition.
+_Avoid_: rule fragment, unnamed paragraph, completion guess
+
+**Flow Action**:
+The single MCP-authorized next operation for a flow revision, with stable identity, owner, accepted result type, and completion condition.
+_Avoid_: agent-selected phase, generic to-do, implicit retry
+
+**Completion Proof**:
+The immutable record showing how every Manifest Leaf was disposed, which candidate rules were eligible for publication, and which remain blocked by their Calculation Trust Gate.
+_Avoid_: agent declaration, success flag, active rule list
+
+**Draft Tombstone**:
+The minimal tenant-scoped audit record retained after an expired Ingestion Draft's incomplete artifacts are purged.
+_Avoid_: active evidence, raw source archive, reusable rule
+
 ## Payment paths
 
 **Acceptance Network**:

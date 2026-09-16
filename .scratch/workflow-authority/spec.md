@@ -92,7 +92,7 @@ Expiry is enforced during MCP startup and mutating flow operations, so it remain
 
 ## Atomic visibility
 
-Source capture, manifest work, and leaf materialization may persist durable workflow state and candidate artifacts. They must not make incomplete rules visible to the active offer index. Finalization validates the complete dependency closure and activates all accepted Rule Versions in one store update. Failure leaves the prior active catalog unchanged.
+Source capture, manifest work, and leaf materialization may persist durable workflow state and candidate artifacts. They must not make incomplete rules visible to the active offer index. Finalization validates the complete dependency closure and atomically publishes only candidate Rule Versions that already satisfy their Calculation Trust Gate. A complete ingestion may retain candidates awaiting Offer Confirmation; its Completion Proof records that state. Failure leaves the prior active catalog unchanged.
 
 ## Recommendation lifecycle
 
