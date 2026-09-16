@@ -73,19 +73,19 @@ function createMcpClient(dataDir: string, user = 'low-reasoning-user') {
 }
 
 describe('low-reasoning deterministic public-contract workflow test', () => {
-  it('verifies 20 MCP tools and full end-to-end guidance lifecycle over stdio', async () => {
+  it('verifies 22 MCP tools and full end-to-end guidance lifecycle over stdio', async () => {
     const dataDir = mkdtempSync(join(tmpdir(), 'low-reasoning-workflow-e2e-'));
     const client = createMcpClient(dataDir, 'low-reasoning-user');
 
     try {
-      // Step 1: Initialize and verify 20 MCP tools
+      // Step 1: Initialize and verify 22 MCP tools
       const initRes = await client.send('initialize');
       expect(initRes.result).toBeDefined();
       expect(initRes.result.serverInfo.name).toBe('taiwan_card_rewards_mcp');
 
       const toolsRes = await client.send('tools/list');
       const toolNames = toolsRes.result.tools.map((t: any) => t.name);
-      expect(toolNames).toHaveLength(20);
+      expect(toolNames).toHaveLength(22);
       expect(toolNames).toContain('recommend');
       expect(toolNames).toContain('resolve_merchant');
       expect(toolNames).toContain('upsert_offer');

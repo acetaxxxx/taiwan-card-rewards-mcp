@@ -2,10 +2,10 @@ import * as crypto from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { type LedgerStore, type RecordedTransaction, type StoredState, contentHash } from './store.js';
 import { EventRewardLedger, convertMinor, createPaymentEventRewardCandidate, decidePaymentEventRewards, evaluateOffer, evaluatePredicate, matchPaymentEvent, matchPaymentEventChain, matchPaymentRouteSelector, rankCards, resolveCyclePeriodKey } from './evaluator.js';
-import type { CardDescriptor, CardSwitchInput, CardSwitchProjection, CardSwitchStatus, CapPeriod, CapPoolDefinition, EvaluationContext, MerchantIdentity, MerchantResolution, Money, OfferConfirmation, OfferRuleVersion, OfferSourceSnapshot, RewardBreakdown, RewardComponentRecord, TransactionTuple, UserBenefitInput, UserBenefitStatus, EvidenceRecord, PaymentRouteRecord, PaymentCapabilityRecord, PaymentAccountRecord, EventRewardLedgerRecord, EventRewardReversalRecord, PaymentPathRequest, PaymentPathRecommendation, PaymentPathCandidate, PaymentPathEvent, EligibilityFact, RewardValuationSnapshot, FxResolutionRequest, FxEvaluationContext, AppliedFxRate, RecommendationIntent, RecommendationIntentResult, IntentCandidate, FxSnapshot, ListTransactionsOptions, ListTransactionsResult, TransactionSummaryItem, TransactionDetailItem, FundingInstrument, TransactionListItem } from './types.js';
+import type { CardDescriptor, CardSwitchInput, CardSwitchProjection, CardSwitchStatus, CapPeriod, CapPoolDefinition, EvaluationContext, MerchantIdentity, MerchantResolution, Money, OfferConfirmation, OfferRuleVersion, OfferSourceSnapshot, RewardBreakdown, RewardComponentRecord, TransactionTuple, UserBenefitInput, UserBenefitStatus, EvidenceRecord, PaymentRouteRecord, PaymentCapabilityRecord, PaymentAccountRecord, EventRewardLedgerRecord, EventRewardReversalRecord, PaymentPathRequest, PaymentPathRecommendation, PaymentPathCandidate, PaymentPathEvent, EligibilityFact, RewardValuationSnapshot, FxResolutionRequest, FxEvaluationContext, AppliedFxRate, RecommendationIntent, RecommendationIntentResult, IntentCandidate, FxSnapshot, ListTransactionsOptions, ListTransactionsResult, TransactionSummaryItem, TransactionDetailItem, FundingInstrument, TransactionListItem, IngestionFlowRecord, IngestionSourceScope, IngestionDraftTombstone } from './types.js';
 import type { StartupConfig } from './startup.js';
 import { RewardServiceError } from './errors.js';
-import { validateCard, validateCapPool, validateConfirmation, validateEligibilityFact, validateMerchant, validateRecommendationTransaction, validateRule, validateSnapshot, validateTransaction, validateEvidence, validateFactCandidate, validatePaymentRouteRecord, validatePaymentCapability, validatePaymentAccountRecord, validateEventRewardInput, validatePaymentEvent, validatePaymentEventChainRule, validatePaymentEventRule, validateRewardValuationSnapshot, validateListTransactionsOptions } from './validation.js';
+import { validateCard, validateCapPool, validateConfirmation, validateEligibilityFact, validateMerchant, validateRecommendationTransaction, validateRule, validateSnapshot, validateTransaction, validateEvidence, validateFactCandidate, validatePaymentRouteRecord, validatePaymentCapability, validatePaymentAccountRecord, validateEventRewardInput, validatePaymentEvent, validatePaymentEventChainRule, validatePaymentEventRule, validateRewardValuationSnapshot, validateListTransactionsOptions, validateIngestionSourceScope } from './validation.js';
 import { cardSwitchStatus, projectionFromInput } from './card-switch.js';
 import { buildFxResolutionRequest, freezeAppliedFxRate, deriveConversionOwner, isFxFresh, isFxCompatible, getFxScopeSpecificity, findBestMatchingFx } from './fx.js';
 import { validateRecommendationIntent } from './validation.js';
@@ -59,7 +59,81 @@ function fundingMatches(a: TransactionTuple, b: TransactionTuple): boolean {
 }
 
 export class RewardService {
-  constructor(readonly store: LedgerStore, readonly metadataUser: string | undefined) {}
+  private readonly workflowNow: () => Date;
+  private readonly ingestionDraftTtlMs: number;
+  private readonly ingestionTombstoneRetentionMs: number;
+
+  constructor(readonly store: LedgerStore, readonly metadataUser: string | undefined, options: { now?: () => Date; ingestionDraftTtlMs?: number; ingestionTombstoneRetentionMs?: number } = {}) {
+    this.workflowNow = options.now ?? (() => new Date());
+    this.ingestionDraftTtlMs = options.ingestionDraftTtlMs ?? 7 * 24 * 60 * 60 * 1000;
+    this.ingestionTombstoneRetentionMs = options.ingestionTombstoneRetentionMs ?? 30 * 24 * 60 * 60 * 1000;
+    if (!Number.isSafeInteger(this.ingestionDraftTtlMs) || this.ingestionDraftTtlMs < 1 || !Number.isSafeInteger(this.ingestionTombstoneRetentionMs) || this.ingestionTombstoneRetentionMs < 1) throw new RewardServiceError('INVALID_INPUT', 'ingestion draft retention settings must be positive integers');
+    this.sweepExpiredIngestions();
+  }
+
+  createIngestion(input: unknown): ReturnType<RewardService['inspectIngestion']> {
+    const ownerUser = this.requireIngestionOwner();
+    const item = input && typeof input === 'object' && !Array.isArray(input) ? input as Record<string, unknown> : (() => { throw new RewardServiceError('INVALID_INPUT', 'ingestion create input must be an object'); })();
+    const sourceScope = validateIngestionSourceScope(item.sourceScope);
+    const idempotencyKey = typeof item.idempotencyKey === 'string' && /^[A-Za-z0-9][A-Za-z0-9_:-]{0,127}$/.test(item.idempotencyKey) ? item.idempotencyKey : (() => { throw new RewardServiceError('INVALID_INPUT', 'idempotencyKey must be a valid identifier'); })();
+    this.sweepExpiredIngestions();
+    const now = this.workflowNow();
+    const result = this.store.update((state) => {
+      const byKey = state.ingestionFlows.find((flow) => flow.ownerUser === ownerUser && flow.idempotencyKey === idempotencyKey);
+      if (byKey && !this.sameSourceScope(byKey.sourceScope, sourceScope)) throw new RewardServiceError('IDEMPOTENCY_CONFLICT', 'idempotencyKey already belongs to a different ingestion source scope', { code: 'IDEMPOTENCY_CONFLICT', path: 'idempotencyKey', requiredFacts: [], retryAction: 'create_ingestion_with_new_idempotency_key', affectedIds: [byKey.id] });
+      if (byKey) return;
+      const existing = state.ingestionFlows.find((flow) => flow.ownerUser === ownerUser && this.sameSourceScope(flow.sourceScope, sourceScope));
+      if (existing) return;
+      const stamp = now.toISOString();
+      state.ingestionFlows.push({ id: `flow_${crypto.randomUUID().replace(/-/g, '')}`, ownerUser, sourceScope, revision: 1, status: 'awaiting_source', idempotencyKey, createdAt: stamp, lastActivityAt: stamp, expiresAt: new Date(now.getTime() + this.ingestionDraftTtlMs).toISOString() });
+    });
+    const flow = result.ingestionFlows.find((candidate) => candidate.ownerUser === ownerUser && candidate.idempotencyKey === idempotencyKey) ?? result.ingestionFlows.find((candidate) => candidate.ownerUser === ownerUser && this.sameSourceScope(candidate.sourceScope, sourceScope));
+    if (!flow) throw new RewardServiceError('STORE_UNAVAILABLE', 'ingestion flow was not persisted');
+    return this.presentIngestion(flow);
+  }
+
+  inspectIngestion(flowId: string): { flow: IngestionFlowRecord | Omit<IngestionDraftTombstone, 'retentionExpiresAt'> & { status: 'expired' }; nextAction: { actionId: string; kind: 'SUBMIT_SOURCE'; expectedRevision: number; completionCondition: string } | undefined } {
+    const ownerUser = this.requireIngestionOwner();
+    if (!/^[A-Za-z0-9][A-Za-z0-9_:-]{0,127}$/.test(flowId)) throw new RewardServiceError('INVALID_INPUT', 'flowId is invalid');
+    this.sweepExpiredIngestions();
+    const state = this.store.read();
+    const flow = state.ingestionFlows.find((candidate) => candidate.id === flowId && candidate.ownerUser === ownerUser);
+    if (flow) return this.presentIngestion(flow);
+    const tombstone = state.ingestionDraftTombstones.find((candidate) => candidate.id === flowId && candidate.ownerUser === ownerUser);
+    if (tombstone) return { flow: { id: tombstone.id, ownerUser: tombstone.ownerUser, sourceScope: tombstone.sourceScope, revision: tombstone.revision, createdAt: tombstone.createdAt, expiredAt: tombstone.expiredAt, status: 'expired' }, nextAction: undefined };
+    throw new RewardServiceError('FLOW_NOT_FOUND', `ingestion flow ${flowId} not found`);
+  }
+
+  sweepExpiredIngestions(): { expired: number; purgedTombstones: number } {
+    const now = this.workflowNow();
+    let expired = 0;
+    let purgedTombstones = 0;
+    this.store.update((state) => {
+      const retained: IngestionFlowRecord[] = [];
+      for (const flow of state.ingestionFlows) {
+        if (Date.parse(flow.expiresAt) > now.getTime()) { retained.push(flow); continue; }
+        expired += 1;
+        state.ingestionDraftTombstones.push({ id: flow.id, ownerUser: flow.ownerUser, sourceScope: flow.sourceScope, revision: flow.revision, createdAt: flow.createdAt, expiredAt: now.toISOString(), retentionExpiresAt: new Date(now.getTime() + this.ingestionTombstoneRetentionMs).toISOString() });
+      }
+      state.ingestionFlows = retained;
+      const before = state.ingestionDraftTombstones.length;
+      state.ingestionDraftTombstones = state.ingestionDraftTombstones.filter((tombstone) => Date.parse(tombstone.retentionExpiresAt) > now.getTime());
+      purgedTombstones = before - state.ingestionDraftTombstones.length;
+    });
+    return { expired, purgedTombstones };
+  }
+
+  private requireIngestionOwner(): string {
+    if (!this.metadataUser) throw new RewardServiceError('UNAUTHENTICATED', 'ingestion flows require an authenticated user');
+    return this.metadataUser;
+  }
+
+  private sameSourceScope(a: IngestionSourceScope, b: IngestionSourceScope): boolean { return a.kind === b.kind && a.value === b.value; }
+
+  private presentIngestion(flow: IngestionFlowRecord): { flow: IngestionFlowRecord; nextAction: { actionId: string; kind: 'SUBMIT_SOURCE'; expectedRevision: number; completionCondition: string } | undefined } {
+    const nextAction = flow.status === 'awaiting_source' ? { actionId: `act_${crypto.createHash('sha256').update(`${flow.id}:${flow.revision}:SUBMIT_SOURCE`).digest('hex').slice(0, 24)}`, kind: 'SUBMIT_SOURCE' as const, expectedRevision: flow.revision, completionCondition: 'Submit one immutable source capture for this flow.' } : undefined;
+    return { flow: structuredClone(flow), nextAction };
+  }
 
   recordEventReward(input: unknown): EventRewardLedgerRecord {
     if (!this.metadataUser) throw new RewardServiceError('UNAUTHENTICATED', 'event reward recording requires an authenticated user');

@@ -150,6 +150,8 @@ async function callTool(service: RewardService, params: Record<string, unknown>)
     return projectPage(projected, { page: effectivePage, limit: effectiveLimit, maxItems, maxBytes: 256 * 1024, evaluatedAt: new Date().toISOString(), dataVersion: contentHash(JSON.stringify(projected)).slice(0, 16), sortKey });
   };
   switch (name) {
+    case 'create_ingestion': return service.createIngestion(args);
+    case 'get_ingestion': return service.inspectIngestion(String(args.flowId));
     case 'register_card': return service.registerCard(validateCard(args.card));
     case 'list_cards': return maybePaged(service.listCards(), (item) => String((item as CardDescriptor).id), 50);
     case 'upsert_offer': return service.upsertOffer(validateSnapshot(args.snapshot), validateRule(args.rule), args.confirmation !== undefined ? validateConfirmation(args.confirmation) : undefined, args.capPools === undefined ? undefined : (Array.isArray(args.capPools) ? args.capPools.map(validateCapPool) : []), args.merchant as any);

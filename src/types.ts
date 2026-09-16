@@ -844,6 +844,30 @@ export interface PaymentPathCandidate {
 }
 export interface PaymentPathRecommendation { status: 'ok' | 'partial' | 'needs_facts' | 'needs_review' | 'no_match'; candidates: readonly PaymentPathCandidate[]; evaluatedAt: string; blocked?: readonly { routeId: string; reason: string }[]; diagnostics?: readonly string[]; limits?: { maxCandidates: number; maxHops: number; maxEvents: number; maxBranchesPerNode: number }; }
 
+/** A non-sensitive, canonical handle used to deduplicate unfinished source ingestion. */
+export interface IngestionSourceScope { kind: 'official_url' | 'offer_family'; value: string; }
+export type IngestionFlowStatus = 'awaiting_source' | 'awaiting_manifest' | 'processing_leaves' | 'ready_to_finalize' | 'complete' | 'needs_review' | 'conflict' | 'failed' | 'cancelled' | 'expired';
+export interface IngestionFlowRecord {
+  id: string;
+  ownerUser: string;
+  sourceScope: IngestionSourceScope;
+  revision: number;
+  status: IngestionFlowStatus;
+  idempotencyKey: string;
+  createdAt: string;
+  lastActivityAt: string;
+  expiresAt: string;
+}
+export interface IngestionDraftTombstone {
+  id: string;
+  ownerUser: string;
+  sourceScope: IngestionSourceScope;
+  revision: number;
+  createdAt: string;
+  expiredAt: string;
+  retentionExpiresAt: string;
+}
+
 export interface McpToolContract {
   name: string;
   description: string;

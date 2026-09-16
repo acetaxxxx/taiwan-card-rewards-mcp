@@ -1,5 +1,5 @@
 import { SUPPORTED_PREDICATE_FIELDS } from './types.js';
-import type { CardDescriptor, CardProduct, CapPeriod, CapPoolDefinition, CardSwitchCampaign, CardSwitchConfirmation, CardSwitchInput, CardSwitchEnrollment, CardSwitchProjection, EligibilityFact, EvaluationContext, FxSnapshot, HeldCard, MerchantIdentity, MerchantProvenance, Money, OfferConfirmation, OfferProvenance, OfferRuleVersion, OfferSourceSnapshot, Predicate, PredicateValue, RewardBreakdown, RewardSpec, RuleMatch, TransactionTuple, PaymentRouteKind, RewardComponentKind, RewardComponentRecord, PaymentRouteContext, PaymentRouteRecord, PaymentCapabilityRecord, PaymentAccountRecord, PaymentEvent, PaymentEventKind, PaymentEventRule, PaymentEventChainRule, EventRewardLedgerRecord, EventRewardReversalRecord, EventRewardCapUsageRecord, PaymentEventRewardCandidate, PaymentEventRewardCandidateInput, PaymentEventMatch, RewardValuationSnapshot, PaymentRouteSelector, FundingInstrument, ListTransactionsOptions, TransactionTimeBasis, AppliedFxRate, FxRateType } from './types.js';
+import type { CardDescriptor, CardProduct, CapPeriod, CapPoolDefinition, CardSwitchCampaign, CardSwitchConfirmation, CardSwitchInput, CardSwitchEnrollment, CardSwitchProjection, EligibilityFact, EvaluationContext, FxSnapshot, HeldCard, MerchantIdentity, MerchantProvenance, Money, OfferConfirmation, OfferProvenance, OfferRuleVersion, OfferSourceSnapshot, Predicate, PredicateValue, RewardBreakdown, RewardSpec, RuleMatch, TransactionTuple, PaymentRouteKind, RewardComponentKind, RewardComponentRecord, PaymentRouteContext, PaymentRouteRecord, PaymentCapabilityRecord, PaymentAccountRecord, PaymentEvent, PaymentEventKind, PaymentEventRule, PaymentEventChainRule, EventRewardLedgerRecord, EventRewardReversalRecord, EventRewardCapUsageRecord, PaymentEventRewardCandidate, PaymentEventRewardCandidateInput, PaymentEventMatch, RewardValuationSnapshot, PaymentRouteSelector, FundingInstrument, ListTransactionsOptions, TransactionTimeBasis, AppliedFxRate, FxRateType, IngestionSourceScope, IngestionFlowRecord, IngestionDraftTombstone } from './types.js';
 import type { StoredState } from './store.js';
 import type { EvidenceRecord, FactCandidate } from './types.js';
 import { RewardServiceError } from './errors.js';
@@ -958,10 +958,44 @@ function validateAppliedFxRate(value: unknown): AppliedFxRate {
   };
 }
 
+export function validateIngestionSourceScope(value: unknown): IngestionSourceScope {
+  const item = object(value, 'ingestion sourceScope');
+  keys(item, ['kind', 'value'], 'ingestion sourceScope');
+  const kind = requiredString(item.kind, 'ingestion sourceScope.kind');
+  const rawValue = requiredString(item.value, 'ingestion sourceScope.value');
+  if (kind === 'official_url') {
+    let url: URL;
+    try { url = new URL(rawValue); } catch { throw new RewardServiceError('INVALID_INPUT', 'ingestion sourceScope.value must be an absolute HTTPS URL'); }
+    if (url.protocol !== 'https:' || url.username || url.password) throw new RewardServiceError('INVALID_INPUT', 'ingestion sourceScope.value must be a credential-free HTTPS URL');
+    url.hash = '';
+    return { kind, value: url.toString() };
+  }
+  if (kind === 'offer_family') {
+    const normalized = rawValue.normalize('NFKC').trim().toLocaleLowerCase('und');
+    if (!/^[a-z0-9][a-z0-9_:-]{0,127}$/.test(normalized)) throw new RewardServiceError('INVALID_INPUT', 'ingestion sourceScope.value must be a normalized offer-family identifier');
+    return { kind, value: normalized };
+  }
+  throw new RewardServiceError('INVALID_INPUT', 'ingestion sourceScope.kind is invalid');
+}
+
+function validateIngestionFlow(value: unknown): IngestionFlowRecord {
+  const item = object(value, 'ingestion flow');
+  keys(item, ['id', 'ownerUser', 'sourceScope', 'revision', 'status', 'idempotencyKey', 'createdAt', 'lastActivityAt', 'expiresAt'], 'ingestion flow');
+  const status = requiredString(item.status, 'ingestion flow.status');
+  if (!['awaiting_source', 'awaiting_manifest', 'processing_leaves', 'ready_to_finalize', 'complete', 'needs_review', 'conflict', 'failed', 'cancelled', 'expired'].includes(status)) throw new RewardServiceError('INVALID_INPUT', 'ingestion flow.status is invalid');
+  return { id: requiredString(item.id, 'ingestion flow.id', true), ownerUser: requiredString(item.ownerUser, 'ingestion flow.ownerUser', true), sourceScope: validateIngestionSourceScope(item.sourceScope), revision: safeInt(item.revision, 'ingestion flow.revision', 1), status: status as IngestionFlowRecord['status'], idempotencyKey: requiredString(item.idempotencyKey, 'ingestion flow.idempotencyKey', true), createdAt: iso(item.createdAt, 'ingestion flow.createdAt'), lastActivityAt: iso(item.lastActivityAt, 'ingestion flow.lastActivityAt'), expiresAt: iso(item.expiresAt, 'ingestion flow.expiresAt') };
+}
+
+function validateIngestionDraftTombstone(value: unknown): IngestionDraftTombstone {
+  const item = object(value, 'ingestion draft tombstone');
+  keys(item, ['id', 'ownerUser', 'sourceScope', 'revision', 'createdAt', 'expiredAt', 'retentionExpiresAt'], 'ingestion draft tombstone');
+  return { id: requiredString(item.id, 'ingestion draft tombstone.id', true), ownerUser: requiredString(item.ownerUser, 'ingestion draft tombstone.ownerUser', true), sourceScope: validateIngestionSourceScope(item.sourceScope), revision: safeInt(item.revision, 'ingestion draft tombstone.revision', 1), createdAt: iso(item.createdAt, 'ingestion draft tombstone.createdAt'), expiredAt: iso(item.expiredAt, 'ingestion draft tombstone.expiredAt'), retentionExpiresAt: iso(item.retentionExpiresAt, 'ingestion draft tombstone.retentionExpiresAt') };
+}
+
 export function validateStoredState(value: unknown): StoredState {
   const item = object(value, 'stored state');
-  keys(item, ['schemaVersion', 'cards', 'snapshots', 'rules', 'transactions', 'campaigns', 'switchEnrollments', 'cardSwitches', 'capPools', 'rewardComponents', 'merchants', 'evidence', 'factCandidates', 'paymentRoutes', 'paymentCapabilities', 'paymentAccounts', 'valuationSnapshots', 'eventRewardSchemaVersion', 'eventRewardLedger', 'eventRewardReversals', 'eventRewardCapUsage'], 'stored state');
-  if (item.schemaVersion !== 2) throw new RewardServiceError('INCOMPATIBLE_SCHEMA', 'schema v1 or another unsupported schema requires explicit migration or reset; data was not deleted');
+  keys(item, ['schemaVersion', 'cards', 'snapshots', 'rules', 'transactions', 'campaigns', 'switchEnrollments', 'cardSwitches', 'capPools', 'rewardComponents', 'merchants', 'evidence', 'factCandidates', 'paymentRoutes', 'paymentCapabilities', 'paymentAccounts', 'valuationSnapshots', 'eventRewardSchemaVersion', 'eventRewardLedger', 'eventRewardReversals', 'eventRewardCapUsage', 'ingestionFlows', 'ingestionDraftTombstones'], 'stored state');
+  if (item.schemaVersion !== 2 && item.schemaVersion !== 3) throw new RewardServiceError('INCOMPATIBLE_SCHEMA', 'unsupported persistent schema version; data was not deleted');
   if (item.eventRewardSchemaVersion !== undefined && item.eventRewardSchemaVersion !== 1) throw new RewardServiceError('INCOMPATIBLE_SCHEMA', 'unsupported event reward ledger schema version; data was not deleted');
   if (!Array.isArray(item.cards) || !Array.isArray(item.snapshots) || !Array.isArray(item.rules) || !Array.isArray(item.transactions)) throw new RewardServiceError('STORE_CORRUPT', 'state collections must be arrays');
   const transactions = item.transactions.map((value, index) => {
@@ -993,10 +1027,14 @@ export function validateStoredState(value: unknown): StoredState {
   const eventRewardLedger = item.eventRewardLedger === undefined ? [] : (Array.isArray(item.eventRewardLedger) ? item.eventRewardLedger.map(validateEventRewardLedger) : (() => { throw new RewardServiceError('STORE_CORRUPT', 'eventRewardLedger must be an array'); })());
   const eventRewardReversals = item.eventRewardReversals === undefined ? [] : (Array.isArray(item.eventRewardReversals) ? item.eventRewardReversals.map(validateEventRewardReversal) : (() => { throw new RewardServiceError('STORE_CORRUPT', 'eventRewardReversals must be an array'); })());
   const eventRewardCapUsage = item.eventRewardCapUsage === undefined ? [] : (Array.isArray(item.eventRewardCapUsage) ? item.eventRewardCapUsage.map(validateEventRewardCapUsage) : (() => { throw new RewardServiceError('STORE_CORRUPT', 'eventRewardCapUsage must be an array'); })());
+  const ingestionFlows = item.ingestionFlows === undefined ? [] : (Array.isArray(item.ingestionFlows) ? item.ingestionFlows.map(validateIngestionFlow) : (() => { throw new RewardServiceError('STORE_CORRUPT', 'ingestionFlows must be an array'); })());
+  const ingestionDraftTombstones = item.ingestionDraftTombstones === undefined ? [] : (Array.isArray(item.ingestionDraftTombstones) ? item.ingestionDraftTombstones.map(validateIngestionDraftTombstone) : (() => { throw new RewardServiceError('STORE_CORRUPT', 'ingestionDraftTombstones must be an array'); })());
   if (new Set(capPools.map((pool) => pool.id)).size !== capPools.length) throw new RewardServiceError('STORE_CORRUPT', 'duplicate cap pool id');
   if (new Set(eventRewardLedger.map((record) => record.idempotencyKey)).size !== eventRewardLedger.length) throw new RewardServiceError('STORE_CORRUPT', 'duplicate event reward ledger idempotency key');
   if (new Set(eventRewardReversals.map((record) => record.idempotencyKey)).size !== eventRewardReversals.length) throw new RewardServiceError('STORE_CORRUPT', 'duplicate event reward reversal idempotency key');
-  return { schemaVersion: 2, cards: item.cards.map(validateCard), snapshots: item.snapshots.map(validateSnapshot), rules: item.rules.map(validateRule), transactions, campaigns, switchEnrollments, cardSwitches, capPools, rewardComponents, merchants, evidence, factCandidates, paymentRoutes, paymentCapabilities, paymentAccounts, valuationSnapshots, eventRewardSchemaVersion: 1, eventRewardLedger, eventRewardReversals, eventRewardCapUsage };
+  if (new Set(ingestionFlows.map((flow) => flow.id)).size !== ingestionFlows.length) throw new RewardServiceError('STORE_CORRUPT', 'duplicate ingestion flow id');
+  if (new Set(ingestionDraftTombstones.map((tombstone) => tombstone.id)).size !== ingestionDraftTombstones.length) throw new RewardServiceError('STORE_CORRUPT', 'duplicate ingestion draft tombstone id');
+  return { schemaVersion: 3, cards: item.cards.map(validateCard), snapshots: item.snapshots.map(validateSnapshot), rules: item.rules.map(validateRule), transactions, campaigns, switchEnrollments, cardSwitches, capPools, rewardComponents, merchants, evidence, factCandidates, paymentRoutes, paymentCapabilities, paymentAccounts, valuationSnapshots, eventRewardSchemaVersion: 1, eventRewardLedger, eventRewardReversals, eventRewardCapUsage, ingestionFlows, ingestionDraftTombstones };
 }
 
 function validatePaymentRouteLayer(value: unknown): PaymentRouteRecord['layers'][number] {
