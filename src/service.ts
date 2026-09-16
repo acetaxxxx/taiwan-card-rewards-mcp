@@ -2,7 +2,7 @@ import * as crypto from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { type LedgerStore, type RecordedTransaction, type StoredState, contentHash } from './store.js';
 import { EventRewardLedger, convertMinor, createPaymentEventRewardCandidate, decidePaymentEventRewards, evaluateOffer, evaluatePredicate, matchPaymentEvent, matchPaymentEventChain, matchPaymentRouteSelector, rankCards, resolveCyclePeriodKey } from './evaluator.js';
-import type { CardDescriptor, CardSwitchInput, CardSwitchProjection, CardSwitchStatus, CapPeriod, CapPoolDefinition, EvaluationContext, MerchantIdentity, MerchantResolution, Money, OfferConfirmation, OfferRuleVersion, OfferSourceSnapshot, RewardBreakdown, RewardComponentRecord, TransactionTuple, UserBenefitInput, UserBenefitStatus, EvidenceRecord, PaymentRouteRecord, PaymentCapabilityRecord, PaymentAccountRecord, EventRewardLedgerRecord, EventRewardReversalRecord, PaymentPathRequest, PaymentPathRecommendation, PaymentPathCandidate, PaymentPathEvent, EligibilityFact, RewardValuationSnapshot, FxResolutionRequest, FxEvaluationContext, AppliedFxRate, RecommendationIntent, RecommendationIntentResult, IntentCandidate, FxSnapshot, ListTransactionsOptions, ListTransactionsResult, TransactionSummaryItem, TransactionDetailItem, FundingInstrument, TransactionListItem, IngestionFlowRecord, IngestionSourceScope, IngestionDraftTombstone, IngestionBenefitLeafSubmission, IngestionBenefitArtifact, IngestionExclusionArtifact, AppliedExclusion, IngestionCompletionProof } from './types.js';
+import type { CardDescriptor, CardSwitchInput, CardSwitchProjection, CardSwitchStatus, CapPeriod, CapPoolDefinition, Diagnostic, EvaluationContext, MerchantIdentity, MerchantResolution, Money, OfferConfirmation, OfferRuleVersion, OfferSourceSnapshot, RewardBreakdown, RewardComponentRecord, TransactionTuple, UserBenefitInput, UserBenefitStatus, EvidenceRecord, PaymentRouteRecord, PaymentCapabilityRecord, PaymentAccountRecord, EventRewardLedgerRecord, EventRewardReversalRecord, PaymentPathRequest, PaymentPathRecommendation, PaymentPathCandidate, PaymentPathEvent, EligibilityFact, RewardValuationSnapshot, FxResolutionRequest, FxEvaluationContext, AppliedFxRate, RecommendationIntent, RecommendationIntentResult, IntentCandidate, FxSnapshot, ListTransactionsOptions, ListTransactionsResult, TransactionSummaryItem, TransactionDetailItem, FundingInstrument, TransactionListItem, IngestionFlowRecord, IngestionSourceScope, IngestionDraftTombstone, IngestionBenefitLeafSubmission, IngestionBenefitArtifact, IngestionExclusionArtifact, AppliedExclusion, IngestionCompletionProof } from './types.js';
 import type { StartupConfig } from './startup.js';
 import { RewardServiceError } from './errors.js';
 import { validateCard, validateCapPool, validateConfirmation, validateEligibilityFact, validateMerchant, validateRecommendationTransaction, validateRule, validateSnapshot, validateTransaction, validateEvidence, validateFactCandidate, validatePaymentRouteRecord, validatePaymentCapability, validatePaymentAccountRecord, validateEventRewardInput, validatePaymentEvent, validatePaymentEventChainRule, validatePaymentEventRule, validateRewardValuationSnapshot, validateListTransactionsOptions, validateIngestionSourceScope, validateIngestionSourceCapture, validateIngestionManifest, validateIngestionBenefitLeaf, validateIngestionExclusionLeaf } from './validation.js';
@@ -1001,17 +1001,71 @@ export class RewardService {
     const actions: Array<RecommendationIntentResult['requiredActions'][number]> = [];
     const addAction = (action: RecommendationIntentResult['requiredActions'][number]) => {
       const existing = actions.find((candidate) => candidate.id === action.id);
-      if (!existing) { actions.push(action); return; }
+      if (!existing) {
+        actions.push({
+          ...action,
+          candidateIds: action.candidateIds ? [...action.candidateIds].sort() : undefined,
+          ...(action.diagnostic ? {
+            diagnostic: {
+              ...action.diagnostic,
+              candidateIds: action.candidateIds ? [...action.candidateIds].sort() : action.diagnostic.candidateIds,
+            },
+          } : {}),
+        });
+        return;
+      }
       const candidateIds = [...new Set([...(existing.candidateIds ?? []), ...(action.candidateIds ?? [])])].sort();
-      if (candidateIds.length) (existing as { candidateIds?: readonly string[] }).candidateIds = candidateIds;
+      if (candidateIds.length) {
+        (existing as { candidateIds?: readonly string[] }).candidateIds = candidateIds;
+        if (existing.diagnostic) {
+          (existing.diagnostic as { candidateIds?: readonly string[] }).candidateIds = candidateIds;
+        }
+      }
     };
-    if (resolution.resolutionStatus !== 'confirmed') addAction({
-      id: 'merchant', action: resolution.resolutionStatus === 'ambiguous' ? 'resolve_merchant' : 'research_merchant',
-      owner: resolution.resolutionStatus === 'ambiguous' ? 'user' : 'agent',
-      path: 'merchant', requiredFacts: ['confirmed merchant identity and market'], submission: { tool: 'recommend', field: 'merchant' },
-      completionCondition: 'repeat recommend after merchant identity and market are resolved; without new facts, stop retrying',
-    });
-    if (!input.amount) addAction({ id: 'amount', action: 'ask_user', owner: 'user', path: 'amount', requiredFacts: ['amount.amountMinor', 'amount.currency'], submission: { tool: 'recommend', field: 'amount' }, completionCondition: 'repeat recommend with a positive amount and currency' });
+    if (resolution.resolutionStatus !== 'confirmed') {
+      const isAmbiguous = resolution.resolutionStatus === 'ambiguous';
+      const actionName = isAmbiguous ? 'resolve_merchant' : 'research_merchant';
+      const owner = isAmbiguous ? 'user' : 'agent';
+      const code = isAmbiguous ? 'merchant_ambiguous' : 'merchant_not_found';
+      addAction({
+        id: 'merchant',
+        action: actionName,
+        owner,
+        path: 'merchant',
+        requiredFacts: ['confirmed merchant identity and market'],
+        submission: { tool: 'recommend', field: 'merchant' },
+        completionCondition: 'repeat recommend after merchant identity and market are resolved; without new facts, stop retrying',
+        diagnostic: {
+          code,
+          path: 'merchant',
+          requiredFacts: ['confirmed merchant identity and market'],
+          retryAction: actionName,
+          nextAction: actionName,
+          message: isAmbiguous
+            ? `merchant '${rawMerchant}' is ambiguous across multiple markets`
+            : `merchant '${rawMerchant}' identity is not confirmed in the catalog`,
+        },
+      });
+    }
+    if (!input.amount) {
+      addAction({
+        id: 'amount',
+        action: 'ask_user',
+        owner: 'user',
+        path: 'amount',
+        requiredFacts: ['amount.amountMinor', 'amount.currency'],
+        submission: { tool: 'recommend', field: 'amount' },
+        completionCondition: 'repeat recommend with a positive amount and currency',
+        diagnostic: {
+          code: 'missing_required_fact',
+          path: 'amount',
+          requiredFacts: ['amount.amountMinor', 'amount.currency'],
+          retryAction: 'ask_user',
+          nextAction: 'ask_user',
+          message: 'transaction amount and currency are required to evaluate rewards',
+        },
+      });
+    }
     const merchant = resolution.merchant?.canonicalId;
     const transaction = input.amount ? validateRecommendationTransaction({
       kind: 'purchase', mode: 'planned', occurredAt: evaluatedAt, amount: input.amount,
@@ -1020,7 +1074,10 @@ export class RewardService {
       ...(input.paymentMethod ? { paymentMethod: input.paymentMethod } : {}),
       ...(input.fx ? { fx: input.fx } : {}),
     }) : undefined;
-    const context = this.context(state, evaluatedAt, transaction);
+    const context = {
+      ...this.context(state, evaluatedAt, transaction),
+      ...(input.eligibilityFacts ? { eligibilityFacts: input.eligibilityFacts } : {}),
+    };
     const cards = state.cards.filter(card => input.cardIds === undefined || input.cardIds.includes(card.id));
     const registeredRoutes = this.listPaymentRoutes().filter(route =>
       (input.routeIds === undefined || input.routeIds.includes(route.id)) &&
@@ -1100,7 +1157,24 @@ export class RewardService {
         }
         if (!generatedCapabilityIds.has(capability.id)) {
           const fundingKind = capability.fundingKinds.find((k) => k !== 'cash') ?? capability.fundingKinds[0]!;
-          addAction({ id: `capability:${capability.id}`, action: 'bind_payment_method', owner: 'user', path: `paymentCapabilities.${capability.id}`, requiredFacts: capability.fundingKinds.map((kind) => `held ${kind}`), candidateIds: [], submission: fundingKind === 'credit_card' ? { tool: 'register_card', field: 'card' } : { tool: 'register_payment_account', field: 'account' }, completionCondition: `repeat recommend after registering or binding a ${fundingKind} supported by this payment capability` });
+          addAction({
+            id: `capability:${capability.id}`,
+            action: 'bind_payment_method',
+            owner: 'user',
+            path: `paymentCapabilities.${capability.id}`,
+            requiredFacts: capability.fundingKinds.map((kind) => `held ${kind}`),
+            candidateIds: [],
+            submission: fundingKind === 'credit_card' ? { tool: 'register_card', field: 'card' } : { tool: 'register_payment_account', field: 'account' },
+            completionCondition: `repeat recommend after registering or binding a ${fundingKind} supported by this payment capability`,
+            diagnostic: {
+              code: 'missing_required_fact',
+              path: `paymentCapabilities.${capability.id}`,
+              requiredFacts: capability.fundingKinds.map((kind) => `held ${kind}`),
+              retryAction: 'bind_payment_method',
+              nextAction: 'bind_payment_method',
+              message: `held payment method required for capability ${capability.id}`,
+            },
+          });
         }
       }
     }
@@ -1179,14 +1253,87 @@ export class RewardService {
       const unresolved = projected.some(rule => rule.status === 'unknown' || rule.status === 'potential');
       if (tx) {
         for (const { rule, result } of evaluations) for (const diagnostic of result?.diagnostics ?? []) {
-          if (!['fx_missing', 'fx_stale', 'fx_pair_mismatch', 'fx_scope_mismatch'].includes(diagnostic.code)) continue;
-          const request = buildFxResolutionRequest({
-            transaction: tx, rules: [rule], card,
-            cardScheme: card.network,
-            scope: { kind: 'card_scheme', ...(card.network ? { cardScheme: card.network } : {}) },
-            submission: { tool: 'recommend', field: 'fx' },
-          });
-          registerFxRequest(request, `card:${card.id}`, diagnostic.code);
+          if (['fx_missing', 'fx_stale', 'fx_pair_mismatch', 'fx_scope_mismatch', 'fx_conflict'].includes(diagnostic.code)) {
+            const request = buildFxResolutionRequest({
+              transaction: tx, rules: [rule], card,
+              cardScheme: card.network,
+              scope: { kind: 'card_scheme', ...(card.network ? { cardScheme: card.network } : {}) },
+              submission: { tool: 'recommend', field: 'fx' },
+            });
+            registerFxRequest(request, `card:${card.id}`, diagnostic.code);
+            continue;
+          }
+          if (['missing_required_fact', 'conflicting_fact', 'stale_fact', 'unsupported_field'].includes(diagnostic.code)) {
+            const isEligibility = diagnostic.path.startsWith('user.') || diagnostic.path.startsWith('eligibility');
+            if (isEligibility) {
+              const factKey = diagnostic.path.startsWith('user.') ? diagnostic.path.slice(5) : diagnostic.path;
+              const actionName = diagnostic.code === 'conflicting_fact' ? 'resolve_conflict' : diagnostic.retryAction || 'ask_user';
+              addAction({
+                id: `eligibility:${card.id}:${factKey}`,
+                action: actionName,
+                owner: 'user',
+                path: 'eligibilityFacts',
+                requiredFacts: diagnostic.requiredFacts.length ? diagnostic.requiredFacts : [diagnostic.path],
+                candidateIds: [`card:${card.id}`],
+                submission: { tool: 'recommend', field: 'eligibilityFacts' },
+                completionCondition: `repeat recommend after supplying verified eligibility fact for ${diagnostic.path}; without new facts, candidate remains excluded`,
+                diagnostic: {
+                  code: diagnostic.code,
+                  path: diagnostic.path,
+                  requiredFacts: diagnostic.requiredFacts.length ? diagnostic.requiredFacts : [diagnostic.path],
+                  retryAction: diagnostic.retryAction || 'ask_user',
+                  nextAction: diagnostic.nextAction || 'ask_user',
+                  message: diagnostic.message,
+                  candidateIds: [`card:${card.id}`],
+                },
+              });
+              continue;
+            }
+          }
+          if (diagnostic.code === 'stale_rule' || rule.status === 'stale') {
+            addAction({
+              id: `freshness:${rule.id}`,
+              action: 'refresh_offer',
+              owner: 'agent',
+              path: `rules.${rule.id}`,
+              requiredFacts: ['current verified offer terms', 'rule confirmation'],
+              candidateIds: [`card:${card.id}`],
+              submission: { tool: 'upsert_offer', field: 'rule' },
+              completionCondition: `repeat recommend after refreshing offer terms or confirming current benefit validity for rule ${rule.id}`,
+              diagnostic: {
+                code: 'stale_rule',
+                path: `rules.${rule.id}`,
+                requiredFacts: ['current verified offer terms'],
+                retryAction: 'refresh_or_confirm_offer',
+                nextAction: 'refresh_or_confirm_offer',
+                message: `offer rule ${rule.id} is stale and requires freshness verification`,
+                candidateIds: [`card:${card.id}`],
+              },
+            });
+            continue;
+          }
+          if (diagnostic.code === 'source_untrusted') {
+            addAction({
+              id: `source:${rule.sourceSnapshotId}`,
+              action: 'provide_verified_source_snapshot',
+              owner: 'agent',
+              path: `snapshots.${rule.sourceSnapshotId}`,
+              requiredFacts: ['verified source snapshot'],
+              candidateIds: [`card:${card.id}`],
+              submission: { tool: 'upsert_offer', field: 'snapshot' },
+              completionCondition: `repeat recommend after providing a verified source snapshot for rule ${rule.id}`,
+              diagnostic: {
+                code: 'source_untrusted',
+                path: `snapshots.${rule.sourceSnapshotId}`,
+                requiredFacts: ['verified source snapshot'],
+                retryAction: 'provide_verified_source_snapshot',
+                nextAction: 'provide_verified_source_snapshot',
+                message: `source snapshot for rule ${rule.id} is untrusted or missing`,
+                candidateIds: [`card:${card.id}`],
+              },
+            });
+            continue;
+          }
         }
       }
       const fxEst = (() => {
@@ -1326,11 +1473,79 @@ export class RewardService {
               registerFxRequest(request, path.id, event.fx ? (pairMatches ? 'fx_stale' : 'fx_pair_mismatch') : 'fx_missing');
             }
           }
+          if (path.diagnostics?.length) {
+            for (const diag of path.diagnostics) {
+              if (['missing_required_fact', 'conflicting_fact', 'stale_fact', 'unsupported_field'].includes(diag.code)) {
+                const isEligibility = diag.path.startsWith('user.') || diag.path.startsWith('eligibility');
+                if (isEligibility) {
+                  const factKey = diag.path.startsWith('user.') ? diag.path.slice(5) : diag.path;
+                  addAction({
+                    id: `eligibility:${path.routeId}:${factKey}`,
+                    action: diag.code === 'conflicting_fact' ? 'resolve_conflict' : diag.retryAction || 'ask_user',
+                    owner: 'user',
+                    path: 'eligibilityFacts',
+                    requiredFacts: diag.requiredFacts.length ? diag.requiredFacts : [diag.path],
+                    candidateIds: [path.id],
+                    submission: { tool: 'recommend', field: 'eligibilityFacts' },
+                    completionCondition: `repeat recommend after supplying verified eligibility fact for ${diag.path}; without new facts, candidate remains excluded`,
+                    diagnostic: {
+                      ...diag,
+                      candidateIds: [path.id],
+                    },
+                  });
+                }
+              }
+            }
+          }
+          if (path.requiredActions?.some((a) => a.includes('fee'))) {
+            const hasFx = [...fxRequests.values()].some((item) => item.candidateIds.has(path.id));
+            if (!hasFx) {
+              addAction({
+                id: `fee:${path.routeId}`,
+                action: 'confirm_fee',
+                owner: 'agent',
+                path: `routes.${path.routeId}.fees`,
+                requiredFacts: ['fee currency and schedule'],
+                candidateIds: [path.id],
+                submission: { tool: 'upsert_payment_route', field: 'route' },
+                completionCondition: 'repeat recommend after confirming route fee schedule',
+                diagnostic: {
+                  code: 'missing_required_fact',
+                  path: `routes.${path.routeId}.fees`,
+                  requiredFacts: ['fee currency and schedule'],
+                  retryAction: 'confirm_fee',
+                  nextAction: 'confirm_fee',
+                  message: 'route fee schedule or currency requires confirmation',
+                  candidateIds: [path.id],
+                },
+              });
+            }
+          }
         }
       }
       for (const blocked of result.blocked ?? []) {
         pathTruncated ||= blocked.reason.includes('truncated_by_bound');
-        addAction({ id: `route:${blocked.routeId}:${blocked.reason}`, action: 'review_payment_route', owner: 'agent', path: `routes.${blocked.routeId}`, requiredFacts: [blocked.reason], candidateIds: [blocked.routeId], submission: { tool: 'upsert_payment_route', field: 'route' }, completionCondition: 'repeat recommend after the route has current accepted evidence' });
+        const isStale = blocked.reason.includes('stale') || blocked.reason.includes('validity window');
+        const code = isStale ? 'stale_fact' : blocked.reason.includes('conflict') ? 'conflicting_fact' : 'missing_required_fact';
+        addAction({
+          id: `route:${blocked.routeId}:${blocked.reason}`,
+          action: 'review_payment_route',
+          owner: 'agent',
+          path: `routes.${blocked.routeId}`,
+          requiredFacts: [blocked.reason],
+          candidateIds: [blocked.routeId],
+          submission: { tool: 'upsert_payment_route', field: 'route' },
+          completionCondition: 'repeat recommend after the route has current accepted evidence',
+          diagnostic: {
+            code,
+            path: `routes.${blocked.routeId}`,
+            requiredFacts: [blocked.reason],
+            retryAction: 'submit_evidence',
+            nextAction: 'submit_evidence',
+            message: blocked.reason,
+            candidateIds: [blocked.routeId],
+          },
+        });
       }
       pathTruncated ||= result.candidates.length >= 128;
     } else {
@@ -1344,19 +1559,90 @@ export class RewardService {
         });
       }
     }
-    if (!candidates.length) addAction({ id: 'setup', action: 'ask_user', owner: 'user', path: 'cardIds', requiredFacts: ['cards or payment methods the user owns'], submission: { tool: 'register_card', field: 'card' }, completionCondition: 'repeat recommend after at least one owned card or payment route is registered' });
+    if (!candidates.length) {
+      addAction({
+        id: 'setup',
+        action: 'ask_user',
+        owner: 'user',
+        path: 'cardIds',
+        requiredFacts: ['cards or payment methods the user owns'],
+        submission: { tool: 'register_card', field: 'card' },
+        completionCondition: 'repeat recommend after at least one owned card or payment route is registered',
+        diagnostic: {
+          code: 'missing_required_fact',
+          path: 'cardIds',
+          requiredFacts: ['cards or payment methods the user owns'],
+          retryAction: 'ask_user',
+          nextAction: 'ask_user',
+          message: 'no owned cards or payment routes registered for evaluation',
+        },
+      });
+    }
     for (const candidate of candidates) if (candidate.status === 'unknown' || candidate.status === 'blocked' || candidate.matchedRules.some(rule => rule.status === 'potential' || rule.status === 'unknown')) {
-      if (![...fxRequests.values()].some(item => item.candidateIds.has(candidate.id))) addAction({ id: `candidate:${candidate.id}`, action: 'review_candidate', owner: 'agent', path: `candidates.${candidate.id}`,
-        requiredFacts: candidate.exclusionReasons.length ? candidate.exclusionReasons : ['current applicable offer evidence and transaction facts'], candidateIds: [candidate.id], submission: { tool: 'recommend', field: 'merchant' }, completionCondition: 'repeat recommend only after new evidence or user-owned facts are available' });
+      const alreadyCovered = actions.some(action => action.candidateIds?.includes(candidate.id)) ||
+        [...fxRequests.values()].some(item => item.candidateIds.has(candidate.id));
+      if (!alreadyCovered) {
+        addAction({
+          id: `candidate:${candidate.id}`,
+          action: 'review_candidate',
+          owner: 'agent',
+          path: `candidates.${candidate.id}`,
+          requiredFacts: candidate.exclusionReasons.length ? candidate.exclusionReasons : ['current applicable offer evidence and transaction facts'],
+          candidateIds: [candidate.id],
+          submission: { tool: 'recommend', field: 'merchant' },
+          completionCondition: 'repeat recommend only after new evidence or user-owned facts are available',
+          diagnostic: {
+            code: 'needs_review',
+            path: `candidates.${candidate.id}`,
+            requiredFacts: candidate.exclusionReasons.length ? candidate.exclusionReasons : ['current applicable offer evidence and transaction facts'],
+            retryAction: 'review_candidate',
+            nextAction: 'review_candidate',
+            message: candidate.exclusionReasons.join('; ') || 'candidate requires review',
+            candidateIds: [candidate.id],
+          },
+        });
+      }
     }
     for (const [key, { request, candidateIds, diagnostic }] of fxRequests) {
-      addAction({ id: `fx:${crypto.createHash('sha256').update(key).digest('hex').slice(0, 16)}`, action: request.retryAction, owner: request.retryAction === 'ask_user' ? 'user' : 'agent', path: request.submission?.field ?? 'fx', requiredFacts: request.requiredFacts, candidateIds: [...candidateIds].sort(), ...(request.submission ? { submission: request.submission } : {}), completionCondition: `repeat recommend after supplying a validated ${request.baseCurrency}/${request.quoteCurrency} observation; without new evidence, stop retrying ${diagnostic}`, fxResolutionRequest: request });
+      const code = (diagnostic === 'fx_stale' || diagnostic === 'fx_pair_mismatch' || diagnostic === 'fx_scope_mismatch' || diagnostic === 'fx_conflict') ? diagnostic : 'fx_missing';
+      addAction({
+        id: `fx:${crypto.createHash('sha256').update(key).digest('hex').slice(0, 16)}`,
+        action: request.retryAction,
+        owner: request.retryAction === 'ask_user' ? 'user' : 'agent',
+        path: request.submission?.field ?? 'fx',
+        requiredFacts: request.requiredFacts,
+        candidateIds: [...candidateIds].sort(),
+        ...(request.submission ? { submission: request.submission } : {}),
+        completionCondition: `repeat recommend after supplying a validated ${request.baseCurrency}/${request.quoteCurrency} observation; without new evidence, stop retrying ${diagnostic}`,
+        diagnostic: {
+          code,
+          path: request.submission?.field ?? 'fx',
+          requiredFacts: request.requiredFacts,
+          retryAction: request.retryAction,
+          nextAction: request.retryAction,
+          message: code === 'fx_stale'
+            ? `FX snapshot for ${request.baseCurrency}/${request.quoteCurrency} is stale and must be refreshed`
+            : code === 'fx_pair_mismatch'
+            ? `FX snapshot currency pair does not match ${request.baseCurrency}/${request.quoteCurrency}`
+            : code === 'fx_scope_mismatch'
+            ? `FX snapshot scope does not match the target card or route`
+            : code === 'fx_conflict'
+            ? `conflicting FX observations for ${request.baseCurrency}/${request.quoteCurrency}`
+            : `missing FX snapshot for ${request.baseCurrency}/${request.quoteCurrency}`,
+          candidateIds: [...candidateIds].sort(),
+        },
+        fxResolutionRequest: request,
+      });
     }
     for (const action of actions) if (action.candidateIds === undefined) {
       const affected = action.id === 'merchant'
         ? candidates.filter((candidate) => candidate.matchedRules.some((rule) => Boolean(rule.conditions.merchants?.length))).map((candidate) => candidate.id)
         : candidates.map((candidate) => candidate.id);
-      (action as { candidateIds?: readonly string[] }).candidateIds = affected.sort();
+      const ids = (affected.length ? affected : candidates.map((c) => c.id)).sort();
+      (action as { candidateIds?: readonly string[] }).candidateIds = ids;
+      if (action.diagnostic && !action.diagnostic.candidateIds?.length) {
+        (action.diagnostic as { candidateIds?: readonly string[] }).candidateIds = ids;
+      }
     }
     const fxResolutionRequests = [...fxRequests.values()].map(({ request }) => request);
     const ready = candidates.some(candidate => candidate.status === 'ready');
@@ -1380,14 +1666,35 @@ export class RewardService {
     const hasMore = cursorOffset + page.length < candidates.length;
     const nextCursor = hasMore ? Buffer.from(JSON.stringify({ v: 1, offset: cursorOffset + page.length, evaluatedAt, resultVersion })).toString('base64url') : undefined;
     const responsePage = Math.floor(cursorOffset / pageSize) + 1;
+    const unpopulatedScopes: string[] = [];
+    if (cards.length === 0) unpopulatedScopes.push('cards');
+    if (routes.length === 0) unpopulatedScopes.push('routes');
+    if (pathTruncated) unpopulatedScopes.push('bounded_routes');
+    const allDiagnostics: Diagnostic[] = actions
+      .map((action) => action.diagnostic)
+      .filter((d): d is Diagnostic => d !== undefined);
     return {
       status, candidates: page, requiredActions: actions, evaluatedAt,
       ...(fxResolutionRequest ? { fxResolutionRequest } : {}),
       ...(fxResolutionRequests.length ? { fxResolutionRequests } : {}),
+      ...(allDiagnostics.length ? { diagnostics: allDiagnostics } : {}),
       pageSize, page: responsePage, hasMore, ...(nextCursor ? { nextCursor } : {}), resultVersion,
-      coverage: { scope: 'registered cards and payment routes; route acceptance requires evidence',
-        discoveredCount: candidates.length, bounded: pathTruncated, explorationComplete: !pathTruncated, ...(!pathTruncated ? { total: candidates.length } : {}),
-        notes: ['not a market-wide catalog', 'planned calls do not consume caps', ...(pathTruncated ? ['path exploration reached a declared resource bound'] : ['all currently discovered candidates are available through continuation'])] },
+      coverage: {
+        scope: 'registered cards and payment routes; route acceptance requires evidence',
+        discoveredCount: candidates.length,
+        bounded: pathTruncated,
+        explorationComplete: !pathTruncated,
+        ...(!pathTruncated ? { total: candidates.length } : {}),
+        actionCount: actions.length,
+        ...(unpopulatedScopes.length ? { unpopulatedScopes } : {}),
+        notes: [
+          'not a market-wide catalog',
+          'planned calls do not consume caps',
+          ...(actions.length ? [`${actions.length} action(s) required across candidates`] : []),
+          ...(pathTruncated ? ['path exploration reached a declared resource bound'] : ['all currently discovered candidates are available through continuation']),
+          ...(unpopulatedScopes.length ? [`unpopulated scopes: ${unpopulatedScopes.join(', ')}`] : []),
+        ],
+      },
     };
   }
 
@@ -1516,6 +1823,7 @@ export class RewardService {
       return paths;
     });
     const candidates: PaymentPathCandidate[] = routePaths.map(({ route, pathEdges: selectedEdges }) => {
+      const pathDiagnostics: Diagnostic[] = [];
       const fundingId = route.funding.kind === 'credit_card' ? route.funding.cardId : route.funding.kind === 'account' ? route.funding.accountId : undefined;
       const fundingLabel = route.funding.kind === 'credit_card' ? `card:${fundingId ?? 'unknown'}` : route.funding.kind === 'account' ? `${route.funding.subtype}:${fundingId ?? 'unknown'}` : 'cash';
       const fundingNode = { id: 'funding', kind: route.funding.kind, displayName: fundingLabel };
@@ -1577,6 +1885,7 @@ export class RewardService {
             const outcome = evaluatePredicate(rule.predicate, { cardId: '', routeId: route.id, kind: 'purchase', mode: 'planned', occurredAt: asOf, amount: input.amount }, predicateContext);
             if (!outcome.matched) {
               eligibilityUncertain = true;
+              if (outcome.diagnostics?.length) pathDiagnostics.push(...outcome.diagnostics);
               plannedRewards.push({ ruleId: rule.id, ruleVersion: rule.version, component: rule.componentKind, sponsor: rule.sponsor ?? rule.componentKind, benefitGroup: rule.benefitGroup ?? rule.combination?.groupId ?? 'default', nativeUnit: rule.reward.currency ?? rule.reward.kind, ...(rule.combination === undefined ? {} : { combination: rule.combination }), ...(rule.capPoolRefs === undefined ? {} : { capPoolRefs: rule.capPoolRefs }), reasons: [...outcome.missing, ...outcome.conflicts, ...(outcome.missing.length || outcome.conflicts.length ? [] : ['eligibility fact does not match'])] });
               continue;
             }
@@ -1710,7 +2019,7 @@ export class RewardService {
       const evidenceFreshness = pathEvidence.length === 0 ? undefined : pathEvidence.map((evidence) => evidence.observedAt).sort()[0];
       const stableEdges = pathEdges?.map(({ fx: _fx, ...edge }) => edge) ?? events.map(({ fx: _fx, ...event }) => event);
       const pathSignature = JSON.stringify({ version: 1, nodes, edges: stableEdges, funding: route.funding, merchant: input.merchant, currency: input.amount.currency });
-      return { id: `path:${pathSignature}`, routeId: route.id, nodes, events, fundingSource: route.funding, grossReward, netReward: cappedReward, cappedReward, ...(feeTotal === undefined ? {} : { feeTotal }), ...(netValue === undefined ? {} : { netValue }), requiredActions: feeMismatch ? ['confirm fee currency or provide a validated FX snapshot'] : nativeUnitMismatch ? ['provide a validated valuation snapshot for each reward unit'] : [], userEffort: feeMismatch || nativeUnitMismatch ? 1 : 0, evidenceTier, ...(evidenceFreshness === undefined ? {} : { evidenceFreshness }), matchedRules: blocked ? [] : valuedRules, pathSignature, status: blocked ? 'blocked' : 'ready', exclusionReasons: stackingAmbiguous ? ['ambiguous stacking policy'] : feeMismatch ? ['fee currency cannot be compared without validated FX'] : nativeUnitMismatch ? ['provide a fresh authoritative valuation for each reward unit'] : matchedRules.length ? evaluations.length === matchedRules.length ? [] : ['possible stacking policy excluded'] : ['no applicable verified card rule'] };
+      return { id: `path:${pathSignature}`, routeId: route.id, nodes, events, fundingSource: route.funding, grossReward, netReward: cappedReward, cappedReward, ...(feeTotal === undefined ? {} : { feeTotal }), ...(netValue === undefined ? {} : { netValue }), requiredActions: feeMismatch ? ['confirm fee currency or provide a validated FX snapshot'] : nativeUnitMismatch ? ['provide a validated valuation snapshot for each reward unit'] : [], userEffort: feeMismatch || nativeUnitMismatch ? 1 : 0, evidenceTier, ...(evidenceFreshness === undefined ? {} : { evidenceFreshness }), matchedRules: blocked ? [] : valuedRules, pathSignature, status: blocked ? 'blocked' : 'ready', exclusionReasons: stackingAmbiguous ? ['ambiguous stacking policy'] : feeMismatch ? ['fee currency cannot be compared without validated FX'] : nativeUnitMismatch ? ['provide a fresh authoritative valuation for each reward unit'] : matchedRules.length ? evaluations.length === matchedRules.length ? [] : ['possible stacking policy excluded'] : ['no applicable verified card rule'], ...(pathDiagnostics.length ? { diagnostics: pathDiagnostics } : {}) };
     });
     const statusRank = (status: PaymentPathCandidate['status']): number => status === 'ready' ? 0 : status === 'blocked' ? 2 : status === 'no_match' ? 3 : 1;
     candidates.sort((a, b) => statusRank(a.status) - statusRank(b.status)

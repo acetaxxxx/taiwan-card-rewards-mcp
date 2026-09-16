@@ -523,6 +523,7 @@ export interface Diagnostic {
   retryAction: string;
   message: string;
   nextAction: string;
+  candidateIds?: readonly string[] | undefined;
 }
 
 export interface FxResolutionRequest {
@@ -768,19 +769,42 @@ export interface IntentRule {
   reward?: Money;
   reasons: readonly string[];
 }
+export interface RecommendationAction {
+  id: string;
+  action: string;
+  owner: 'agent' | 'user';
+  path?: string | undefined;
+  requiredFacts: readonly string[];
+  candidateIds?: readonly string[] | undefined;
+  submission?: { tool: string; field: string } | undefined;
+  completionCondition?: string | undefined;
+  diagnostic?: Diagnostic | undefined;
+  fxResolutionRequest?: FxResolutionRequest | undefined;
+}
+
 export interface RecommendationIntentResult {
   status: 'ready' | 'partial' | 'needs_input' | 'no_match';
   candidates: readonly IntentCandidate[];
-  requiredActions: readonly { id: string; action: string; owner: 'agent' | 'user'; path?: string; requiredFacts: readonly string[]; candidateIds?: readonly string[]; submission?: { tool: string; field: string }; completionCondition?: string; fxResolutionRequest?: FxResolutionRequest }[];
-  coverage: { scope: string; discoveredCount: number; bounded: boolean; explorationComplete: boolean; total?: number; notes: readonly string[] };
+  requiredActions: readonly RecommendationAction[];
+  coverage: {
+    scope: string;
+    discoveredCount: number;
+    bounded: boolean;
+    explorationComplete: boolean;
+    total?: number | undefined;
+    notes: readonly string[];
+    actionCount?: number | undefined;
+    unpopulatedScopes?: readonly string[] | undefined;
+  };
   evaluatedAt: string;
-  fxResolutionRequest?: FxResolutionRequest;
-  fxResolutionRequests?: readonly FxResolutionRequest[];
+  fxResolutionRequest?: FxResolutionRequest | undefined;
+  fxResolutionRequests?: readonly FxResolutionRequest[] | undefined;
   pageSize: number;
   page: number;
   hasMore: boolean;
-  nextCursor?: string;
+  nextCursor?: string | undefined;
   resultVersion: string;
+  diagnostics?: readonly Diagnostic[] | undefined;
 }
 
 export interface PaymentPathRequest {
@@ -845,6 +869,7 @@ export interface PaymentPathCandidate {
   exclusionReasons: readonly string[];
   status?: 'ready' | 'blocked' | 'no_match';
   pathSignature?: string;
+  diagnostics?: readonly Diagnostic[] | undefined;
 }
 export interface PaymentPathRecommendation { status: 'ok' | 'partial' | 'needs_facts' | 'needs_review' | 'no_match'; candidates: readonly PaymentPathCandidate[]; evaluatedAt: string; blocked?: readonly { routeId: string; reason: string }[]; diagnostics?: readonly string[]; limits?: { maxCandidates: number; maxHops: number; maxEvents: number; maxBranchesPerNode: number }; }
 
