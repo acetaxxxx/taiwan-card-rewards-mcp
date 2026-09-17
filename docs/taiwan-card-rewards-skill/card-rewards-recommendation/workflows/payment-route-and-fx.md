@@ -10,6 +10,18 @@
 
 ---
 
+## 本 SOP 使用工具速查 (Scoped Tools)
+
+| 工具 | 類型 | 本 SOP 中的用途 | 關鍵必填欄位 |
+|---|:---:|---|---|
+| `recommend` | read | 觸發點（收到 `fx_missing`）與重試點（帶入 `fx` snapshot） | `merchant`, `amount`, `fx.{id,baseCurrency,quoteCurrency,ratePpm,capturedAt,provider,rateType}`, `expectedResultVersion` |
+
+> [!NOTE]
+> 本 SOP 的 `fx` snapshot 為**當次一次性信任**，MCP 不會持久化匯率數值。
+> 若需要長期記憶某支付路徑的匯率查詢來源（讓 MCP 之後能自動提供 `sourceUrls`），請參考 [`fx-rate-ingestion.md`](../../card-rewards-evidence/workflows/fx-rate-ingestion.md)。
+
+---
+
 ## 1. 觸發條件 (Trigger Conditions)
 
 當調用 `recommend` 回傳滿足下列條件之一時，進入本 SOP：

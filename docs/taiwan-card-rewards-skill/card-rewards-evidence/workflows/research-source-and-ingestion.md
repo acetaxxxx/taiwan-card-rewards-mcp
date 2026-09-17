@@ -4,6 +4,24 @@
 
 ---
 
+## 本 SOP 使用工具速查 (Scoped Tools)
+
+| 工具 | 類型 | 本 SOP 中的用途 | 關鍵必填欄位 |
+|---|:---:|---|---|
+| `create_ingestion` | write | 建立或繼續一個 source-scoped ingestion draft | `sourceScope.{kind, value}`, `idempotencyKey` |
+| `get_ingestion` | read | 取得 MCP 決定的下一個 action（每次 write 後必須重讀） | `flowId` |
+| `submit_ingestion_source` | write | 提交官方來源快照（MCP 不自行抓 URL） | `flowId`, `actionId`, `expectedRevision`, `sourceCapture.{sourceType, retrievedAt, contentHash, artifactRef, submitter, submittedAt}` |
+| `submit_ingestion_manifest` | write | 提交完整 benefit/exclusion leaf 清單 | `flowId`, `actionId`, `expectedRevision`, `manifest[].{id, kind, summary, evidenceLocator, dependsOn}` |
+| `correct_ingestion_manifest` | write | 建立新的 manifest revision（需全量替換，不可差異補丁） | `flowId`, `actionId`, `expectedRevision`, `idempotencyKey`（必須全新）, `manifest` |
+| `submit_benefit_leaf` | write | 逐一提交 MCP 指定的 benefit leaf | `flowId`, `actionId`, `expectedRevision`, `leafId` + benefit rule payload |
+| `submit_exclusion_leaf` | write | 逐一提交 MCP 指定的 exclusion leaf | `flowId`, `actionId`, `expectedRevision`, `leafId` + exclusion payload |
+| `finalize_ingestion` | write | 原子重驗並啟用所有 candidate rules | `flowId`, `actionId`, `expectedRevision` |
+| `upsert_offer` | write | 快速路徑：直接提交 snapshot + rule（不走 leaf 追蹤） | `snapshot.{id, url, fetchedAt, contentHash, sourceType}`, `rule.{id, cardId, version}` |
+| `resolve_merchant` | read | 查詢特店的 canonical ID（用於 upsert_offer 快速路徑） | `query` |
+
+---
+
+
 ## 1. 觸發條件 (Trigger Conditions)
 
 進入本 SOP 的時機：
@@ -17,7 +35,7 @@
 
 ```text
 // 步驟 1：非官方探索（發現線索）
-keywords = "[發卡行名稱] [卡片名稱] 2026 優惠 權益"
+keywords = "[發卡行名稱] [卡片名稱] [time.Now('YYYY MM')] 優惠 權益"
 檢索來源: PTT 信用卡板、Dcard 信用卡板、CardU 卡優新聞網、Money101、iCard.AI
 記錄探索線索（URL, 摘要, 查詢時間）
 注意: 社群資料僅作線索，嚴禁直接以此建立 active 規則

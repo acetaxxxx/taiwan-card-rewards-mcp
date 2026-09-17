@@ -4,6 +4,22 @@
 
 ---
 
+## 本 SOP 使用工具速查 (Scoped Tools)
+
+| 工具 | 類型 | 本 SOP 中的用途 | 關鍵必填欄位 |
+|---|:---:|---|---|
+| `upsert_payment_capability` | write | 登錄公開可用的支付能力與其 FX 來源設定（任何使用者可用） | `capability.{id, provider, fxPolicy.{sourceUrls, provider, suggestedRateTypes}, evidence}` |
+| `upsert_payment_route` | write | 登錄使用者個人支付路徑並指定其匯率查詢來源 | `route.{id, cardId, routeFacts.{fxProvider, fxRateType, fxSourceUrl}, evidence}` |
+| `register_payment_account` | write | 首次登錄電子錢包或連結銀行帳戶（登錄路徑前置步驟） | `account.{provider, accountKind, linkedCardId, evidence.confirmedBy}` |
+| `recommend` | read | 登錄完成後重試，確認 `fx_missing` 已解決 | `merchant`, `amount`, `expectedResultVersion` |
+
+> [!NOTE]
+> 本 SOP 的 `upsert_payment_route` / `upsert_payment_capability` 是**長期設定**（MCP 記憶匯率查詢來源）。
+> 只需要當次推薦試算的 FX 快照，請改走 [`payment-route-and-fx.md`](../../card-rewards-recommendation/workflows/payment-route-and-fx.md)。
+
+---
+
+
 ## 1. 觸發條件 (Trigger Conditions)
 
 進入本 SOP 的時機：

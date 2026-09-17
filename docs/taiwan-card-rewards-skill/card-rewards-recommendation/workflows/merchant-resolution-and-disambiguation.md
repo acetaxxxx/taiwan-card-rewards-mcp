@@ -4,6 +4,16 @@
 
 ---
 
+## 本 SOP 使用工具速查 (Scoped Tools)
+
+| 工具 | 類型 | 本 SOP 中的用途 | 關鍵必填欄位 |
+|---|:---:|---|---|
+| `recommend` | read | 消歧義或補齊特店後重新調用推薦 | `merchant`（使用者選定名稱）, `expectedResultVersion` |
+| `resolve_merchant` | read | 選填：在歧義時輔助查詢候選實體清單 | `query`（商家名稱字串） |
+
+---
+
+
 ## 1. 觸發條件 (Trigger Conditions)
 
 | 診斷代碼 (`diagnostic.code`) | 觸發原因 | 處置主體 (`owner`) | 核心目標 |

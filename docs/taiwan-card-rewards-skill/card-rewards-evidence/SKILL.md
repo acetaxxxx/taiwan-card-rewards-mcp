@@ -21,11 +21,11 @@ SWITCH 使用者意圖:
 
     CASE "告知持卡" | "登錄新卡" | "設定權益方案" | "切換方案":
         → 進入 [卡片登錄與權益設定 SOP](workflows/card-onboarding-and-benefit-enrollment.md)
-        使用工具: register_card, list_cards, upsert_user_benefit_status
+        使用工具:register_card,list_cards, upsert_user_benefit_status
 
-    CASE "查詢最新優惠" | "驗證卡片規則" | "建立官方來源 ingestion" | "更新條款":
+    CASE  "查詢最新優惠" | "驗證卡片規則" | "建立官方來源 ingestion" | "更新條款":
         → 進入 [官方來源研究與 Ingestion SOP](workflows/research-source-and-ingestion.md)
-        使用工具: create_ingestion, get_ingestion, submit_ingestion_source,
+        使用工具:  create_ingestion, get_ingestion, submit_ingestion_source,
                   submit_ingestion_manifest, submit_benefit_leaf,
                   submit_exclusion_leaf, finalize_ingestion, upsert_offer,
                   resolve_merchant

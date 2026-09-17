@@ -4,6 +4,17 @@
 
 ---
 
+## 本 SOP 使用工具速查 (Scoped Tools)
+
+| 工具 | 類型 | 本 SOP 中的用途 | 關鍵必填欄位 |
+|---|:---:|---|---|
+| `register_card` | write | 登錄每一張持有卡片的描述符 | `card.{id, issuer, productName}` |
+| `list_cards` | read | 驗證登錄結果，確認持卡清冊正確 | `limit`, `page`, `projection` |
+| `upsert_user_benefit_status` | write | 記錄多方案卡片的目前啟用方案 | `input.{kind, cardId, benefit, completedAt, effectiveFrom, idempotencyKey, confirmation}` |
+
+---
+
+
 ## 1. 觸發條件 (Trigger Conditions)
 
 進入本 SOP 的時機：
