@@ -15,36 +15,82 @@ description: "台灣信用卡消費推薦與最佳支付路徑比價 (Recommend 
 
 ---
 
-## 2. 黃金路徑三步驟 (The 3-Step Golden Path)
+## 2. 推薦執行演算法 (Recommendation Loop Algorithm)
 
-```mermaid
-flowchart TD
-    S1["步驟 1：萃取要素<br>(商家 merchant, 金額 amount, 幣別 currency)"] --> S2["步驟 2：單一調用 recommend 工具"]
-    S2 --> Gate{"步驟 3：Hard Gate 檢查<br>status === 'ready' 且無未解 action ?"}
-    Gate -- 是 --> Success["輸出推薦最優卡片、回饋率與淨收益 (結案)"]
-    Gate -- 否 --> Block["🚨 觸發 Hard Gate 阻斷：<br>嚴禁輸出卡片結論，依據 requiredActions 處置"]
+Agent 執行推薦時，**必須遵循以下結構化虛擬碼狀態機**：
+
+### 階段一：要素萃取 (Input Extraction)
+從使用者對話中解析以下三要素：
+- `merchant`：特店名稱（如「唐吉訶德」、「全家便利商店」、「中華航空」）。
+- `amount`：預計消費金額（整數或小數），幣別預設 `TWD`；若為國外消費則填對應外幣（如 `JPY`）。
+- `paymentMethod`：支付方式（如「Apple Pay」、「街口支付」），若未指定則留空。
+
+### 階段二：調用工具 (Initial Call)
+呼叫 `recommend({ merchant, amount, currency, paymentMethod })`。
+
+### 階段三：狀態機循環 (Recommendation Loop)
+
+```text
+WHILE (response.status !== 'ready'):
+    🚨 觸發 Hard Gate 阻斷：
+    嚴禁向使用者輸出任何推薦卡片名稱、趴數或排名！即使 candidates 有初步計算，一律視為未定案。
+
+    FOR EACH action IN response.requiredActions:
+        MATCH action.diagnostic.code WITH:
+
+            CASE "merchant_ambiguous" (特店名稱模糊):
+                -> 檢視 action.candidateIds 或 action.diagnostic.message
+                -> 向使用者列出 2~3 個候選實體請其選擇（例如：「請問是 1. 全家便利商店 還是 2. 全家餐飲？」）
+                -> 等待使用者回覆選定項目
+
+            CASE "missing_required_fact" (缺少必要消費事實，如金額或通路):
+                -> 依據 action.path 向使用者提問（例如：「請問這筆消費預計金額是多少？」）
+                -> 等待使用者回覆
+
+            CASE "fx_missing" | "fx_stale" | "fx_pair_mismatch" | "fx_scope_mismatch" (缺少或過期外幣匯率):
+                -> 責任為 agent (owner === 'agent')，禁止向使用者索取技術代碼
+                -> 參考 workflows/payment-route-and-fx.md 獲取已知即時匯率快照
+                -> 組裝 fx 物件 (ratePpm, capturedAt, provider, rateType)
+
+            CASE "conflicting_fact" | "stale_fact" | "invalid_fact" (卡片資格事實衝突):
+                -> 向使用者確認真實資格（例如目前持有的卡片會員等級或已切換方案）
+
+            CASE "stale_rule" | "needs_review" (卡片權益條款需覆核):
+                -> 該卡片候選標記為需要覆核，若其他卡片已 ready 則繼續進行；若為核心目標卡則提示使用者可能需要更新條款
+
+        END MATCH
+
+    [組裝重試 Payload]：
+        - 保留原始交易意圖（merchant, amount 等）
+        - 將補齊的事實填入 action.submission.field（例如填入 fx、或填入 supplementalFacts）
+        - 帶入 expectedResultVersion: response.resultVersion（鎖定版本，防止並行漂移）
+        - 再次調用 recommend 工具
+        - 更新 response 為最新回傳結果
+
+END WHILE
 ```
 
-### 步驟 1：萃取消費三要素
-從使用者輸入中解析以下資訊（缺少非關鍵資訊時使用預設值，不主動打斷詢問）：
-- **商家/特店 (merchant)**：例如「唐吉訶德」、「全家便利商店」、「中華航空」。
-- **預計消費金額 (amount)**：例如 `1000`。
-- **幣別與通路 (currency / paymentMethod)**：預設 `TWD`；若提到日本消費填 `JPY`，若提到 Apple Pay 或行動支付則填入對應欄位。
+### 階段四：結案輸出 (Final Presentation)
 
-### 步驟 2：調用 `recommend` 工具
-將上述參數傳入 `recommend`，獲取比價結果。
+- **情境 A (`response.status === 'ready'`)**：
+  1. 依據 `candidates` 排名，輸出第 1 名推薦卡片名稱。
+  2. 標註名目回饋趴數、命中之權益規則名稱（如「玩旅刷 3.3%」）。
+  3. 若為外幣交易，明確列出海外手續費（1.5%）與**預估實質淨回饋金額**。
+  4. 提示該卡回饋上限剩餘額度。
+- **情境 B (`response.status === 'no_match'`)**：
+  - 誠實告知使用者目前登記的卡片無特定加碼通路，建議使用一般消費基礎回饋卡支付。
 
-### 步驟 3：Hard Gate 狀態守門員檢查
-檢視 `recommend` 回傳的根層級欄位：
+---
 
-> [!IMPORTANT]
-> ### 🚨 Hard Gate 強制阻斷準則 (Fail-Closed)
-> 1. **狀態合格（`status === 'ready'` 且無 `requiredActions`）**：
->    - 依據 `candidates` 排名，直接向使用者輸出第 1 名推薦卡片、回饋趴數、預估淨回饋（扣除手續費）與回饋上限剩餘額度。
-> 2. **狀態未定（`status !== 'ready'` 或 `requiredActions.length > 0`）**：
->    - **嚴禁向使用者輸出任何卡片排名或誘導性推薦！**
->    - 即使 `candidates` 中有部分試算數字，一律視為未定案。
->    - 依據 `requiredActions` 的指示處理：
->      - 若為 `action: "resolve_merchant"`：列出候選特店請使用者澄清，或調用 `resolve_merchant`。
->      - 若為 `action: "fx_resolution"`：參考 [`workflows/payment-route-and-fx.md`](workflows/payment-route-and-fx.md) 獲取即時牌告匯率。
->      - 待補齊要素後，帶入更新資訊重新調用 `recommend`，直到取得 `status === 'ready'` 為止。
+## 3. 診斷代碼處置映射表 (Diagnostic Code Matrix)
+
+本表格直接對應 MCP 原始碼之真實枚舉：
+
+| 診斷代碼 (`diagnostic.code`) | 責任人 (`owner`) | 說明 | Agent 處置指南 |
+|---|:---:|---|---|
+| `merchant_ambiguous` | `user` | 特店在不同地區或體系有多個實體 | 向使用者列出選項確認，將確認之特店名填入 `merchant` 重試。 |
+| `merchant_not_found` | `agent` | 特店尚未收錄於在地型錄 | 若使用者已知確切品牌則直接作為自訂特店，重新調用。 |
+| `missing_required_fact` | `user` | 缺少金額 (`amount`) 或關鍵欄位 | 向使用者詢問缺少之欄位，回填後重試。 |
+| `fx_missing` / `fx_stale` | `agent` | 缺少或過期之外幣匯率快照 | 查詢合格牌告中價或現鈔賣出價，組裝 `fx` 快照後重試。 |
+| `conflicting_fact` | `user` | 資格條件衝突（如方案切換日期不符） | 向使用者詢問最新狀態，填入 `supplementalFacts.eligibilityFacts`。 |
+| `stale_rule` / `needs_review` | `agent` | 權益可能已到期或需覆核 | 候選卡片標記為待覆核，或提示使用者載入 Ingestion 流程更新。 |
