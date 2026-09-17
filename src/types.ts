@@ -960,6 +960,9 @@ export interface IngestionFlowRecord {
   expiresAt: string;
   sourceCapture?: IngestionSourceCapture;
   manifest?: readonly IngestionManifestLeaf[];
+  manifestRevision?: number;
+  manifestHistory?: readonly { revision: number; manifest: readonly IngestionManifestLeaf[]; supersededByRevision: number; }[];
+  manifestCorrectionKeys?: readonly { idempotencyKey: string; payloadHash: string; revision: number; }[];
   benefitArtifacts?: readonly IngestionBenefitArtifact[];
   exclusionArtifacts?: readonly IngestionExclusionArtifact[];
   completionProof?: IngestionCompletionProof;

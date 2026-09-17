@@ -13,7 +13,7 @@ Status: ready-for-human
 - [x] 成功提交後進入 `processing_leaves`，MCP 以 deterministic order 回下一個可處理 leaf action。
 - [x] 每個 leaf 最終只能有 `materialized`、`ignored` 或 `superseded` disposition；ignored/superseded 必須有理由和 evidence linkage。
 - [ ] Coverage 回傳總數、各 disposition 數量、pending/blocked leaf IDs 與 `complete=false`。
-- [ ] 修正版 manifest 必須建立新 revision 並保留舊版稽核關係，不在原 revision 中偷偷增刪 leaf。
+- [x] 修正版 manifest 必須建立新 revision 並保留舊版稽核關係，不在原 revision 中偷偷增刪 leaf。
 - [x] Large manifest 有明確上限或分頁策略；超限回可恢復診斷，不接受部分截斷後宣稱完整。
 - [x] 整合測試涵蓋多 benefit、shared exclusion、依賴順序、cycle、duplicate 與 interrupted resume。
 

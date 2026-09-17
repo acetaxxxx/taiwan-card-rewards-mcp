@@ -56,6 +56,22 @@ describe('ingestion flow spine', () => {
     expect(result.nextAction).toEqual(expect.objectContaining({ kind: 'PROCESS_LEAF', leafId: 'a', expectedRevision: 3 }));
   });
 
+  it('creates manifest correction revisions and preserves superseded lineage', () => {
+    const service = new RewardService(new MemoryStore(), 'user-a');
+    const created = service.createIngestion({ sourceScope: { kind: 'offer_family', value: 'correction' }, idempotencyKey: 'correction-flow' });
+    const sourced = service.submitIngestionSource({ flowId: created.flow.id, actionId: created.nextAction?.actionId, expectedRevision: 1, sourceCapture: { sourceType: 'user_input', description: 'terms', retrievedAt: '2026-09-16T00:00:00Z', contentHash: 'correction-hash', artifactRef: 'artifact:correction', submitter: 'user-a', submittedAt: '2026-09-16T00:00:00Z' } });
+    const first = service.submitIngestionManifest({ flowId: created.flow.id, actionId: sourced.nextAction?.actionId, expectedRevision: 2, manifest: [{ id: 'old-leaf', kind: 'benefit', summary: 'old', evidenceLocator: 'page:1', dependsOn: [] }] });
+    const correction = first.manifestCorrectionAction!;
+    const revised = service.correctIngestionManifest({ flowId: created.flow.id, actionId: correction.actionId, expectedRevision: correction.expectedRevision, idempotencyKey: 'correction-1', manifest: [{ id: 'new-leaf', kind: 'benefit', summary: 'new', evidenceLocator: 'page:2', dependsOn: [] }] });
+    expect(revised.flow.manifestRevision).toBe(2);
+    expect(revised.flow.manifestHistory).toEqual([expect.objectContaining({ revision: 1, supersededByRevision: 2, manifest: [expect.objectContaining({ id: 'old-leaf' })] })]);
+    expect(revised.flow.manifest?.[0]?.id).toBe('new-leaf');
+    expect(() => service.correctIngestionManifest({ flowId: created.flow.id, actionId: correction.actionId, expectedRevision: correction.expectedRevision, idempotencyKey: 'correction-2', manifest: [{ id: 'third-leaf', kind: 'benefit', summary: 'third', evidenceLocator: 'page:3', dependsOn: [] }] })).toThrow(/STALE_REVISION/);
+    const retry = service.correctIngestionManifest({ flowId: created.flow.id, actionId: revised.manifestCorrectionAction!.actionId, expectedRevision: revised.manifestCorrectionAction!.expectedRevision, idempotencyKey: 'correction-1', manifest: [{ id: 'new-leaf', kind: 'benefit', summary: 'new', evidenceLocator: 'page:2', dependsOn: [] }] });
+    expect(retry.flow.manifestRevision).toBe(2);
+    expect(() => service.correctIngestionManifest({ flowId: created.flow.id, actionId: revised.manifestCorrectionAction!.actionId, expectedRevision: revised.manifestCorrectionAction!.expectedRevision, idempotencyKey: 'correction-1', manifest: [{ id: 'different', kind: 'benefit', summary: 'different', evidenceLocator: 'page:4', dependsOn: [] }] })).toThrow(/IDEMPOTENCY_CONFLICT/);
+  });
+
   it('materializes one benefit leaf as a candidate artifact without activating it', () => {
     const service = new RewardService(new MemoryStore(), 'user-a');
     const created = service.createIngestion({ sourceScope: { kind: 'official_url', value: 'https://bank.example/offers' }, idempotencyKey: 'ingest-benefit' });

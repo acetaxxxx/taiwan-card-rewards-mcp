@@ -154,6 +154,7 @@ async function callTool(service: RewardService, params: Record<string, unknown>)
     case 'get_ingestion': return service.inspectIngestion(String(args.flowId));
     case 'submit_ingestion_source': return service.submitIngestionSource(args);
     case 'submit_ingestion_manifest': return service.submitIngestionManifest(args);
+    case 'correct_ingestion_manifest': return service.correctIngestionManifest(args);
     case 'submit_benefit_leaf': return service.submitBenefitLeaf(args);
     case 'submit_exclusion_leaf': return service.submitExclusionLeaf(args);
     case 'finalize_ingestion': return service.finalizeIngestion(args);

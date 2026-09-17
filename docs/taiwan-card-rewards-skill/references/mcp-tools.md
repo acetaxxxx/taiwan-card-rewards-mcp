@@ -1,8 +1,8 @@
 # Canonical MCP tools
 
-這份 reference 對應目前 source contract 的公開 surface：27 個工具。工具名稱、closed input、enum 與 fail-closed errors 以 `src/mcp-contract.ts`、`src/validation.ts` 和 `src/cli.ts` 為準；版本 tag 是發佈管理資訊，不是 public tool name。
+這份 reference 對應目前 source contract 的公開 surface：28 個工具。工具名稱、closed input、enum 與 fail-closed errors 以 `src/mcp-contract.ts`、`src/validation.ts` 和 `src/cli.ts` 為準；版本 tag 是發佈管理資訊，不是 public tool name。
 
-## 27-tool matrix
+## 28-tool matrix
 
 | Tool | Read/write | 用途 |
 |---|---|---|
@@ -30,6 +30,7 @@
 | `get_ingestion` | read | 取得 MCP 決定的下一個 ingestion action 與 coverage |
 | `submit_ingestion_source` | write | 提交不可變 source capture；MCP 不會自行抓 URL |
 | `submit_ingestion_manifest` | write | 提交完整 manifest，驗證 dependency graph |
+| `correct_ingestion_manifest` | write | 建立 server-owned manifest revision 並保留舊 revision lineage |
 | `submit_benefit_leaf` | write | 解析 merchant references、驗證並 materialize 單一 candidate benefit rule；未 finalize 前不可推薦 |
 | `submit_exclusion_leaf` | write | 提交 server-selected shared exclusion；ignored exclusion 必須提供 reason |
 | `finalize_ingestion` | write | 原子重驗完整 manifest，啟用 verified candidate rules 並回傳 completion proof |

@@ -33,7 +33,7 @@ version, run the host's handshake/tool smoke check, then deploy.
 At startup, validate the MCP handshake and tool list before business calls:
 
 1. Confirm the expected protocol and server identity.
-2. Confirm all 27 canonical public tools exist, including the merchant-first `recommend` entry point (whose response already unifies direct-card and payment-path candidates), `list_transactions`, and payment-route/account onboarding/listing, with the expected closed input schemas;
+2. Confirm all 28 canonical public tools exist, including the merchant-first `recommend` entry point (whose response already unifies direct-card and payment-path candidates), `list_transactions`, and payment-route/account onboarding/listing, with the expected closed input schemas;
    check required fields, enums/bounds, and runtime unknown-field rejection at
    every object level, not only the top-level tool object.
 3. Confirm the process is bound by the trusted host to the intended user scope.
