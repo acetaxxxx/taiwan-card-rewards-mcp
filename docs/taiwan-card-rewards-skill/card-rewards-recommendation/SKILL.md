@@ -40,6 +40,7 @@ WHILE (response.status !== 'ready'):
 
             CASE "merchant_ambiguous" (特店名稱模糊):
                 -> 檢視 action.candidateIds 或 action.diagnostic.message
+                -> 參考 [`workflows/merchant-resolution-and-disambiguation.md`](workflows/merchant-resolution-and-disambiguation.md) 流程
                 -> 向使用者列出 2~3 個候選實體請其選擇（例如：「請問是 1. 全家便利商店 還是 2. 全家餐飲？」）
                 -> 等待使用者回覆選定項目
 
@@ -49,7 +50,7 @@ WHILE (response.status !== 'ready'):
 
             CASE "fx_missing" | "fx_stale" | "fx_pair_mismatch" | "fx_scope_mismatch" (缺少或過期外幣匯率):
                 -> 責任為 agent (owner === 'agent')，禁止向使用者索取技術代碼
-                -> 參考 workflows/payment-route-and-fx.md 獲取已知即時匯率快照
+                -> 讀取 [`workflows/payment-route-and-fx.md`](workflows/payment-route-and-fx.md) 獲取已知即時匯率快照與組裝格式
                 -> 組裝 fx 物件 (ratePpm, capturedAt, provider, rateType)
 
             CASE "conflicting_fact" | "stale_fact" | "invalid_fact" (卡片資格事實衝突):
@@ -73,12 +74,12 @@ END WHILE
 ### 階段四：結案輸出 (Final Presentation)
 
 - **情境 A (`response.status === 'ready'`)**：
-  1. 依據 `candidates` 排名，輸出第 1 名推薦卡片名稱。
-  2. 標註名目回饋趴數、命中之權益規則名稱（如「玩旅刷 3.3%」）。
+  1. 依據 `candidates` 排名，依序輸出推薦卡片名稱。
+  2. 標註名目回饋趴數、命中之權益規則名稱。
   3. 若為外幣交易，明確列出海外手續費（1.5%）與**預估實質淨回饋金額**。
   4. 提示該卡回饋上限剩餘額度。
 - **情境 B (`response.status === 'no_match'`)**：
-  - 誠實告知使用者目前登記的卡片無特定加碼通路，建議使用一般消費基礎回饋卡支付。
+  - 誠實告知使用者目前登記的卡片無特定加碼通路，依據 `candidates` 排名，依序輸出推薦卡片名稱。
 
 ---
 
@@ -86,11 +87,11 @@ END WHILE
 
 本表格直接對應 MCP 原始碼之真實枚舉：
 
-| 診斷代碼 (`diagnostic.code`) | 責任人 (`owner`) | 說明 | Agent 處置指南 |
+| 診斷代碼 (`diagnostic.code`) | 責任人 (`owner`) | 說明 | Agent 處置指南與流程連結 |
 |---|:---:|---|---|
-| `merchant_ambiguous` | `user` | 特店在不同地區或體系有多個實體 | 向使用者列出選項確認，將確認之特店名填入 `merchant` 重試。 |
-| `merchant_not_found` | `agent` | 特店尚未收錄於在地型錄 | 若使用者已知確切品牌則直接作為自訂特店，重新調用。 |
+| `merchant_ambiguous` | `user` | 特店在不同地區或體系有多個實體 | 參考 [`merchant-resolution-and-disambiguation.md`](workflows/merchant-resolution-and-disambiguation.md) 列出選項確認，更新 `merchant` 後重試。 |
+| `merchant_not_found` | `agent` | 特店尚未收錄於在地型錄 | 參考 [`merchant-resolution-and-disambiguation.md`](workflows/merchant-resolution-and-disambiguation.md) 將已知品牌作為特店重新調用。 |
 | `missing_required_fact` | `user` | 缺少金額 (`amount`) 或關鍵欄位 | 向使用者詢問缺少之欄位，回填後重試。 |
-| `fx_missing` / `fx_stale` | `agent` | 缺少或過期之外幣匯率快照 | 查詢合格牌告中價或現鈔賣出價，組裝 `fx` 快照後重試。 |
+| `fx_missing` / `fx_stale` | `agent` | 缺少或過期之外幣匯率快照 | 依 [`payment-route-and-fx.md`](workflows/payment-route-and-fx.md) 查詢牌告中價或現鈔賣出價，組裝 `fx` 快照後重試。 |
 | `conflicting_fact` | `user` | 資格條件衝突（如方案切換日期不符） | 向使用者詢問最新狀態，填入 `supplementalFacts.eligibilityFacts`。 |
 | `stale_rule` / `needs_review` | `agent` | 權益可能已到期或需覆核 | 候選卡片標記為待覆核，或提示使用者載入 Ingestion 流程更新。 |

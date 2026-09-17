@@ -1,216 +1,90 @@
-# 通用支付路徑層級與外幣匯率研究 SOP (Payment Route & FX SOP)
+# 外幣匯率查詢與組裝標準作業程序 (Payment Route & FX SOP)
 
-本標準作業程序規範多層支付路徑架構、最終扣款工具分類、支付拓撲與開放識別碼、外幣匯率研究及 PPM 量化標準。
-
-> **先查官方來源**：遇到跨境錢包、PayPay、TWQR、台灣 Pay、Pay+ 或任何新 provider，分別確認品牌、QR 受理網路、消費者 App、互通方案、funding 與 settlement；只有當期官方證據支持時才可把它們串成一條 route。
-
----
-
-## 1. 循序支付路徑層級與最終扣款工具 (Payment-Route Layers & Funding Instruments)
-
-一筆消費可能同時產出多個獨立的 `RewardComponent`。系統將交易拆解為 **(A) 循序支付路徑層級** 與 **(B) 最終實體扣款工具**：
-
-### (A) 可疊加之循序支付路徑層級 (Ordered Payment-Route Layers)
-
-```
-┌────────────────────────────────────────────────────────────────────────┐
-│ 1. 特約商家會員層 (Merchant Loyalty)  ──► 產生 merchant_loyalty 回饋組件   │
-│    (例：超商 OPEN POINT、全聯福利點、百貨會員點數)                     │
-├────────────────────────────────────────────────────────────────────────┤
-│ 2. 消費者支付 App / Wallet 層       ──► 產生 payment_provider 回饋組件   │
-│    (例：LINE Pay 點數、街口幣、全支付點數、電子支付跨國優惠)           │
-├────────────────────────────────────────────────────────────────────────┤
-│ 3. 商家受理 / 互通方案 / 中介層       （不一定同時存在）                 │
-│    (例：PayPay QR、TWQR、跨境互通或清算中介)                             │
-├────────────────────────────────────────────────────────────────────────┤
-│ 4. 發卡機構與卡組織 (Card Issuer / Network) ──► 產生 card_issuer 回饋組件 │
-│    (例：銀行信用卡現金回饋、紅利點數、發卡組織專案)                    │
-└────────────────────────────────────────────────────────────────────────┘
-```
-
-- **回饋歸屬主體**：每個 `RewardComponent` 依其發放主體（`merchant_loyalty`, `payment_provider`, `card_issuer`）獨立計量、獨立套用進位規則與上限池。電子錢包可能是 App、帳戶扣款者或信用卡儲值中介；不能只看品牌判斷最終 funding。
-
-### (B) 最終實體扣款工具 (Terminal Funding Instrument)
-
-最終實際支付資金來源僅劃分為以下三大類：
-1. **信用卡 (`credit_card`)**：實體信用卡或綁定於錢包之信用卡。
-2. **現金 (`cash`)**：實體紙鈔硬幣或貨到付款現金。
-3. **帳戶 (`account`)**：涵蓋銀行存款帳戶（`linked_bank_account`）、電子支付錢包儲值帳戶/餘額（`wallet_balance`）及外幣存款帳戶（`foreign_currency_account`）。
+本標準作業程序規範 Agent 在推薦流程中收到 `fx_missing`、`fx_stale`、`fx_pair_mismatch` 或附帶 `FxResolutionRequest` 時，如何解析來源網址、計算匯率並組裝 `fx` 快照以供重試。
 
 > [!IMPORTANT]
-> **扣款工具與回饋連動守則**：
-> 1. **帳戶扣款不觸發發卡行回饋**：當使用者選擇以銀行帳戶或錢包餘額（`account`）扣款時，**絕不觸發**發卡機構信用卡回饋（`card_issuer`），僅能享有商家或錢包業者之回饋。
-> 2. **現金無信用卡回饋**：使用現金（`cash`）結帳絕無卡片回饋，嚴禁代理人猜測或虛構。
+> **架構原則（核心零直接網路 I/O 與失敗即關閉 Fail-Closed）**：
+> MCP 核心內部絕不自行發起外聯網路請求抓取匯率。若缺少匯率快照，核心引擎遵循「失敗即關閉 (Fail-Closed)」原則，回傳 `requiredActions` 包含 `action: "query_approved_fx_source"` 以及結構化之 `FxResolutionRequest`，由外部 Host Agent 負責透過網路或工具查詢核准之來源網址後注入。實際交易入帳後，採納之匯率將固化為 `AppliedFxRate`。
 
 ---
 
-## 2. 穩定拓撲 vs 開放可擴充識別碼 (Topology vs Extensible Identifiers)
+## 1. 核心查價與換匯 4 步流程 (The 4-Step FX Resolution Flow)
 
-系統明確區分**封閉穩定的架構拓撲**與**開放可擴充的字串資料**：
+```text
+1. 解析 MCP 指示 ──► 2. 獲取合格報價 ──► 3. 計算 ratePpm ──► 4. 組裝 fx 重試
+   (sourceUrls)         (即期 vs 現鈔)      (匯率 x 1,000,000)   (帶入 recommend)
+```
 
-### 2.1 粗粒度穩定拓撲 (`PaymentRouteKind`)
-MCP 合約中維持穩定封閉列舉：
-- `direct_card`: 實體卡插卡、感應或線上輸入卡號。
-- `wallet`: 行動支付、電子錢包或條碼支付載體。
-- `merchant_app`: 特店專屬 App 內嵌結帳（如 Uber App、foodpanda、高鐵 T-EX App）。
-
-### 2.2 開放可擴充識別碼 (Extensible Open Identifiers)
-`providerId`, `appId`, `paymentMethod`, `walletProviderId` 等皆為開放字串資料：
-- **常見實例（僅為說明，非封閉常數）**：`line_pay`, `jkopay`, `pxpay_plus`, `apple_pay`, `google_pay`, `taiwan_pay`, `samsung_pay`, `icash_pay`, `open_wallet`, `paypay` 等。
-- **新增支付服務**：新增市場上的新電子錢包或支付品牌時，**只需填入新的 provider / paymentMethod 字串並提供對應的官方證據與規則 (Evidence & Rules)**，完全無需修改 MCP 核心引擎。
-- **無猜測原則**：遇到系統未建立規則之未知 provider 時，絕不進行模糊自動匹配；只有出現全新計算語意（如全新形態的匯率折算公式、特殊階梯費率或新型態疊加邏輯）時才需擴充 MCP 合約。
-
-建議 route layer 依觀察事實使用 `merchant_acceptance`、`consumer_app`、`interoperability_scheme`、`payment_provider`、`intermediate_provider`、`card_network`、`card_issuer`；`funding` 另以 `credit_card | account | cash` 表示。`PayPay QR → Taishin Pay+ → 台新信用卡` 與 `TWQR → 台灣 Pay → 帳戶` 是兩筆 route，不得用一個固定 `wallet` 常數代替。
-
-### 2.3 核心欄位語意區分
-- **`channel`**：交易互動媒介情境（如 `in_store` 實體門市臨櫃、`online` 網路電商/App）。
-- **`paymentMethod` / `providerId`**：具體支付工具或電子支付機構名稱（如 `line_pay`, `apple_pay`）。
-- **`route.kind`**：粗粒度路徑種類（`direct_card` | `wallet` | `merchant_app`）。
-
-### 2.4 Agent 自動提醒與加入支付路徑 (Route Onboarding Loop)
-
-當使用者說「我有一張新卡」或「我常用某個支付 App／帳戶」時，Agent 應把支付路徑當成可重用的使用者設定提醒。官方證據一致時，planned recommendation 預設可使用；只有衝突、歧義或 user-specific binding 才詢問：
-
-1. 先詢問並記錄非敏感事實：受理網路或商家 App、消費者 App、是否有互通／中介、最終 funding 是信用卡／帳戶／現金，以及交易幣別與結算幣別。
-2. 只有在管理／查重或使用者明確要求路徑清單時才呼叫 `list_payment_routes`；正常 merchant-first recommendation 不需要先列清單。若已知路徑過期或衝突，標示 `needs_review`，不要覆蓋原紀錄。
-3. 缺資料時由 Agent Workspace 查官方 FAQ、費率、匯率、回饋與排除條款，建立逐層 `EvidenceRecord`；MCP 不自行上網，也不把品牌名稱當成清算事實。
-4. 用 `upsert_payment_route` 寫入有證據的路徑；一致證據可直接為 `active`，不需要逐筆 confirmation。若使用者表示不可用，使用相同 idempotency key、附 `failure` 將既有 route 標成 `failed`；禁止寫入卡號、驗證碼、密碼或任何支付憑據。
-5. 若有只適用此路徑的回饋規則，將規則以 `OfferRuleVersion.routeId` 綁定該 route；通用規則不綁 route，維持既有相容性。
-6. 正常 merchant-first 流程直接送出 `recommend`；要限制搜尋範圍就用 intent 的 `routeIds`。路徑不存在、過期、funding 不一致、匯率／費用／回饋條款衝突時，`recommend` 回傳 `requiredActions` 讓 Agent 補資料或詢問使用者，不能猜測。
-
-新增支付服務只需要新的開放識別碼與官方證據；除非出現新的計算語意，否則不需要新增 PayPay、街口或其他品牌專用工具。
+### 步驟 1：解析 MCP 指示與來源網址 (`FxResolutionRequest`)
+當 `recommend` 回傳 `requiredActions` 之 `action: "query_approved_fx_source"` 時，檢視附加的 `fxResolutionRequest` 物件：
+- `baseCurrency`: 交易外幣（如 `JPY`, `USD`, `EUR`）。
+- `quoteCurrency`: 結算貨幣（固定為 `TWD`）。
+- `sourceUrls`: **MCP 指定之核准查詢網址**。若此欄位有提供，Agent **必須優先以此 URL 查詢**。
+- `suggestedRateTypes`: 建議匯率類型（如 `cash_selling`, `spot_selling`, `card_scheme`, `mid_market`）。
+- `conversionOwner`: 換匯主導者（`card_scheme`, `wallet`, `issuer`）。
 
 ---
 
-## 3. 外幣匯率研究與三種幣別拆解 (FX & Currency Tri-Split)
+### 步驟 2：換匯主體判斷與查價原則 (Pricing Rules)
+若 `sourceUrls` 未指定或需要進一步確認定價軌道，遵循以下規則：
 
-跨國或外幣交易中，Agent 必須精確釐清以下三種幣別：
-1. **交易幣別 (`transactionCurrency`)**：特約商店結帳標價幣別（如 JPY, USD, EUR, TWD）。
-2. **清算幣別 (`settlementCurrency`)**：卡組織或跨境支付通道結算幣別（通常為 TWD 或 USD）。
-3. **帳單請款幣別 (`billingCurrency`)**：使用者信用卡帳單計價幣別（通常為 TWD）。
+| 支付通路與清算軌道 | 換匯主導者 (`conversionOwner`) | 匯率類型 (`rateType`) | 合格查價來源與原則 |
+|---|---|---|---|
+| **實體信用卡 / Apple Pay / Google Pay** | `card_scheme` | `card_scheme` 或 `spot_selling` | 走國際卡組織即期中價。<br>查價網址：臺灣銀行牌告即期賣出中價 (`https://rate.bot.com.tw/xrt?Lang=zh-TW`) 或卡組織公布之參考匯率。 |
+| **跨境電子錢包 (街口 / 台新Pay+ 掃日本 PayPay)** | `wallet` | `cash_selling` | **走合作銀行「現鈔賣出牌告價」（約比即期貴 1.8%~2.3%）**。<br>查價網址：台新即時外幣牌告 (`https://www.taishinbank.com.tw/TSB/personal/deposit/lookup/realtime/`) 現鈔賣出牌價，或錢包 App 即時鎖定牌價。 |
+| **發卡行直接結匯 / 雙幣卡** | `issuer` | `cash_selling` | 發卡行官網當日牌告現鈔賣出價。 |
 
-### 換匯主導者與換匯時機
-- `conversionOwner`: `merchant` (DCC 機制), `wallet` (電子錢包即時換匯), `payment_provider`, `bank`, `acquirer`, `card_network` (VISA/Mastercard/JCB 國際組織), `issuer` (發卡銀行), `unknown`。
-- `conversionTiming`: `transaction` (即時結匯), `clearing`, `settlement`, `posting` (入帳日匯率)。
-
-### 手續費結構
-- `foreignTransactionFee`: 以該 provider／卡片／活動的官方費率快照為準；`1.5% = 15000` PPM 只是某些卡片條款的輸入，不是全域預設。
-- `markup`: 通道服務費或匯差加價。
-- `dcc`: 是否觸發動態貨幣轉換 (Dynamic Currency Conversion)。
+> [!WARNING]
+> **🚨 跨境雙軌匯差防呆注意清單**：
+> 當使用者打算在日本使用街口或台新Pay+ 掃 PayPay 時，清算網路 (HIVEX) 採用的是較貴的**「銀行現鈔賣出價」**。
+> 若名目回饋僅多 0.5%~1.0%，扣除約 2% 匯差滑價後實質淨回饋往往不如直接刷實體卡或 Apple Pay。Agent 推薦時應計算並主動提醒使用者實質回饋差距。
 
 ---
 
-## 4. 官方一手來源查核階層 (Official Source Hierarchy)
+### 步驟 3：量化計算 PPM 數值 (`ratePpm`)
+系統要求匯率以 Parts-Per-Million (PPM) 整數表示：
+$$\text{ratePpm} = \text{Round}(\text{1 單位外幣兌換之新台幣金額} \times 1,000,000)$$
 
-| 優先級 | 來源類別 | 查核目標內容 |
-|---|---|---|
-| 🥇 **第 1 級** | **支付錢包 / 通道官方定價與條款** | 跨國交易支援度、扣款手續費、換匯合作銀行與即時匯率公告 (例：街口/全支付跨境條款、LINE Pay 服務協議) |
-| 🥈 **第 2 級** | **發卡銀行 / 國際組織條款** | 國外交易 1.5% 手續費計收標準、海外刷卡加碼門檻、排除加碼之特店清單 |
-| 🥉 **第 3 級** | **特店商家結帳條款** | 是否收取外幣交易附加費、是否強制或預設 DCC 本幣結帳 |
-
-### 4.1 路徑研究的最小官方證據包
-
-每條候選 route 至少要回答以下問題，並讓每個答案對應自己的來源快照：
-
-- 這個 App 是否真的支援該商家受理網路／互通方案？
-- 使用信用卡是直接授權，還是先儲值到錢包餘額再扣款？
-- 最終扣款工具與回饋發放主體是誰？是否有排除條款或不同 MCC／帳單描述？
-- 換匯由誰決定、在何時決定、使用哪種 rate type？是否另收 service fee、foreign transaction fee 或 DCC markup？
-- 條款有效期、地區、卡別、活動登錄與上限為何？
-
-任何一題無法由當期官方資料回答，就保留 `candidate` 或 `needs_review`，不把路徑當成可推薦事實；若官方資料互相衝突，先詢問 user。
+**算例對照**：
+- 日圓現鈔賣出價 `1 JPY = 0.2093 TWD` ➔ `ratePpm = 209300`
+- 美元即期賣出價 `1 USD = 32.15 TWD` ➔ `ratePpm = 32150000`
+- 歐元即期賣出價 `1 EUR = 34.50 TWD` ➔ `ratePpm = 34500000`
 
 ---
 
-## 5. 外幣匯率研究與 PPM 量化標準
+### 步驟 4：組裝標準 `fx` 快照並重試
+組裝符合 MCP Schema 的 `fx` Snapshot 物件：
 
-### 5.1 量化公式
-$$\text{ratePpm} = \text{匯率 (1 單位外幣折合新台幣金額)} \times 1,000,000$$
-
-- **日圓 (JPY) 範例**：1 JPY = 0.2152 TWD $\Rightarrow 0.2152 \times 1,000,000 =$ **`215200` PPM**。
-- **美金 (USD) 範例**：1 USD = 31.850 TWD $\Rightarrow 31.850 \times 1,000,000 =$ **`31850000` PPM**。
-- **歐元 (EUR) 範例**：1 EUR = 34.500 TWD $\Rightarrow 34.500 \times 1,000,000 =$ **`34500000` PPM**。
-
-### 5.2 注入 `FxSnapshot` 結構
 ```json
 {
-  "id": "fx_jpy_twd_bot_spot_20260906",
+  "id": "fx_quote_jpy_twd",
   "baseCurrency": "JPY",
   "quoteCurrency": "TWD",
-  "ratePpm": 215200,
-  "capturedAt": "2026-09-06T12:00:00Z",
+  "ratePpm": 209300,
+  "capturedAt": "2026-09-17T12:00:00Z",
   "maxAgeSeconds": 86400,
-  "provider": "BankOfTaiwan",
-  "rateType": "spot_selling",
-  "sourceUrl": "https://rate.bot.com.tw/xrt?Lang=zh-TW"
+  "provider": "TaishinBank",
+  "rateType": "cash_selling",
+  "sourceUrl": "https://www.taishinbank.com.tw/TSB/personal/deposit/lookup/realtime/"
 }
 ```
 
-> [!CAUTION]
-> **嚴禁 1:1 匯率回退**：若交易幣別非 `TWD` 且未提供有效 `FxSnapshot`，`recommend` 對受影響的 candidate 回傳 `status: "unknown"` 或 `"blocked"`，並在 `requiredActions` 附上 `action: "query_approved_fx_source"`（或 `"ask_user"`）與對應的 `fxResolutionRequest`。
-
----
-
-## 6. FX 自動化解析合約 (FX Resolution Contract)
-
-為消除 Host Agent 與 MCP 核心之間的外幣資訊落差，同時恪守「核心零直接網路 I/O、失敗即關閉 (Fail-Closed)」之架構承諾，系統回傳標準化 `FxResolutionRequest`，供 Agent 查詢並以本次 typed `fx` snapshot 重試。MCP 不維護全域 FX policy/observation store，也不仲裁多個候選值——Agent 每次新 evaluation 自行取得單一目前匯率，附在同一個 intent／transaction／event 上，通過幣別配對與新鮮度檢查即被直接信任套用。
-
-### 6.1 `FxResolutionRequest` 合約架構
-
-當交易幣別與回饋規則／清算幣別不一致（即跨幣別消費）時，`recommend` 回應或 Mutation 錯誤可附帶結構化的 `FxResolutionRequest`。它是待查要求，不是已取得的 `fx` snapshot：
-
-```typescript
-export interface FxResolutionRequest {
-  baseCurrency: Currency;
-  quoteCurrency: Currency;
-  asOf: string; // ISO 8601 UTC
-  transactionKind: 'planned' | 'actual';
-  conversionOwner: 'card_scheme' | 'issuer' | 'wallet' | 'merchant_dcc' | 'unknown';
-  suggestedRateTypes: Array<'card_scheme' | 'cash_selling' | 'spot_selling' | 'mid_market'>;
-  requiredFacts: readonly string[];
-  sourceSelectionReason: string;
-  retryAction: 'query_approved_fx_source' | 'ask_user' | 'refresh_external_data';
-  userQuestion?: string;
-  sourceUrls?: readonly string[];
-  sourceStatus?: 'known' | 'discovery_required';
-  purpose?: 'path_quote' | 'policy_research' | 'reference_estimate';
-  rateDirection?: 'base_to_quote';
-  scope?: { kind: 'public_reference' | 'card' | 'issuer' | 'route' | 'route_edge'; cardId?: string; issuer?: string; routeId?: string; edgeId?: string };
-  freshness?: { maxAgeSeconds?: number; targetTime?: string };
-  requiredFields?: readonly string[];
-  submission?: { tool: string; field: string };
-}
+攜帶上述 `fx` 物件與 `expectedResultVersion: response.resultVersion` 重新調用 `recommend` 工具：
+```javascript
+recommend({
+  merchant: "Bic Camera",
+  amount: { amountMinor: 10000, currency: "JPY" },
+  fx: {
+    id: "fx_quote_jpy_twd",
+    baseCurrency: "JPY",
+    quoteCurrency: "TWD",
+    ratePpm: 209300,
+    capturedAt: "2026-09-17T12:00:00Z",
+    maxAgeSeconds: 86400,
+    provider: "TaishinBank",
+    rateType: "cash_selling",
+    sourceUrl: "https://www.taishinbank.com.tw/TSB/personal/deposit/lookup/realtime/"
+  },
+  expectedResultVersion: response.resultVersion
+})
 ```
-
-### 6.2 換匯主導者與建議匯率種類矩陣 (Policy Matrix)
-
-系統依據支付路徑拓撲與交易屬性自動推導換匯主導者 (`conversionOwner`) 與建議匯率種類 (`suggestedRateTypes`)：
-
-| 換匯主導者 (`conversionOwner`) | 判定情境條件 | 建議匯率種類 (`suggestedRateTypes`) | 說明與來源仲裁依據 |
-|---|---|---|---|
-| **`card_scheme`** | 實體卡或 Apple/Google Pay 直刷、`card_network`、`acquirer` | `card_scheme` | 國際卡組織（Visa/Mastercard/JCB）官方公布結算匯率 |
-| **`issuer`** | 銀行端結匯或雙幣卡請款、`bank`、`issuer` | `cash_selling` | 發卡銀行當日現鈔／現金賣出牌告匯率 |
-| **`wallet`** | 電子錢包跨境掃碼結帳、`wallet`、`payment_provider` | `spot_selling`, `mid_market` | 錢包合作銀行即時即期賣出匯率或錢包公告中價 |
-| **`merchant_dcc`** | 觸發動態貨幣轉換（DCC）、`dcc: true`、`merchant` | `spot_selling`, `cash_selling` | 商家端 POS 即時加價換匯匯率 |
-| **`unknown`** | 尚未指定路徑或缺乏換匯主體事實 | 依 request 提示查詢；actual 仍需明確主體 | 目前回傳查詢要求與缺項；不把未知轉成自動估算 |
-
-> [!CAUTION]
-> **實際入帳交易嚴禁 `mid_market`**：`mid_market` 僅允許用於 `planned` 試算推薦。若 `record_transaction` 或 `record_event_reward` 在 `mode: 'actual'` 下傳入 `rateType: 'mid_market'`，系統將強制拒絕並拋出 `NEEDS_REVIEW`。
-
-### 6.3 寫入操作原子性保證與 Fail-Closed 機制
-
-1. **本次 typed snapshot**：
-   Agent 查詢並驗證報價後，將 typed `fx` snapshot 帶回原本的 planned intent（一般 `fx` 或指定 `routeFacts` 的 route/edge scope），再呼叫 `recommend` 讓 MCP 重新計算。Actual `record_transaction` 或 `record_event_reward` 同樣傳入驗證過的 `fx: FxSnapshot`；`fx.id` 是來源 reference，不會建立可跨交易重用的 MCP FX record。成功寫入只會把當次採用的 rate 與 provenance 凍結在該筆 ledger record。
-2. **`fx_missing` 結構化錯誤回傳**：
-   若未提供匯率快照，核心引擎立即拋出 `fx_missing` 錯誤，並在 `error.details` 中完整附帶 `fxResolutionRequest`，引導外部 Agent 透過核可管道查詢補齊後重試。
-3. **歷史入帳凍結與退款匯率豁免 (Frozen Provenance & Refund Immunity)**：
-   - 交易成功入帳時，核心將當下採納之匯率快照永久凍結於 `AppliedFxRate`（包含 `ratePpm`, `capturedAt`, `rateType`, `conversionOwner`, `appliedAtUtc`）。
-   - 當發起後續退款交易 (`kind: 'refund'`) 時，系統自動繼承原始交易之 `appliedFx` 與 `fx` 快照，退款金額與回饋沖銷完全按原始入帳匯率等比例折算，免於後續匯率波動或匯率快照過期之影響。
-
-### 6.4 查詢與重試原則 (Query and Retry Strategy)
-
-為確保使用者體驗不被打擾，系統遵循嚴格的提問策略：
-- `FxResolutionRequest` 是 request，`fx` 是 Agent 查詢後取得、直接信任套用的單一 snapshot，兩者不可互換；MCP 不對多個候選匯率評分或仲裁——一次呼叫只信任一個 Agent 提供的值。
-- Agent 依 request 指定的幣別對、時間、主體、rate type、方向與 scope 查詢核准來源；只有 planned `sourceStatus: known`、`purpose: reference_estimate` 才可使用臺灣銀行牌告頁（`https://rate.bot.com.tw/xrt?Lang=zh-TW`）作公共參考候選。Actual 或 `discovery_required` 不得使用 BOT fallback；它不是任何卡片／錢包的實際政策或結算報價。
-- 查詢並驗證後，將 typed `fx` 資料帶回同一 intent，再呼叫 `recommend` 重算。Actual conversion owner 不明時，依 request 的 `userQuestion` 詢問使用者。
-- 一旦使用者或資料源給定事實，系統即刻推導並固化，絕不就匯率問題進行重複對話。
