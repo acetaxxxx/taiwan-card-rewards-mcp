@@ -550,6 +550,12 @@ describe('Ticket 10: Recommendation and Ingestion Refresh Handoff', () => {
       childFlowId: childA.flow.id,
     })).toThrowError(/UNAUTHORIZED/);
 
+    // 9a.1. An unauthenticated recommendation cannot probe a child flow by ID.
+    expect(() => new RewardService(store, undefined).recommendIntent({
+      ...intentA,
+      childFlowId: childA.flow.id,
+    })).toThrowError(/UNAUTHENTICATED/);
+
     // 9b. Continuation fingerprint mismatch throws INVALID_INPUT
     const differentIntent = {
       ...intentA,

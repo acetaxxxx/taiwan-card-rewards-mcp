@@ -236,7 +236,7 @@ export class RewardService {
     return this.inspectIngestion(flowId);
   }
 
-  submitBenefitLeaf(input: unknown): { artifact: IngestionBenefitArtifact; flow: ReturnType<RewardService['inspectIngestion']> } {
+  submitBenefitLeaf(input: unknown): { artifact?: IngestionBenefitArtifact; flow: ReturnType<RewardService['inspectIngestion']> } {
     const ownerUser = this.requireIngestionOwner();
     const parsed = validateIngestionBenefitLeaf(input);
     this.sweepExpiredIngestions();
@@ -253,12 +253,27 @@ export class RewardService {
     const leaf = flow.manifest?.find((candidate) => candidate.id === parsed.leafId);
     if (!action || action.kind !== 'PROCESS_LEAF' || action.leafId !== parsed.leafId) throw new RewardServiceError('INVALID_FLOW_ACTION', 'benefit leaf is not the server-owned next action', { code: 'INVALID_FLOW_ACTION', path: 'leafId', requiredFacts: ['get_ingestion.nextAction.leafId'], retryAction: 'get_ingestion', affectedIds: [flow.id] });
     if (!leaf || leaf.kind !== 'benefit' || leaf.disposition !== undefined) throw new RewardServiceError('INVALID_INPUT', 'leafId must identify a pending benefit leaf');
-    if (parsed.expectedRevision !== flow.revision || parsed.actionId !== action.actionId) throw new RewardServiceError('STALE_REVISION', 'benefit leaf action is stale', { code: 'STALE_REVISION', path: parsed.expectedRevision !== flow.revision ? 'expectedRevision' : 'actionId', requiredFacts: [], retryAction: 'get_ingestion', affectedIds: [flow.id] });
-    if (!flow.sourceCapture || parsed.offer.snapshot.contentHash !== flow.sourceCapture.contentHash || (flow.sourceCapture.url !== undefined && parsed.offer.snapshot.url !== flow.sourceCapture.url)) throw new RewardServiceError('SOURCE_SCOPE_CONFLICT', 'benefit offer snapshot does not match the captured source', { code: 'SOURCE_SCOPE_CONFLICT', path: 'offer.snapshot', requiredFacts: ['source capture contentHash and URL'], retryAction: 'submit_benefit_leaf', affectedIds: [flow.id, parsed.leafId] });
-    if (parsed.offer.rule.status !== 'candidate') throw new RewardServiceError('INVALID_OFFER', 'benefit leaf materialization must create a candidate rule');
-    if (!['percentage', 'flat', 'step', 'per_unit'].includes(parsed.offer.rule.reward.kind)) throw new RewardServiceError('NEEDS_REVIEW', `benefit leaf uses unsupported reward semantics: ${parsed.offer.rule.reward.kind}`, { code: 'UNSUPPORTED_REWARD_UNIT', path: 'offer.rule.reward.kind', requiredFacts: ['a supported reward kind or an authoritative valuation/adapter for this reward unit'], retryAction: 'submit_benefit_leaf', affectedIds: [flow.id, parsed.leafId] });
-    let materializedRule = parsed.offer.rule;
-    let merchant = parsed.offer.merchant;
+    if (parsed.expectedRevision !== flow.revision || parsed.actionId !== action.actionId) throw new RewardServiceError('STALE_REVISION', 'benefit leaf action is stale', { code: 'STALE_REVISION', path: parsed.expectedRevision !== flow.revision ? 'expectedRevision' : 'actionId', requiredFacts: [], retryAction: 'get_ingestion', affectedIds: [flow.id, leaf.id] });
+    if (parsed.disposition !== 'materialized') {
+      this.store.update((state) => {
+        const current = state.ingestionFlows.find((candidate) => candidate.id === flow.id && candidate.ownerUser === ownerUser);
+        if (!current || current.revision !== parsed.expectedRevision) throw new RewardServiceError('STALE_REVISION', 'benefit leaf changed while recording disposition');
+        const currentLeaf = current.manifest?.find((candidate) => candidate.id === parsed.leafId);
+        if (!currentLeaf || currentLeaf.disposition !== undefined) throw new RewardServiceError('INVALID_FLOW_ACTION', 'benefit leaf was already processed');
+        if (current.manifest) current.manifest = current.manifest.map((candidate) => candidate.id === parsed.leafId ? { ...candidate, disposition: parsed.disposition!, dispositionReason: parsed.reason!, dispositionEvidence: parsed.evidenceRefs[0]! } : candidate);
+        current.revision += 1;
+        current.status = current.manifest?.every((candidate) => candidate.disposition !== undefined) ? 'ready_to_finalize' : 'processing_leaves';
+        current.lastActivityAt = this.workflowNow().toISOString();
+      });
+      return { flow: this.inspectIngestion(flow.id) };
+    }
+    const offer = parsed.offer;
+    if (!offer) throw new RewardServiceError('INVALID_INPUT', 'materialized benefit requires offer');
+    if (!flow.sourceCapture || offer.snapshot.contentHash !== flow.sourceCapture.contentHash || (flow.sourceCapture.url !== undefined && offer.snapshot.url !== flow.sourceCapture.url)) throw new RewardServiceError('SOURCE_SCOPE_CONFLICT', 'benefit offer snapshot does not match the captured source', { code: 'SOURCE_SCOPE_CONFLICT', path: 'offer.snapshot', requiredFacts: ['source capture contentHash and URL'], retryAction: 'submit_benefit_leaf', affectedIds: [flow.id, parsed.leafId] });
+    if (offer.rule.status !== 'candidate') throw new RewardServiceError('INVALID_OFFER', 'benefit leaf materialization must create a candidate rule');
+    if (!['percentage', 'flat', 'step', 'per_unit'].includes(offer.rule.reward.kind)) throw new RewardServiceError('NEEDS_REVIEW', `benefit leaf uses unsupported reward semantics: ${offer.rule.reward.kind}`, { code: 'UNSUPPORTED_REWARD_UNIT', path: 'offer.rule.reward.kind', requiredFacts: ['a supported reward kind or an authoritative valuation/adapter for this reward unit'], retryAction: 'submit_benefit_leaf', affectedIds: [flow.id, parsed.leafId] });
+    let materializedRule = offer.rule;
+    let merchant = offer.merchant;
     if (parsed.merchantRefs?.length) {
       const resolvedIds: string[] = [];
       for (const [index, reference] of parsed.merchantRefs.entries()) {
@@ -274,14 +289,14 @@ export class RewardService {
     const knownMerchants = new Set(before.merchants.map((candidate) => candidate.canonicalId));
     const unresolvedMerchant = merchant === undefined ? materializedRule.match.merchants?.find((id) => !knownMerchants.has(id)) : undefined;
     if (unresolvedMerchant !== undefined) throw new RewardServiceError('NEEDS_REVIEW', 'benefit leaf references an unresolved canonical merchant', { code: 'MERCHANT_UNRESOLVED', path: 'offer.rule.match.merchants', requiredFacts: [`confirmed canonical merchant ${unresolvedMerchant}`], retryAction: 'submit_benefit_leaf', affectedIds: [flow.id, parsed.leafId, unresolvedMerchant], merchantResolution: { rawQuery: unresolvedMerchant, status: 'unresolved', candidates: [] } });
-    const knownPools = new Set([...before.capPools, ...(parsed.offer.capPools ?? [])].map((pool) => pool.id));
-    const unresolvedPool = parsed.offer.rule.capPoolRefs?.find((id) => !knownPools.has(id));
+    const knownPools = new Set([...before.capPools, ...(offer.capPools ?? [])].map((pool) => pool.id));
+    const unresolvedPool = offer.rule.capPoolRefs?.find((id) => !knownPools.has(id));
     if (unresolvedPool !== undefined) throw new RewardServiceError('NEEDS_REVIEW', 'benefit leaf references an unresolved cap pool', { code: 'NEEDS_REVIEW', path: 'offer.rule.capPoolRefs', requiredFacts: [`validated cap pool ${unresolvedPool}`], retryAction: 'submit_benefit_leaf', affectedIds: [flow.id, parsed.leafId, unresolvedPool] });
-    if (parsed.offer.rule.routeId !== undefined && !before.paymentRoutes.some((route) => route.id === parsed.offer.rule.routeId)) throw new RewardServiceError('NEEDS_REVIEW', 'benefit leaf references an unresolved payment route', { code: 'NEEDS_REVIEW', path: 'offer.rule.routeId', requiredFacts: [`validated payment route ${parsed.offer.rule.routeId}`], retryAction: 'submit_benefit_leaf', affectedIds: [flow.id, parsed.leafId, parsed.offer.rule.routeId] });
+    if (offer.rule.routeId !== undefined && !before.paymentRoutes.some((route) => route.id === offer.rule.routeId)) throw new RewardServiceError('NEEDS_REVIEW', 'benefit leaf references an unresolved payment route', { code: 'NEEDS_REVIEW', path: 'offer.rule.routeId', requiredFacts: [`validated payment route ${offer.rule.routeId}`], retryAction: 'submit_benefit_leaf', affectedIds: [flow.id, parsed.leafId, offer.rule.routeId] });
     const sharedExclusions = this.appliedSharedExclusions(flow, leaf.id);
     if (parsed.localExclusions?.some((local) => sharedExclusions.some((shared) => isDeepStrictEqual(local.predicate, shared.predicate)))) throw new RewardServiceError('NEEDS_REVIEW', 'local and shared exclusion duplicate each other', { code: 'EXCLUSION_SCOPE_CONFLICT', path: 'localExclusions', requiredFacts: ['one non-overlapping exclusion scope'], retryAction: 'submit_benefit_leaf', affectedIds: [flow.id, leaf.id, ...sharedExclusions.map((shared) => shared.sourceLeafId)] });
     if (sharedExclusions.length) materializedRule = { ...materializedRule, sharedExclusions };
-    const result = this.upsertOffer(parsed.offer.snapshot, materializedRule, undefined, parsed.offer.capPools, merchant);
+    const result = this.upsertOffer(offer.snapshot, materializedRule, undefined, offer.capPools, merchant);
     const artifact: IngestionBenefitArtifact = { id: `artifact_${crypto.randomUUID().replace(/-/g, '')}`, flowId: flow.id, revision: flow.revision, leafId: leaf.id, ruleId: result.rule.id, ruleVersion: result.rule.version, snapshotId: result.snapshot.id, evidenceRefs: parsed.evidenceRefs, localExclusions: parsed.localExclusions ?? [], idempotencyKey: parsed.idempotencyKey, payloadHash, status: 'candidate' };
     this.store.update((state) => {
       const current = state.ingestionFlows.find((candidate) => candidate.id === flow.id && candidate.ownerUser === ownerUser);
@@ -380,7 +395,7 @@ export class RewardService {
         state.rules[ruleIndex] = { ...rule, status: 'active', trustBasis: 'official_verified' };
         activatedRules.push({ ruleId: rule.id, ruleVersion: rule.version });
       }
-      const leaves = (flow.manifest ?? []).map((leaf) => ({ id: leaf.id, kind: leaf.kind, disposition: leaf.disposition!, ...(leaf.dispositionReason === undefined ? {} : { reason: leaf.dispositionReason }), evidenceLocator: leaf.evidenceLocator, evidenceRefs: leaf.kind === 'benefit' ? flow.benefitArtifacts?.find((artifact) => artifact.leafId === leaf.id)?.evidenceRefs ?? [] : flow.exclusionArtifacts?.find((artifact) => artifact.sourceLeafId === leaf.id)?.evidenceRefs ?? (leaf.dispositionEvidence === undefined ? [] : [leaf.dispositionEvidence]) }));
+      const leaves = (flow.manifest ?? []).map((leaf) => ({ id: leaf.id, kind: leaf.kind, disposition: leaf.disposition!, ...(leaf.dispositionReason === undefined ? {} : { reason: leaf.dispositionReason }), evidenceLocator: leaf.evidenceLocator, evidenceRefs: leaf.kind === 'benefit' ? flow.benefitArtifacts?.find((artifact) => artifact.leafId === leaf.id)?.evidenceRefs ?? (leaf.dispositionEvidence === undefined ? [] : [leaf.dispositionEvidence]) : flow.exclusionArtifacts?.find((artifact) => artifact.sourceLeafId === leaf.id)?.evidenceRefs ?? (leaf.dispositionEvidence === undefined ? [] : [leaf.dispositionEvidence]) }));
       proof = { flowId: flow.id, finalizeActionId: actionId, finalizedRevision: flow.revision, completedAt: this.workflowNow().toISOString(), sourceCapture: { artifactRef: flow.sourceCapture!.artifactRef, contentHash: flow.sourceCapture!.contentHash, retrievedAt: flow.sourceCapture!.retrievedAt, sourceType: flow.sourceCapture!.sourceType }, leafTotals: { total: leaves.length, materialized: leaves.filter((leaf) => leaf.disposition === 'materialized').length, ignored: leaves.filter((leaf) => leaf.disposition === 'ignored').length, superseded: leaves.filter((leaf) => leaf.disposition === 'superseded').length }, leaves, activatedRules, awaitingConfirmationRules };
       flow.completionProof = proof;
       flow.status = 'complete';
@@ -482,6 +497,7 @@ export class RewardService {
 
   private assertFinalizeReady(state: StoredState, flow: IngestionFlowRecord): void {
     if (!flow.sourceCapture || !flow.manifest?.length || flow.manifest.some((leaf) => leaf.disposition === undefined)) throw new RewardServiceError('INVALID_FLOW_ACTION', 'finalization requires a source capture and a full manifest disposition');
+    if (flow.manifest.some((leaf) => leaf.disposition !== 'materialized' && (!leaf.dispositionReason || !leaf.dispositionEvidence))) throw new RewardServiceError('NEEDS_REVIEW', 'non-materialized leaf disposition requires reason and evidence', { code: 'MANIFEST_INCOMPLETE', path: 'manifest', requiredFacts: ['reason and evidence for ignored or superseded leaves'], retryAction: 'get_ingestion', affectedIds: [flow.id] });
     for (const leaf of flow.manifest) {
       if (leaf.kind === 'benefit' && leaf.disposition === 'materialized' && !(flow.benefitArtifacts ?? []).some((artifact) => artifact.leafId === leaf.id)) throw new RewardServiceError('NEEDS_REVIEW', 'materialized benefit has no candidate artifact', { code: 'MANIFEST_INCOMPLETE', path: 'manifest', requiredFacts: ['candidate benefit artifact'], retryAction: 'get_ingestion', affectedIds: [flow.id, leaf.id] });
       if (leaf.kind === 'exclusion' && leaf.disposition === 'materialized' && !(flow.exclusionArtifacts ?? []).some((artifact) => artifact.sourceLeafId === leaf.id)) throw new RewardServiceError('NEEDS_REVIEW', 'materialized exclusion has no candidate artifact', { code: 'MANIFEST_INCOMPLETE', path: 'manifest', requiredFacts: ['candidate exclusion artifact'], retryAction: 'get_ingestion', affectedIds: [flow.id, leaf.id] });
@@ -1208,11 +1224,12 @@ export class RewardService {
     const targetChildFlowId = input.childFlowId ?? input.resumedFlowId ?? retryFacts?.childFlowId ?? retryFacts?.resumedFlowId;
     let targetChildFlow: IngestionFlowRecord | undefined;
     if (targetChildFlowId !== undefined) {
+      if (!this.metadataUser) throw new RewardServiceError('UNAUTHENTICATED', 'child ingestion continuation requires an authenticated user');
       const flow = state.ingestionFlows.find((c) => c.id === targetChildFlowId);
       if (!flow) {
         throw new RewardServiceError('FLOW_NOT_FOUND', `child ingestion flow ${targetChildFlowId} not found`);
       }
-      if (this.metadataUser && flow.ownerUser !== this.metadataUser) {
+      if (flow.ownerUser !== this.metadataUser) {
         throw new RewardServiceError('UNAUTHORIZED', `child ingestion flow ${targetChildFlowId} belongs to another user`);
       }
       const {

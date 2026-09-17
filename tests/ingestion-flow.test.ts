@@ -41,7 +41,9 @@ describe('ingestion flow spine', () => {
     const submitted = service.submitIngestionSource({ flowId: created.flow.id, actionId: created.nextAction?.actionId, expectedRevision: 1, sourceCapture: { sourceType: 'official', url: 'https://bank.example/offers', retrievedAt: '2026-09-16T00:00:00Z', contentHash: 'sha256:offers', artifactRef: 'artifact:offers-2026', submitter: 'agent-a', submittedAt: '2026-09-16T00:00:01Z' } });
     expect(submitted.flow).toEqual(expect.objectContaining({ status: 'awaiting_manifest', revision: 2 }));
     expect(submitted.nextAction).toEqual(expect.objectContaining({ kind: 'SUBMIT_MANIFEST', expectedRevision: 2 }));
+    const beforeUnknownAction = service.store.read();
     expect(() => service.submitIngestionSource({ flowId: created.flow.id, actionId: 'wrong', expectedRevision: 1, sourceCapture: { sourceType: 'official', url: 'https://other.example/offers', retrievedAt: '2026-09-16T00:00:00Z', contentHash: 'sha256:other', artifactRef: 'artifact:other', submitter: 'agent-a', submittedAt: '2026-09-16T00:00:01Z' } })).toThrow(/INVALID_FLOW_ACTION/);
+    expect(service.store.read()).toEqual(beforeUnknownAction);
   });
 
   it('rejects cyclic manifests and returns the first dependency-ready leaf deterministically', () => {
@@ -71,8 +73,25 @@ describe('ingestion flow spine', () => {
     expect(finalized.proof).toEqual(expect.objectContaining({ flowId: created.flow.id, leafTotals: { total: 1, materialized: 1, ignored: 0, superseded: 0 }, activatedRules: [{ ruleId: 'rule-benefit-1', ruleVersion: '1' }] }));
     expect(finalized.flow.flow.status).toBe('complete');
     expect(service.searchActiveOffers({ cardId: 'card-1' }).offers).toHaveLength(1);
+    const terminalState = (service.store as MemoryStore).read();
+    expect(() => service.submitBenefitLeaf({ flowId: created.flow.id, actionId: action.actionId, expectedRevision: action.expectedRevision, idempotencyKey: 'terminal-retry', leafId: 'benefit-1', evidenceRefs: ['page:1#benefit'], offer: { snapshot: { id: 'snapshot-benefit-1', url: 'https://bank.example/offers', fetchedAt: '2026-09-16T00:00:00.000Z', contentHash: 'source-hash', parserVersion: '1', verified: true, sourceType: 'official' }, rule: { id: 'rule-benefit-1', cardId: 'card-1', version: '1', sourceSnapshotId: 'snapshot-benefit-1', status: 'candidate', validFrom: '2026-01-01T00:00:00.000Z', settlementCurrency: 'TWD', match: {}, reward: { kind: 'percentage', rateBps: 300 } } } })).toThrow();
+    expect((service.store as MemoryStore).read()).toEqual(terminalState);
     expect(service.finalizeIngestion({ flowId: created.flow.id, actionId: action.actionId, expectedRevision: action.expectedRevision }).proof).toEqual(finalized.proof);
     expect(service.createIngestion({ sourceScope: { kind: 'official_url', value: 'https://bank.example/offers' }, idempotencyKey: 'ingest-benefit-revision-2' }).flow.id).not.toBe(created.flow.id);
+  });
+
+  it('records ignored and superseded leaf decisions with reason and evidence', () => {
+    const service = new RewardService(new MemoryStore(), 'user-a');
+    const created = service.createIngestion({ sourceScope: { kind: 'offer_family', value: 'decisions' }, idempotencyKey: 'decisions-1' });
+    const sourced = service.submitIngestionSource({ flowId: created.flow.id, actionId: created.nextAction?.actionId, expectedRevision: 1, sourceCapture: { sourceType: 'user_input', description: 'terms', retrievedAt: '2026-09-16T00:00:00Z', contentHash: 'decision-hash', artifactRef: 'artifact:decisions', submitter: 'user-a', submittedAt: '2026-09-16T00:00:00Z' } });
+    const manifested = service.submitIngestionManifest({ flowId: created.flow.id, actionId: sourced.nextAction?.actionId, expectedRevision: 2, manifest: [{ id: 'benefit-ignored', kind: 'benefit', summary: 'ignored', evidenceLocator: 'page:1', dependsOn: [] }, { id: 'exclusion-superseded', kind: 'exclusion', summary: 'superseded', evidenceLocator: 'page:2', dependsOn: [] }] });
+    const ignored = service.submitBenefitLeaf({ flowId: created.flow.id, actionId: manifested.nextAction?.actionId, expectedRevision: 3, idempotencyKey: 'ignored-1', leafId: 'benefit-ignored', disposition: 'ignored', reason: 'not applicable', evidenceRefs: ['page:1#reason'] });
+    expect(ignored.artifact).toBeUndefined();
+    const superseded = service.submitExclusionLeaf({ flowId: created.flow.id, actionId: ignored.flow.nextAction?.actionId, expectedRevision: 4, idempotencyKey: 'superseded-1', leafId: 'exclusion-superseded', target: 'merchant', scope: { kind: 'all_benefits' }, predicate: { field: 'transaction.merchant', op: 'EQUALS', value: 'old' }, disposition: 'superseded', reason: 'replaced', evidenceRefs: ['page:2#replacement'] });
+    expect(superseded.artifact).toBeUndefined();
+    const final = service.finalizeIngestion({ flowId: created.flow.id, actionId: superseded.flow.nextAction?.actionId, expectedRevision: 5 });
+    expect(final.proof.leafTotals).toEqual({ total: 2, materialized: 0, ignored: 1, superseded: 1 });
+    expect(final.proof.leaves).toEqual(expect.arrayContaining([expect.objectContaining({ id: 'benefit-ignored', disposition: 'ignored', reason: 'not applicable', evidenceRefs: ['page:1#reason'] }), expect.objectContaining({ id: 'exclusion-superseded', disposition: 'superseded', reason: 'replaced', evidenceRefs: ['page:2#replacement'] })]));
   });
 
   it('keeps a leaf pending with structured diagnostics when canonical references are missing', () => {

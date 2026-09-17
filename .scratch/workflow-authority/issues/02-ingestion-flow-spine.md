@@ -15,7 +15,7 @@ Status: ready-for-human
 - [x] 同一 idempotency key 加相同內容重試會回原 flow；不同內容重用會回結構化 conflict。
 - [x] 其他 tenant 無法讀取該 flow；未驗證 metadata 時依既有安全策略 fail closed。
 - [x] Store schema migration 可讀既有 v0.15.0 state，並驗證新增 workflow collection。
-- [ ] Stale revision、未知 action、terminal flow submission 都不改變 state，且回完整診斷。
+- [x] Stale revision、未知 action、terminal flow submission 都不改變 state，且回完整診斷。
 - [x] 重新啟動 MCP 後可從 FileStore 讀回 flow 並取得相同 next action。
 - [x] Draft 保存 `lastActivityAt`、`expiresAt` 與 terminal `expired` 狀態。
 - [x] Startup 與 mutating flow operations 會 sweep 過期 drafts；另有可由 operator/scheduler 呼叫的 maintenance sweep，使用 injectable clock 做 deterministic test。
