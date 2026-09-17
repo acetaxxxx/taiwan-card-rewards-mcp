@@ -206,6 +206,8 @@ describe('Ticket 07 Public MCP Ingestion E2E Workflow', () => {
       expect(manifestRes.flow.status).toBe('processing_leaves');
       expect(manifestRes.nextAction.kind).toBe('PROCESS_LEAF');
       expect(manifestRes.nextAction.leafId).toBe('ex-wallet');
+      expect(manifestRes.coverage).toEqual(expect.objectContaining({ total: 4, materialized: 0, ignored: 0, superseded: 0, pending: 1, blocked: 3, pendingLeafIds: ['ex-wallet'], blockedLeafIds: ['ben-dining', 'ben-online', 'ex-legacy'], complete: false }));
+      expect(manifestRes.coverage.blockedBy).toEqual(expect.arrayContaining([{ leafId: 'ben-dining', dependsOn: ['ex-wallet'] }, { leafId: 'ben-online', dependsOn: ['ex-wallet'] }]));
 
       // 6. Submit shared exclusion leaf
       const exclusionRes = await client.callTool('submit_exclusion_leaf', {

@@ -941,6 +941,18 @@ export interface IngestionCompletionProof {
   activatedRules: readonly { ruleId: string; ruleVersion: string; }[];
   awaitingConfirmationRules: readonly { ruleId: string; ruleVersion: string; reason: string; }[];
 }
+export interface IngestionCoverageLedger {
+  total: number;
+  materialized: number;
+  ignored: number;
+  superseded: number;
+  pending: number;
+  blocked: number;
+  pendingLeafIds: readonly string[];
+  blockedLeafIds: readonly string[];
+  blockedBy: readonly { leafId: string; dependsOn: readonly string[] }[];
+  complete: false;
+}
 export interface IngestionParentContinuation {
   intentFingerprint: string;
   parentResultVersion: string;

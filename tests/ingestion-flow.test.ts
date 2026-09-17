@@ -54,6 +54,7 @@ describe('ingestion flow spine', () => {
     const result = service.submitIngestionManifest({ flowId: created.flow.id, actionId: sourced.nextAction?.actionId, expectedRevision: 2, manifest: [{ id: 'z', kind: 'benefit', summary: 'z', evidenceLocator: 'artifact:z', dependsOn: ['a'] }, { id: 'a', kind: 'exclusion', summary: 'a', evidenceLocator: 'artifact:a', dependsOn: [] }] });
     expect(result.flow.status).toBe('processing_leaves');
     expect(result.nextAction).toEqual(expect.objectContaining({ kind: 'PROCESS_LEAF', leafId: 'a', expectedRevision: 3 }));
+    expect(result.coverage).toEqual({ total: 2, materialized: 0, ignored: 0, superseded: 0, pending: 1, blocked: 1, pendingLeafIds: ['a'], blockedLeafIds: ['z'], blockedBy: [{ leafId: 'z', dependsOn: ['a'] }], complete: false });
   });
 
   it('creates manifest correction revisions and preserves superseded lineage', () => {
@@ -81,6 +82,7 @@ describe('ingestion flow spine', () => {
     expect(submitted.artifact).toEqual(expect.objectContaining({ flowId: created.flow.id, leafId: 'benefit-1', ruleId: 'rule-benefit-1', status: 'candidate', evidenceRefs: ['page:1#benefit'] }));
     expect(submitted.artifact.localExclusions).toHaveLength(1);
     expect(submitted.flow.flow.status).toBe('ready_to_finalize');
+    expect(submitted.flow.coverage).toEqual({ total: 1, materialized: 1, ignored: 0, superseded: 0, pending: 0, blocked: 0, pendingLeafIds: [], blockedLeafIds: [], blockedBy: [], complete: false });
     expect(service.searchActiveOffers({ cardId: 'card-1' }).offers).toHaveLength(0);
     expect(service.submitBenefitLeaf({ flowId: created.flow.id, actionId: manifested.nextAction?.actionId, expectedRevision: 3, idempotencyKey: 'leaf-1', leafId: 'benefit-1', evidenceRefs: ['page:1#benefit'], offer: { snapshot: { id: 'snapshot-benefit-1', url: 'https://bank.example/offers', fetchedAt: '2026-09-16T00:00:00.000Z', contentHash: 'source-hash', parserVersion: '1', verified: true, sourceType: 'official' }, rule: { id: 'rule-benefit-1', cardId: 'card-1', version: '1', sourceSnapshotId: 'snapshot-benefit-1', status: 'candidate', validFrom: '2026-01-01T00:00:00.000Z', settlementCurrency: 'TWD', match: { channels: ['online'] }, reward: { kind: 'percentage', rateBps: 300 } } }, localExclusions: [{ scope: 'benefit', predicate: { field: 'transaction.paymentMethod', op: 'EQUALS', value: 'excluded-pay' }, evidenceRefs: ['page:1#exclude'] }] })).toEqual(expect.objectContaining({ artifact: submitted.artifact }));
     const action = submitted.flow.nextAction!;
