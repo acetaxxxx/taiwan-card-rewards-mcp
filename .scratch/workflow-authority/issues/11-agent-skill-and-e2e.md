@@ -22,3 +22,10 @@ Status: completed
 ## Comments
 
 此票是整體完成門檻，不替代各票在實作當下更新相關文件及測試的責任。
+
+## Evidence and Audit Notes
+
+- **DoD 1-8:** Proven by `docs/taiwan-card-rewards-skill/`, `docs/usage/ai-agent-usage-guide.md`, MCP tools contract in `src/mcp-contract.ts`, and public workflow traces in `docs/traces/`.
+- **DoD 9 (Verification & Migration):** Proven by running `npm run typecheck`, `npm run build`, `npm run docs:check`, `npm test`, and `npm run test:migration`. The `test:migration` script executes `vitest run tests/persistence.test.ts`, directly verifying transparent on-load schema upgrade from schemaVersion 2 and 3 fixtures up to schemaVersion 4.
+- **DoD 10 (Public surface documentation):** Documented in `README.md`, `package.json`, and tool catalog docs. No release/publish executed.
+

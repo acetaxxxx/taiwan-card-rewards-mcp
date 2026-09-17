@@ -12,7 +12,18 @@ Status: ready-for-human
 - [x] Manifest 為 closed schema；重複 ID、未知類型、缺依賴、自我依賴與 dependency cycle 會 fail closed 並指出路徑。
 - [x] 成功提交後進入 `processing_leaves`，MCP 以 deterministic order 回下一個可處理 leaf action。
 - [x] 每個 leaf 最終只能有 `materialized`、`ignored` 或 `superseded` disposition；ignored/superseded 必須有理由和 evidence linkage。
-- [x] Coverage 回傳總數、各 disposition 數量、pending/blocked leaf IDs 與 `complete=false`。
+- [ ] Coverage 回傳總數、各 disposition 數量、pending/blocked leaf IDs 與 `complete=false`。
 - [ ] 修正版 manifest 必須建立新 revision 並保留舊版稽核關係，不在原 revision 中偷偷增刪 leaf。
 - [x] Large manifest 有明確上限或分頁策略；超限回可恢復診斷，不接受部分截斷後宣稱完整。
 - [x] 整合測試涵蓋多 benefit、shared exclusion、依賴順序、cycle、duplicate 與 interrupted resume。
+
+## Evidence and Audit Notes
+
+- **DoD 1 (Leaf types and IDs):** Proven by `src/types.ts` (`IngestionManifestLeaf`), `src/validation.ts` (`validateIngestionManifestLeaf`), and `tests/ingestion-flow.test.ts`.
+- **DoD 2 (Closed schema & cycle validation):** Proven by `src/validation.ts` (`validateIngestionManifest` checks max 128, duplicates, missing dependencies, cycles) and `tests/ingestion-flow.test.ts` ("rejects cyclic manifests and returns the first dependency-ready leaf deterministically").
+- **DoD 3 (processing_leaves & deterministic nextAction):** Proven by `src/service.ts` (`submitIngestionManifest` advances revision to 3 and sets status to `processing_leaves`; `presentIngestion` deterministically sorts available leaves).
+- **DoD 4 (Leaf dispositions & evidence linkage):** Proven by `src/types.ts`, `src/validation.ts` (`validateIngestionExclusionLeaf` enforces reason and evidenceRefs for ignored disposition), and `tests/ingestion-flow.test.ts` (lines 62-75, 159-166).
+- **DoD 5 (Coverage ledger with complete=false):** **Incomplete / Unchecked.** In current implementation, per-leaf disposition is tracked on `flow.manifest` and finalized coverage totals exist on `completionProof.leafTotals`, but a dedicated pre-finalization `coverage` object with `complete=false` and separate blocked/pending leaf arrays was omitted from the public flow model.
+- **DoD 6 (Manifest revisioning during processing):** **Incomplete / Unchecked.** Current flow lifecycle allows a single manifest submission per flow draft; forking or replacing manifest revisions during `processing_leaves` while maintaining multi-revision audit history is not supported in the current contract.
+- **DoD 7 (Large manifest bounds):** Proven by `src/validation.ts` (`validateIngestionManifest` enforces 1..128 leaves and bounds on dependencies).
+- **DoD 8 (Integration tests):** Proven by `tests/ingestion-flow.test.ts` and `tests/public-workflow-e2e.test.ts`.
