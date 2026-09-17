@@ -5,7 +5,7 @@ description: "Route Taiwan credit-card rewards requests to the correct MCP workf
 
 # Taiwan Card Rewards
 
-Use this as the installed bundle's base skill. Before constructing an MCP payload, read [`references/mcp-tools.md`](references/mcp-tools.md). Then choose one task skill. For any response with `nextAction`, `requiredActions`, diagnostics, manifest coverage, or typed retry fields, also load [`agent-scenario-playbook.md`](workflows/agent-scenario-playbook.md) and follow its read → single action → reread loop:
+Use this as the installed bundle's base skill. Before constructing an MCP payload, read [`references/mcp-tools.md`](references/mcp-tools.md). Then choose one task skill. For any response with `nextAction`, `requiredActions`, diagnostics, manifest coverage, or typed retry fields, also load [`agent-scenario-playbook.md`](workflows/agent-scenario-playbook.md) and follow its read → single action → reread loop. For real-world operational scenarios (user corrections/write-back, marketing vs contract terms, channel exceptions, dual-rail FX spread drag, and statement reconciliation), follow [`workflows/agent-real-world-scenarios.md`](workflows/agent-real-world-scenarios.md):
 
 | User intent | Load |
 |---|---|

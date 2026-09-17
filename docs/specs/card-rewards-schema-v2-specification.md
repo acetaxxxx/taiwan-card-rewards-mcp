@@ -320,16 +320,16 @@ The system MUST return explicit non-confident statuses when conditions are unres
 
 ---
 
-## 7. Public MCP Tool Surface (19-Tool Contract)
+## 7. Public MCP Tool Surface (28-Tool Contract)
 
-Schema v2 defines exactly **19 tools** on the public MCP surface, including the single merchant-first `recommend` entry point (its response unifies direct-card and multi-layer payment-path candidates; there is no separate preflight tool), payment-account and payment-route onboarding/listing, and canonical event tools. Outbound network fetching is handled externally by the host/agent, not by the MCP server. Merchant catalog registration remains a controlled service/catalog-ingestion operation and is not an additional public MCP tool.
+Schema v2 defines exactly **28 tools** on the public MCP surface, including the single merchant-first `recommend` entry point (its response unifies direct-card and multi-layer payment-path candidates; there is no separate preflight tool), payment-account and payment-route onboarding/listing, canonical event tools, and the durable 8-tool official-source ingestion sequence (`create_ingestion`, `get_ingestion`, `submit_ingestion_source`, `submit_ingestion_manifest`, `correct_ingestion_manifest`, `submit_benefit_leaf`, `submit_exclusion_leaf`, `finalize_ingestion`). Outbound network fetching is handled externally by the host/agent, not by the MCP server. Merchant catalog registration remains a controlled service/catalog-ingestion operation and is not an additional public MCP tool.
 
-The authoritative 19-tool matrix, including read/write status and closed input
+The authoritative 28-tool matrix, including read/write status and closed input
 schemas, lives in
 [`mcp-tools.md`](../taiwan-card-rewards-skill/references/mcp-tools.md).
 It includes card calculation/ranking, account and route onboarding, the closed
 card/payment_path `recommend` union, canonical event recording/reversal,
-benefit status, merchant resolution, and active-offer search. This specification
+benefit status, merchant resolution, active-offer search, and source-scoped ingestion. This specification
 does not duplicate that table so the two documents cannot drift.
 
 ---

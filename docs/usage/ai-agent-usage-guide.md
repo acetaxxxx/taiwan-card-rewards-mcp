@@ -65,11 +65,12 @@ node dist/cli.js --data-dir <absolute-path> [--user <user-id>]
 
 ### Safe Help & Tool Discovery (No Invented Flags)
 
-The CLI executable strictly validates startup arguments and accepts only `--data-dir` (and optional `--user`). Passing unsupported flags such as `--help`, `-h`, or invented discovery options fails closed with `UNKNOWN_ARGUMENT`.
+The CLI executable supports `--help` and `-h` to safely print usage options to stdout and exit with code 0 without any filesystem side effects or lock acquisition. For service operation, it strictly accepts `--data-dir` (and optional `--user`); any unadvertised or invented flags fail closed with `UNKNOWN_ARGUMENT`.
 
 To safely inspect available tools, instructions, and schemas:
-1. **MCP Handshake & Dynamic Listing**: Connect to the running stdio server with `--data-dir <path>` and issue the standard JSON-RPC `initialize` request (returns server info and instructions) followed by `tools/list` (dynamically returns all 28 canonical tools with complete input schemas).
-2. **Offline Tool Reference**: Consult [`mcp-tools.md`](../taiwan-card-rewards-skill/references/mcp-tools.md) for the authoritative 28-tool matrix, inputs, and fail-closed error contracts.
+1. **CLI Usage**: Run `taiwan-card-rewards-mcp --help` (or `-h`) to inspect supported startup parameters.
+2. **MCP Handshake & Dynamic Listing**: Connect to the running stdio server with `--data-dir <path>` and issue the standard JSON-RPC `initialize` request (returns server info and instructions) followed by `tools/list` (dynamically returns all 28 canonical tools with complete input schemas).
+3. **Offline Tool Reference**: Consult [`mcp-tools.md`](../taiwan-card-rewards-skill/references/mcp-tools.md) for the authoritative 28-tool matrix, inputs, and fail-closed error contracts.
 
 ---
 

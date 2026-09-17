@@ -5,7 +5,7 @@ description: Recommend Taiwan credit-card rewards for a merchant, payment route,
 
 # Taiwan card-rewards recommendation
 
-Before constructing an MCP payload, read the shared [`mcp-tools.md`](../references/mcp-tools.md). Use this skill for a planned purchase, card comparison, merchant ambiguity, payment-path choice, or FX estimate. When `recommend` returns `requiredActions`, diagnostics, a typed retry error, or partial coverage, load [`agent-scenario-playbook.md`](../workflows/agent-scenario-playbook.md) for the scenario-specific next action and reread rule.
+Before constructing an MCP payload, read the shared [`mcp-tools.md`](../references/mcp-tools.md). Use this skill for a planned purchase, card comparison, merchant ambiguity, payment-path choice, or FX estimate. When `recommend` returns `requiredActions`, diagnostics, a typed retry error, or partial coverage, load [`agent-scenario-playbook.md`](../workflows/agent-scenario-playbook.md) and [`agent-real-world-scenarios.md`](../workflows/agent-real-world-scenarios.md) for scenario-specific next actions, FX spread drag warnings, and channel verification.
 
 - Start merchant intent with [`workflows/recommendation-intent.md`](workflows/recommendation-intent.md).
 - Resolve an ambiguous merchant with [`workflows/merchant-resolution-and-disambiguation.md`](workflows/merchant-resolution-and-disambiguation.md); discover offers with [`workflows/offer-discovery-and-pagination.md`](workflows/offer-discovery-and-pagination.md).
