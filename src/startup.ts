@@ -7,7 +7,18 @@ export interface StartupConfig {
   /** Display/metadata only; never an authorization or storage selector. */
   user?: string;
   mode?: 'direct' | 'shared-owner' | 'shared-bridge';
+  help?: false;
 }
+
+export interface StartupHelp {
+  help: true;
+  dataDir?: undefined;
+  user?: undefined;
+  mode?: undefined;
+}
+
+export type ParsedStartupArgs = StartupConfig | StartupHelp;
+
 
 export class StartupContractError extends Error {
   constructor(public readonly code: string, message: string) {
@@ -43,8 +54,31 @@ function canonicalDataDir(raw: string): string {
   return canonical;
 }
 
+export function getHelpText(): string {
+  return [
+    'taiwan-card-rewards-mcp - Model Context Protocol (MCP) server for Taiwan credit card rewards',
+    '',
+    'Usage:',
+    '  taiwan-card-rewards-mcp --data-dir <path> [--user <label>]',
+    '  taiwan-card-rewards-mcp --help | -h',
+    '',
+    'Options:',
+    '  --data-dir <path>  Canonical absolute directory for tenant ledger and storage (required).',
+    '  --user <label>     Optional user/tenant identity label for auditing and metadata.',
+    '  -h, --help         Show this help message and exit.',
+    '',
+    'JSON-RPC Model:',
+    '  Communicates via JSON-RPC 2.0 over standard input (stdin) and standard output (stdout).',
+    '  Reads newline-delimited JSON-RPC requests from stdin and writes JSON-RPC responses to stdout.',
+    '  Supports standard MCP methods: initialize, tools/list, and tools/call.',
+  ].join('\n');
+}
+
 /** Parse the only supported startup selectors. Unknown flags are rejected. */
-export function parseStartupArgs(argv: readonly string[]): StartupConfig {
+export function parseStartupArgs(argv: readonly string[]): ParsedStartupArgs {
+  if (argv.includes('--help') || argv.includes('-h')) {
+    return { help: true };
+  }
   let dataDir: string | undefined;
   let user: string | undefined;
   let mode: StartupConfig['mode'];
@@ -75,8 +109,9 @@ export function parseStartupArgs(argv: readonly string[]): StartupConfig {
 }
 
 /** Tool calls must use this startup-bound directory; arbitrary paths are forbidden. */
-export function assertToolDataDir(config: StartupConfig, requested?: string): void {
+export function assertToolDataDir(config: { dataDir?: string }, requested?: string): void {
   if (requested !== undefined && requested !== config.dataDir) {
     throw new StartupContractError('DATA_DIR_OVERRIDE_FORBIDDEN', 'tools cannot override the startup data directory');
   }
 }
+
