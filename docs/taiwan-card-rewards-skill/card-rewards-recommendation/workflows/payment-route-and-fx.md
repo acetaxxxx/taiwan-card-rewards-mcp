@@ -19,8 +19,10 @@
 > [!NOTE]
 > 本 SOP 的 `fx` snapshot 為**當次一次性信任**，MCP 不會持久化匯率數值。
 > 若需要長期記憶某支付路徑的匯率查詢來源（讓 MCP 之後能自動提供 `sourceUrls`），請參考 [`fx-rate-ingestion.md`](../../card-rewards-evidence/workflows/fx-rate-ingestion.md)。
+> 詳細工具 Property 結構與 JSON 骨架，請參考 [推薦專屬工具規格](recommendation-tools-specification.md)。
 
 ---
+
 
 ## 1. 觸發條件 (Trigger Conditions)
 

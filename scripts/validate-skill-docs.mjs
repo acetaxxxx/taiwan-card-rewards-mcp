@@ -14,6 +14,31 @@ if (documentedNames.length !== toolNames.length || documentedSet.size !== toolNa
   throw new Error(`mcp-tools.md tool matrix drift: expected ${toolNames.length} names in contract, found ${documentedNames.length}`);
 }
 
+const scopedSpecFiles = [
+  join(skillRoot, 'card-rewards-recommendation', 'workflows', 'recommendation-tools-specification.md'),
+  join(skillRoot, 'card-rewards-evidence', 'workflows', 'evidence-tools-specification.md'),
+  join(skillRoot, 'card-rewards-ledger', 'workflows', 'ledger-tools-specification.md'),
+];
+
+const contractToolSet = new Set(toolNames);
+const scopedCoveredTools = new Set();
+for (const specFile of scopedSpecFiles) {
+  const specText = readFileSync(specFile, 'utf8');
+  const specTools = [...specText.matchAll(/^\|\s*`([^`]+)`\s*\|/gm)].map((m) => m[1]);
+  for (const tool of specTools) {
+    if (!contractToolSet.has(tool)) {
+      throw new Error(`Unknown tool "${tool}" documented in scoped spec: ${relative(root, specFile)}`);
+    }
+    scopedCoveredTools.add(tool);
+  }
+}
+
+const missingInSpecs = toolNames.filter((t) => !scopedCoveredTools.has(t));
+if (missingInSpecs.length > 0) {
+  throw new Error(`Scoped tool specifications drift: missing coverage for tools: ${missingInSpecs.join(', ')}`);
+}
+
+
 const forbiddenKeys = /^(pan|cardNumber|card_number|cvv|cvc|otp|password|cookie|credential|credentials|secret|token|apiKey|api_key|ownerUser|owner_user|dataDir|data_dir|userId|user_id)$/i;
 const files = [];
 function walk(directory) {

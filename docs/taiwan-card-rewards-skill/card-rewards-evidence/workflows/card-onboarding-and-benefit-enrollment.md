@@ -12,7 +12,11 @@
 | `list_cards` | read | 驗證登錄結果，確認持卡清冊正確 | `limit`, `page`, `projection` |
 | `upsert_user_benefit_status` | write | 記錄多方案卡片的目前啟用方案 | `input.{kind, cardId, benefit, completedAt, effectiveFrom, idempotencyKey, confirmation}` |
 
+> [!NOTE]
+> 詳細工具 Property 結構與 JSON 骨架，請參考 [條款與權益專屬工具規格](evidence-tools-specification.md)。
+
 ---
+
 
 
 ## 1. 觸發條件 (Trigger Conditions)

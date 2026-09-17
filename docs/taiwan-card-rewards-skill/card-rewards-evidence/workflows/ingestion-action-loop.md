@@ -17,7 +17,11 @@
 | `correct_ingestion_manifest` | write | 全量替換修訂條款清單（勘誤時使用） | `flowId`, `actionId`, `expectedRevision`, `idempotencyKey`, `manifest` |
 | `finalize_ingestion` | write | 原子驗證並正式發布所有 verified candidate rules | `flowId`, `actionId`, `expectedRevision` |
 
+> [!NOTE]
+> 詳細工具 Property 結構與 JSON 骨架，請參考 [條款與權益專屬工具規格](evidence-tools-specification.md)。
+
 ---
+
 
 ## 1. 核心概念階層 (Source ➔ Manifest ➔ Leaf)
 
@@ -82,12 +86,13 @@ LOOP:
             })
 
         CASE "SUBMIT_MANIFEST":
+            // Manifest 命名慣例：加碼用 b_<名稱>，排除用 ex_<名稱>；evidenceLocator 填寫官方條款位置
             submit_ingestion_manifest({
                 flowId, actionId: nextAction.actionId,
                 expectedRevision: nextAction.expectedRevision,
                 manifest: [
-                    { id: "ex_pxmart", kind: "exclusion", summary: "排除全聯消費", evidenceLocator: "p.2", dependsOn: [] },
-                    { id: "b_jp_kr", kind: "benefit", summary: "日韓消費加碼3%", evidenceLocator: "p.1", dependsOn: ["ex_pxmart"] }
+                    { id: "ex_pxmart", kind: "exclusion", summary: "排除全聯消費", evidenceLocator: "官方條款注意事項第2條", dependsOn: [] },
+                    { id: "b_jp_kr", kind: "benefit", summary: "日韓消費加碼3%", evidenceLocator: "官方公告表格第1項", dependsOn: ["ex_pxmart"] }
                 ]
             })
 
@@ -98,7 +103,10 @@ LOOP:
                     flowId, actionId: nextAction.actionId, expectedRevision: nextAction.expectedRevision,
                     leafId: nextAction.leafId, idempotencyKey: "leaf_b_<leafId>",
                     evidenceRefs: ["p.1#offer"],
-                    offer: { snapshot: { ... }, rule: { ... candidate rule ... } }
+                    offer: {
+                        snapshot: { id: "snap_<ULID>", url: 官方來源網址, fetchedAt: 當前UTC, contentHash: "sha256:<雜湊>", parserVersion: "1.0.0", verified: true, sourceType: "official" },
+                        rule: { id: "rule_<cardId>_<leafId>_2026", cardId: 卡片ID, version: "1", sourceSnapshotId: "snap_<ULID>", status: "candidate", validFrom: "2026-01-01T00:00:00Z", settlementCurrency: "TWD", match: { channels: ["online", "in_store"] }, reward: { kind: "percentage", rateBps: 300 } }
+                    }
                 })
             ELSE (忽略/覆蓋):
                 submit_benefit_leaf({
@@ -121,7 +129,13 @@ LOOP:
 
         CASE "COMPLETE":
             讀取 completionProof 向使用者報告完成摘要，結束迴圈
+            BREAK LOOP
+
+        DEFAULT (如 NEEDS_REVIEW 或需要人工介入):
+            向使用者說明當前阻斷狀態與缺少之資訊，暫停迴圈等待指示
+            BREAK LOOP
 ```
+
 
 ---
 

@@ -11,7 +11,11 @@
 | `resolve_merchant` | read | 查詢特店之唯一權威 ID (`canonicalId`) | `query` (商家名稱) |
 | `upsert_offer` | write | 快速路徑：直接寫入官方來源快照與優惠規則 | `snapshot.{id, url, fetchedAt, contentHash, sourceType}`, `rule.{id, cardId, version, match, reward}` |
 
+> [!NOTE]
+> 詳細工具 Property 結構與 JSON 骨架，請參考 [條款與權益專屬工具規格](evidence-tools-specification.md)。
+
 ---
+
 
 ## 1. 觸發條件 (Trigger Conditions)
 

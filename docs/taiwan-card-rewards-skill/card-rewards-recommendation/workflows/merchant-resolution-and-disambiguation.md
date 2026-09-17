@@ -11,7 +11,11 @@
 | `recommend` | read | 消歧義或補齊特店後重新調用推薦 | `merchant`（使用者選定名稱）, `expectedResultVersion` |
 | `resolve_merchant` | read | 選填：在歧義時輔助查詢候選實體清單 | `query`（商家名稱字串） |
 
+> [!NOTE]
+> 詳細工具 Property 結構與 JSON 骨架，請參考 [推薦專屬工具規格](recommendation-tools-specification.md)。
+
 ---
+
 
 
 ## 1. 觸發條件 (Trigger Conditions)

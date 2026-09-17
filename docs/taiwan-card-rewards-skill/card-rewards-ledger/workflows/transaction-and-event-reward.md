@@ -17,7 +17,11 @@
 | `list_payment_accounts` | read | 確認 wallet/bank 的 opaque identity ID | `limit`, `page` |
 | `list_payment_routes` | read | 確認使用者已登錄的支付路徑 | `limit`, `page` |
 
+> [!NOTE]
+> 詳細工具 Property 結構與 JSON 骨架，請參考 [記帳專屬工具規格](ledger-tools-specification.md)。
+
 ---
+
 
 ## 1. 觸發條件 (Trigger Conditions)
 
