@@ -47,7 +47,7 @@ The design, research, specifications, and agent usage guides are kept under `doc
 
 ## TDD and CI strategy
 
-GitHub Actions runs on Ubuntu 24.04 with Node 22.14.0: `npm ci --ignore-scripts`, `npm run typecheck`, `npm run build`, `npm run docs:check`, and `npm test`. The workflow is path-scoped to this package and uses the committed lockfile; it never invokes `npx` without a pinned package version. Fixtures should cover exact-match, missing condition, stale rule, cap exhaustion, planned-vs-actual non-mutation, duplicate idempotency, refund, currency mismatch, FX conversion, and deterministic Top-5 ties. Keep bank-specific rules out of the core tests.
+GitHub Actions runs on Ubuntu 24.04 with Node 22.14.0: `npm ci --ignore-scripts`, `npm run typecheck`, `npm run build`, `npm run docs:check`, `npm run test:migration`, and `npm test`. The workflow is path-scoped to this package and uses the committed lockfile; it never invokes `npx` without a pinned package version. `test:migration` exercises FileStore upgrades from persisted schema versions 2 and 3 to version 4. Fixtures should cover exact-match, missing condition, stale rule, cap exhaustion, planned-vs-actual non-mutation, duplicate idempotency, refund, currency mismatch, FX conversion, and deterministic Top-5 ties. Keep bank-specific rules out of the core tests.
 
 ## Sidecar migration notes
 

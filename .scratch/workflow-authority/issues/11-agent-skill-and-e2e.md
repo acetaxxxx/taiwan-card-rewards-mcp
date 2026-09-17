@@ -16,7 +16,7 @@ Status: completed
 - [x] Recommendation trace 覆蓋 fast path、merchant ambiguity、FX 補件、benefit refresh handoff、來源失敗停止與 partial delivery。
 - [x] Deterministic public-contract tests 與實際模型 trace 分開記錄；未執行的模型相容性不得宣稱通過。
 - [x] 文件範例 payload 全部通過 public MCP schema，且不包含 credential、PAN、account number、secret 或內部-only 欄位。
-- [ ] Typecheck、build、full test suite、migration tests、public MCP E2E 與文件/skill consistency checks 全數通過。（migration harness 尚未提供；其餘檢查已執行。）
+- [x] Typecheck、build、full test suite、migration tests、public MCP E2E 與文件/skill consistency checks 全數通過。migration coverage 以 `npm run test:migration` 執行，驗證 FileStore 從 schema v2/v3 升級至 v4。
 - [x] Package/README 工具清單、版本說明與發版注意事項反映新增 public surface；本票不執行 release 或 publish。
 
 ## Comments
