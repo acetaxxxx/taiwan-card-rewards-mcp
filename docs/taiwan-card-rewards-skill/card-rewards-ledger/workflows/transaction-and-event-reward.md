@@ -58,16 +58,43 @@ record_transaction({
     }
 })
 
-// 步驟 3：讀取回應
-SWITCH response 狀態:
-    CASE 成功:
-        展示 RewardBreakdown（回饋金額、cap 扣抵、rule 來源）
+// 步驟 3：讀取回應與重試處置
+SWITCH response 狀態 / 拋出錯誤 (Error Code):
+    CASE 成功 (RewardBreakdown):
+        展示 RewardBreakdown（回饋金額、cap 扣抵、套用之 rule）
+
     CASE IDEMPOTENCY_CONFLICT:
-        說明「此筆已記錄過，請確認是否為重複操作」，不要重試不同 payload
-    CASE INSUFFICIENT_FACTS | NEEDS_REVIEW:
-        說明缺少或衝突的事實，詢問使用者補充後重試
+        說明「此筆消費已記錄過」，若是同一操作安全重試，保持完全相同 payload 重送；若為新消費，生成全新 idempotencyKey
+
+    CASE INSUFFICIENT_FACTS:
+        // 原因：缺少結算時區或必要交易條件
+        向使用者確認時區或補充必要條件（如 timezone: "Asia/Taipei"、occurredAt 帶時區 offset），補齊後以相同 idempotencyKey 重試
+
+    CASE NEEDS_REVIEW:
+        IF 錯誤包含 "mid_market rate cannot be used":
+            // 原因：實際交易不可使用中價匯率
+            更換匯率類型為 "card_scheme" 或 "cash_selling"，重新取得快照後重試
+        IF 錯誤包含 "fx_conflict" 或 "supplied FX snapshot is incompatible":
+            // 原因：匯率快照與交易幣別或清算上下文衝突
+            檢查 fxResolutionRequest.requiredFacts，修正 fx.baseCurrency 或 provider 後重試
+        IF 錯誤包含 "event reward combination policy requires review":
+            // 原因：多重回饋疊加未定義或衝突
+            向使用者說明衝突規則，確認欲套用之特定優惠後重試
+
+    CASE fx_missing:
+        // 原因：外幣消費缺少匯率快照
+        讀取回傳的 fxResolutionRequest.sourceUrls，於外部查詢即時匯率並組裝 transaction.fx 後重新提交
+
+    CASE fx_stale:
+        // 原因：匯率快照已過期
+        執行 retryAction: "refresh_fx_snapshot"，更新 fx.capturedAt 為最新查詢時間後重試
+
+    CASE INVALID_REFUND:
+        // 原因：原購買不存在、卡片或幣別不符、或退款超額
+        呼叫 list_transactions 查核原交易的 idempotencyKey、cardId、幣別與剩餘可退額度，修正後重試
+
     CASE no_match:
-        說明未找到符合規則，展示已知原因，不推算回饋
+        說明未找到符合規則，展示已知排除原因，不推算或虛構回饋
 
 // 步驟 4（退款）：記錄退款
 record_transaction({
@@ -212,11 +239,20 @@ reverse_event_reward({
 
 ---
 
-## 4. MCP 回傳狀態處理 (Status Handling)
+## 4. 異常、診斷代碼與重試處置矩陣 (Diagnostic & Recovery Matrix)
 
-| 狀態 | 含義 | Agent 行動 |
-|---|---|---|
-| `matched` | 找到符合條件的規則/連鎖 | 展示 reward breakdown；僅在實際事件發生且確認後才寫入 |
-| `no_match` | 事件事實明確不符合規則 | 說明具體失敗原因；禁止用猜測事實重試 |
-| `unknown` / `needs_facts` | 缺少金額、relation、會員資格或 evidence | 向使用者詢問具體缺少的事實；不以零值補寫 |
-| `needs_review` | 堆疊方式模糊、來源衝突或 stale evidence | 解決政策/evidence 衝突後再寫；禁止估算 |
+當記帳或事件連鎖工具回傳非成功狀態或拋出結構化錯誤時，Agent 應依據下表精準處置，嚴禁以猜測數值補寫帳本：
+
+| 診斷 / 錯誤代碼 | 觸發原因 | 處置主體 (`owner`) | Agent 具體處置與重試方式 |
+|---|---|:---:|---|
+| `INSUFFICIENT_FACTS` | 缺少結算時區（如 Cap Pool 未知時區）或關鍵交易條件未明 | `user` / `agent` | 向使用者確認消費所在時區或在 `transaction.occurredAt` 附上 ISO 8601 時區偏移（如 `+08:00`），補齊後以**相同 `idempotencyKey`** 重新調用。 |
+| `NEEDS_REVIEW`<br>(`mid_market` 匯率) | 實際交易 (`mode: "actual"`) 帶入了 `rateType: "mid_market"` 匯率快照 | `agent` | 實際記帳嚴禁使用中間價匯率。Agent 必須將 `rateType` 改為卡組織匯率 `"card_scheme"` 或銀行賣出價 `"cash_selling"`，重新查詢後重試。 |
+| `NEEDS_REVIEW`<br>(`fx_conflict`) | 匯率快照與交易清算貨幣或換匯主體上下文不符 | `agent` | 讀取回傳之 `fxResolutionRequest`，檢查 `requiredFacts`，修正 `fx.baseCurrency`、`quoteCurrency` 或 `provider` 後重新提交。 |
+| `NEEDS_REVIEW`<br>(疊加衝突) | 多重回饋規則疊加模式（`additive`, `replace`, `best_of` 等）未明確定義 | `user` | 向使用者呈現衝突的候選規則，要求使用者確認應套用哪一項特定活動回饋，確認後在 `candidate` 鎖定單一規則重試。 |
+| `fx_missing` | 外幣交易缺少對應結算貨幣的匯率快照 | `agent` | 讀取結構化 `fxResolutionRequest.sourceUrls`，前往指定核准來源查詢即時匯率，組裝 `transaction.fx` 快照後重試。 |
+| `fx_stale` | 匯率快照超出新鮮度上限 (`maxAgeSeconds`) | `agent` | 執行 `retryAction: "refresh_fx_snapshot"`，重新抓取當下即時匯率並更新 `capturedAt` 後重試。 |
+| `INVALID_REFUND` | 原消費不存在、卡片不符、幣別不一致，或累計退款金額超過原交易剩餘金額 | `agent` / `user` | 調用 `list_transactions` 查詢歷史紀錄，核對原消費的 `idempotencyKey`、`cardId`、幣別與剩餘可退額度。修正 `refundOfId` 或將退款金額調整至可退上限內重試。 |
+| `IDEMPOTENCY_CONFLICT` | 同一 `idempotencyKey` 被帶入了不同的交易參數 | `agent` | 若為同一筆操作的安全重試，確保傳入完全相同的 payload（MCP 將直接 replay 原決策）；若為新消費，必須產生全新唯一之 `idempotencyKey`。 |
+| `no_match` | 消費條件明確不符合任何已知優惠規則 | `agent` | 記錄該筆交易為基礎交易，向使用者說明未命中加碼規則之原因，嚴禁自創或估算回饋數值。 |
+| `matched` | Server 端重新計算確認符合回饋條件 | `agent` | 交易已成功持久化，向使用者呈現完整的 `RewardBreakdown`（回饋總額、扣抵之 Cap Pool 與依據之規則 ID）。 |
+
