@@ -35,6 +35,11 @@
 ### 2.1 卡片登記與權益維護工具
 
 #### `register_card`
+- `card.id` (string, 必填): 自訂卡片代碼 (e.g. "cathay_cube")
+- `card.issuer` (string, 必填): 銀行名稱或代碼 (e.g. "CathayUnitedBank")
+- `card.productName` (string, 必填): 完整卡片產品名稱 (e.g. "國泰世華 CUBE 卡")
+- `card.network` (string, 選填): 國際卡組織，**封閉枚舉**：`"VISA"` \| `"MasterCard"` \| `"JCB"` \| `"AmericanExpress"`
+
 ```json
 {
   "card": {
@@ -47,6 +52,10 @@
 ```
 
 #### `list_cards`
+- `limit` (number, 選填): 每頁回傳筆數
+- `page` (number, 選填): 頁碼
+- `projection` (string, 選填): 投影深度，**封閉枚舉**：`"summary"` \| `"detail"`
+
 ```json
 {
   "limit": 10,
@@ -56,14 +65,26 @@
 ```
 
 #### `get_user_benefit_status`
+- `kind` (string, 必填): 權益類型，**封閉枚舉**：`"card_switch"` \| `"campaign_registration"`
+- `cardId` (string, 必填): 卡片 ID
+- `asOfUtc` (string, 選填): 查詢基準時間 (ISO 8601 UTC)
+- `projection` (string, 選填): 投影深度，**封閉枚舉**：`"summary"` \| `"detail"` \| `"calculation"` \| `"audit"`
+
 ```json
 {
+  "kind": "card_switch",
   "cardId": "cathay_cube",
-  "asOf": "2026-09-17T08:00:00Z"
+  "asOfUtc": "2026-09-17T08:00:00Z"
 }
 ```
 
 #### `upsert_user_benefit_status`
+- `input.kind` (string, 必填): **封閉枚舉**：`"card_switch"` (方案切換) \| `"campaign_registration"` (登錄活動)
+- `input.action` (string, 選填): **封閉枚舉**：`"record"` \| `"adjust"`
+- `input.cardId` (string, 必填): 卡片 ID
+- `input.benefit` (string, 必填): 方案或活動代碼 (如 "play_digital")
+- `input.effectiveFrom` (string, 必填): ISO 8601 生效時間
+
 ```json
 {
   "input": {
@@ -79,6 +100,7 @@
   }
 }
 ```
+
 
 ---
 
@@ -114,6 +136,9 @@
 ### 2.3 官方來源 Ingestion 工具組
 
 #### `create_ingestion`
+- `sourceScope.kind` (string, 必填): 來源範圍類型，**封閉枚舉**：`"official_url"` \| `"offer_family"`
+- `sourceScope.value` (string, 必填): 官方網址或系列代碼
+
 ```json
 {
   "sourceScope": {
@@ -132,6 +157,8 @@
 ```
 
 #### `submit_ingestion_source`
+- `sourceCapture.sourceType` (string, 必填): 來源真實性，**封閉枚舉**：`"official"` (官方) \| `"user_input"` (使用者自報)
+
 ```json
 {
   "flowId": "flow_fubon_j_draft_1",
@@ -150,6 +177,8 @@
 ```
 
 #### `submit_ingestion_manifest`
+- `manifest[].kind` (string, 必填): 葉節點種類，**封閉枚舉**：`"benefit"` (回饋) \| `"exclusion"` (排除)
+
 ```json
 {
   "flowId": "flow_fubon_j_draft_1",
@@ -178,6 +207,7 @@
 ```
 
 #### `submit_benefit_leaf`
+- `disposition` (string, 忽略或覆蓋時必填): **封閉枚舉**：`"materialized"` \| `"ignored"` \| `"superseded"`
 - **實體化 (Materialized)**：
 ```json
 {
@@ -226,9 +256,13 @@
 ```
 
 #### `submit_exclusion_leaf`
+- `target` (string, 必填): 排除目標層級，**封閉枚舉**：`"merchant"` \| `"transaction_fact"` \| `"payment_route"` \| `"payment_method"`
+- `disposition` (string, 選填): **封閉枚舉**：`"materialized"` \| `"ignored"` \| `"superseded"`
+
 ```json
 {
   "flowId": "flow_fubon_j_draft_1",
+
   "actionId": "act_leaf_ex_pxmart",
   "expectedRevision": 5,
   "leafId": "ex_pxmart",
@@ -254,87 +288,146 @@
 ### 2.4 支付能力與支付路徑工具
 
 #### `upsert_payment_capability`
+- `capability.id` (string, 選填): 能力識別碼 (若未指定，系統指派預設值)
+- `capability.status` (string, 選填): 狀態，**封閉枚舉**：`"candidate"` \| `"active"` \| `"stale"` \| `"conflict"` \| `"needs_review"`
+- `capability.providerId` (string, 必填): 支付服務機構代碼 (e.g. `"JkoPay"`, `"LinePay"`)
+- `capability.acceptanceProviderId` (string, 選填): 端末收單代碼
+- `capability.consumerAppId` (string, 選填): 消費者應用程式代碼
+- `capability.merchant` (string, 選填): 特店名稱
+- `capability.market` (string, 選填): 適用市場/國別 (e.g. `"TW"`, `"JP"`)
+- `capability.channel` (string, 選填): 交易通路，**封閉枚舉**：`"online"` \| `"in_store"`
+- `capability.fundingKinds` (array of string, 必填): 支援之出資種類 (長度 1~3)，元素**封閉枚舉**：`"credit_card"` \| `"account"` \| `"cash"`
+- `capability.transitions` (array of string, 必填): 支援之狀態轉移 (至少 1 項)，元素**封閉枚舉**：
+  - `"card_authorization"` \| `"account_debit"` \| `"wallet_top_up"` \| `"wallet_debit"` \| `"service_to_acceptance"` \| `"merchant_settlement"` \| `"direct_settlement"` \| `"split_tender"`
+- `capability.sourceUrl` (string, 選填): 官方政策網址
+- `capability.evidenceIds` (array of string, 必填): 關聯之證據 ID 陣列 (長度 1~64)
+- `capability.observedAt` (string, 必填): ISO 8601 UTC 時間
+- `capability.idempotencyKey` (string, 必填): 冪等鍵
+
 ```json
 {
   "capability": {
-    "id": "cap_jkopay_fx",
-    "provider": "JkoPay",
-    "displayName": "街口支付",
-    "supportedCurrencies": ["JPY", "TWD"],
-    "fxPolicy": {
-      "conversionOwner": "wallet",
-      "suggestedRateTypes": ["cash_selling"],
-      "sourceUrls": ["https://www.taishinbank.com.tw/TSB/personal/deposit/lookup/realtime/"],
-      "provider": "TaishinBank"
-    },
-    "evidence": {
-      "sourceType": "official",
-      "sourceUrl": "https://www.jkopay.com/policy",
-      "observedAt": "2026-09-17T00:00:00Z"
-    }
+    "id": "cap_jkopay_crossborder_jp",
+    "providerId": "JkoPay",
+    "market": "JP",
+    "channel": "in_store",
+    "fundingKinds": ["account"],
+    "transitions": ["account_debit", "service_to_acceptance", "merchant_settlement"],
+    "sourceUrl": "https://www.jkopay.com/crossborder/jp",
+    "evidenceIds": ["ev_jkopay_jp_terms"],
+    "observedAt": "2026-09-17T08:00:00Z",
+    "idempotencyKey": "cap_jkopay_jp_20260917"
   }
 }
 ```
 
 #### `list_payment_capabilities`
+- 本工具不接受任何參數 (空物件 `{}`)，回傳目前公開登錄之所有支付能力。
+
 ```json
-{
-  "limit": 10,
-  "page": 1
-}
+{}
 ```
 
 #### `upsert_payment_route`
+- `route.id` (string, 必填): 路由識別碼 (e.g. `"route_gogo_linepay"`)
+- `route.status` (string, 必填): 狀態，**封閉枚舉**：`"candidate"` \| `"active"` \| `"stale"` \| `"conflict"` \| `"needs_review"` \| `"failed"`
+- `route.layers` (array of object, 必填): 路由層級陣列
+  - `kind` (string, 必填): 層級角色，**封閉枚舉**：`"merchant_loyalty"` \| `"merchant_acceptance"` \| `"consumer_app"` \| `"payment_provider"` \| `"wallet"` \| `"interoperability_scheme"` \| `"intermediate_provider"` \| `"card_network"` \| `"card_issuer"`
+  - `providerId` (string, 選填): 機構識別代碼
+  - `appId` (string, 選填): 應用程式代碼
+  - `paymentMethod` (string, 選填): 支付方式代碼
+  - `displayName` (string, 選填): 顯示名稱
+- `route.funding` (object, 必填): 出資方式
+  - `kind` (string, 必填): 出資種類，**封閉枚舉**：`"credit_card"` \| `"account"` \| `"cash"`
+  - `cardId` (string, kind 為 credit_card 時選填): 信用卡 ID
+  - `accountId` (string, kind 為 account 時選填): 帳戶 ID
+  - `subtype` (string, kind 為 account 時選填): 帳戶子類型，**封閉枚舉**：`"linked_bank_account"` \| `"wallet_balance"` \| `"foreign_currency_account"`
+- `route.observedAt` (string, 必填): ISO 8601 UTC 時間
+- `route.idempotencyKey` (string, 必填): 冪等鍵
+- `route.authority` (string, 選填): 權威來源，**封閉枚舉**：`"issuer"` \| `"network"` \| `"wallet"` \| `"merchant"` \| `"secondary"` \| `"community"` \| `"user"`
+- `route.confidence` (string, 選填): 信心水準，**封閉枚舉**：`"high"` \| `"medium"` \| `"low"`
+- `route.evidenceIds` (array of string, 選填): 關聯之證據 ID 陣列
+
 ```json
 {
   "route": {
-    "id": "route_gogo_jkopay_jp",
-    "cardId": "taishin_gogo",
-    "walletProvider": "JkoPay",
-    "market": "JP",
-    "routeFacts": {
-      "fxProvider": "TaishinBank",
-      "fxRateType": "cash_selling",
-      "fxSourceUrl": "https://www.taishinbank.com.tw/TSB/personal/deposit/lookup/realtime/"
+    "id": "route_gogo_linepay_online",
+    "status": "active",
+    "layers": [
+      {
+        "kind": "wallet",
+        "providerId": "LinePay",
+        "displayName": "LINE Pay"
+      }
+    ],
+    "funding": {
+      "kind": "credit_card",
+      "cardId": "taishin_gogo"
     },
-    "evidence": {
-      "sourceType": "official",
-      "sourceUrl": "https://www.jkopay.com/policy",
-      "observedAt": "2026-09-17T00:00:00Z"
-    }
+    "authority": "wallet",
+    "confidence": "high",
+    "evidenceIds": ["ev_gogo_linepay_spec"],
+    "observedAt": "2026-09-17T08:00:00Z",
+    "idempotencyKey": "route_gogo_linepay_20260917"
   }
 }
 ```
 
 #### `list_payment_routes`
+- `limit` (number, 選填): 每頁回傳筆數 (預設 10，上限 50)
+- `page` (number, 選填): 頁碼 (1-based)
+- `projection` (string, 選填): 投影深度，**封閉枚舉**：`"summary"` \| `"detail"` \| `"calculation"` \| `"audit"`
+
 ```json
 {
   "limit": 10,
-  "page": 1
+  "page": 1,
+  "projection": "summary"
 }
 ```
 
 #### `register_payment_account`
+- `account.id` (string, 必填): 帳戶識別碼 (e.g. `"acct_jkopay_wallet"`)
+- `account.providerId` (string, 必填): 支付服務機構代碼 (e.g. `"JkoPay"`)
+- `account.kind` (string, 必填): 帳戶種類，**封閉枚舉**：
+  - `"linked_bank_account"`: 連結銀行扣款帳戶
+  - `"wallet_balance"`: 電子錢包儲值餘額
+  - `"foreign_currency_account"`: 外幣活存帳戶
+- `account.displayName` (string, 必填): 帳戶顯示名稱
+- `account.status` (string, 必填): 狀態，**封閉枚舉**：`"candidate"` \| `"active"` \| `"stale"` \| `"needs_review"`
+- `account.observedAt` (string, 必填): ISO 8601 UTC 時間
+- `account.idempotencyKey` (string, 必填): 冪等鍵
+- `account.confirmation` (object, 當 status 為 `"active"` 時必填):
+  - `confirmedAt` (string, 必填): ISO 8601 UTC 時間
+  - `confirmedBy` (string, 必填): 確認來源（如 `"user_explicit_statement"`）
+
 ```json
 {
   "account": {
     "id": "acct_jkopay_wallet",
-    "provider": "JkoPay",
-    "accountKind": "wallet",
-    "linkedCardId": "taishin_gogo",
-    "evidence": {
-      "sourceType": "user_input",
-      "confirmedBy": "user_explicit_statement",
-      "confirmedAtUtc": "2026-09-17T08:00:00Z"
+    "providerId": "JkoPay",
+    "kind": "wallet_balance",
+    "displayName": "街口儲值帳戶",
+    "status": "active",
+    "observedAt": "2026-09-17T08:00:00Z",
+    "idempotencyKey": "acct_jkopay_wallet_20260917",
+    "confirmation": {
+      "confirmedAt": "2026-09-17T08:00:00Z",
+      "confirmedBy": "user_explicit_statement"
     }
   }
 }
 ```
 
 #### `list_payment_accounts`
+- `limit` (number, 選填): 每頁回傳筆數 (預設 10，上限 50)
+- `page` (number, 選填): 頁碼 (1-based)
+- `projection` (string, 選填): 投影深度，**封閉枚舉**：`"summary"` \| `"detail"` \| `"calculation"` \| `"audit"`
+
 ```json
 {
   "limit": 10,
-  "page": 1
+  "page": 1,
+  "projection": "summary"
 }
 ```

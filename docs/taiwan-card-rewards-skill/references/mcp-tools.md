@@ -160,11 +160,35 @@ Event calls use one `event` and one `candidate`; the public event tool additiona
 
 `record_event_reward` recomputes eligibility and stacking server-side; a caller cannot forge `matched`. `reverse_event_reward` is `{event,idempotencyKey}` and requires exactly one explicit refund relation to a recorded event. For card purchase/refund, `record_transaction` takes `{transaction:{cardId,kind,mode,occurredAt,amount,idempotencyKey,...}}`, and actual refunds reference `transaction.refundOfId`.
 
-## Status and migration rules
+## 3. 全域封閉枚舉對照表 (Closed Enums Index)
 
-- `ok`/`ready`: present the calculated fields and evidence.
-- `no_match`: the rule did not qualify; explain the proven failed condition.
-- `unknown`/`needs_facts`: ask for the missing fact; never render zero as a proven reward.
-- `stale`/`blocked`/`needs_review`: refresh evidence, clarify policy, or stop before writing.
+以下為全系統在 Runtime 驗證中嚴格限制的封閉枚舉值域。Agent 在組裝 Payload 時必須精確使用下列小寫或特定字串，嚴禁自創別名：
+
+| 欄位名稱 (`path`) | 合法枚舉值域 (`enum`) | 說明 |
+|---|---|---|
+| `channel` | `'online'` \| `'in_store'` | 交易通路：線上網購/APP 或實體門市 |
+| `transaction.kind` | `'purchase'` \| `'refund'` | 交易類型：一般購買扣款或退款反轉 |
+| `transaction.mode` | `'planned'` \| `'actual'` | 交易模式：試算推薦 (planned) 或實際記帳 (actual) |
+| `rateType` (FX) | `'card_scheme'` \| `'cash_selling'` \| `'spot_selling'` \| `'mid_market'` | 匯率類型：卡組織匯率、現鈔賣出、即期賣出、牌告中價（實際記帳禁用） |
+| `conversionOwner` | `'merchant'` \| `'wallet'` \| `'payment_provider'` \| `'card_network'` \| `'issuer'` \| `'bank'` \| `'acquirer'` \| `'card_scheme'` \| `'merchant_dcc'` \| `'unknown'` | 換匯清算責任主體 |
+| `funding.kind` | `'credit_card'` \| `'account'` \| `'cash'` | 出資工具種類 |
+| `funding.subtype`<br>`account.kind` | `'linked_bank_account'` \| `'wallet_balance'` \| `'foreign_currency_account'` | 帳戶子類型：銀行帳戶、錢包餘額、外幣帳戶 |
+| `timeBasis` | `'occurred_at'` \| `'recorded_at'` | 交易歷史時間基準：消費發生時點或記帳入帳時點 |
+| `projection` | `'summary'` \| `'detail'` \| `'calculation'` \| `'audit'` | 查詢投影深度 |
+| `card.network` | `'VISA'` \| `'MasterCard'` \| `'JCB'` \| `'AmericanExpress'` | 國際卡組織網路名稱（區分大小寫） |
+| `leaf.kind` | `'benefit'` \| `'exclusion'` | Ingestion 條款種類：加碼優惠或排除條件 |
+| `leaf.disposition` | `'materialized'` \| `'ignored'` \| `'superseded'` | 葉節點歸宿：實體化、忽略不適用、被覆蓋 |
+| `exclusion.target` | `'merchant'` \| `'transaction_fact'` \| `'payment_route'` \| `'payment_method'` | 排除目標層級 |
+| `capPool.metric` | `'spend'` \| `'reward'` \| `'transaction_count'` | Cap 額度度量：累積消費、累積回饋、交易筆數 |
+| `capPool.period` | `'calendar_month'` \| `'billing_cycle'` \| `'quarter'` \| `'year'` \| `'campaign'` | Cap 週期：日曆月、帳單週期、季、年、活動期間 |
+| `rule.status` | `'candidate'` \| `'active'` \| `'stale'` \| `'superseded'` \| `'needs_review'` \| `'unknown'` | 優惠規則狀態 |
+| `user_benefit_status.kind` | `'card_switch'` \| `'campaign_registration'` | 使用者權益狀態類別：方案切換或活動登錄 |
+| `user_benefit_status.action` | `'record'` \| `'adjust'` | 權益操作：記錄或校正 |
+| `trustBasis` | `'official_verified'` \| `'user_confirmed'` | 信任基礎：官方核實或使用者確認 |
+
+---
+
+## 4. 廢棄工具警告 (Deprecated Tools)
 
 `upsert_fx_policy`、`list_fx_policies`、`upsert_fx_observation`、`list_fx_observations`、`recommendation_preflight`、`rank_cards`、`recommend_payment_paths_v1`、`record_event_reward_v1`、`record_event_reward_v2`、`reverse_event_reward_v1` 這些名稱已經完全從 `tools/list` 與 dispatch 層移除，不是隱藏別名，呼叫會直接得到 `TOOL_NOT_FOUND`。不要在任何新的 Skill 範例或整合程式碼裡引用它們。
+

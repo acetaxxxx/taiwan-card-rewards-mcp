@@ -23,14 +23,24 @@
   - `merchant` (string, 必填): 商家名稱或模糊字串
   - `amount` (object, 選填): `{ amountMinor: number, currency: string }`
   - `country` (string, 選填): 國別代碼 (e.g. "TW", "JP")
-  - `channel` (string, 選填): "online" | "in_store"
-  - `paymentMethod` (string, 選填): "direct_card" | 錢包代碼
-  - `cardIds` (array of string, 選填): 限制篩選之特定卡片
-  - `routeIds` (array of string, 選填): 限制篩選之支付路徑
-  - `fx` (object, 外幣時選填): `{ id, baseCurrency, quoteCurrency, ratePpm, capturedAt, provider, rateType }`
-  - `eligibilityFacts` (array of object, 選填): `[{ factKey, value }]`
+  - `channel` (string, 選填): 交易通路，**封閉枚舉**：
+    - `"online"`: 線上網購、APP 內扣款
+    - `"in_store"`: 實體門市刷卡
+  - `paymentMethod` (string, 選填): 支付方式代碼（如 `"direct_card"`, `"line_pay"`, `"jkopay"`, `"apple_pay"`）
+  - `cardIds` (array of string, 選填): 限制篩選之特定卡片 ID 陣列
+  - `routeIds` (array of string, 選填): 限制篩選之支付路徑 ID 陣列
+  - `fx` (object, 外幣時選填):
+    - `id` (string, 必填): 快照識別碼
+    - `baseCurrency` (string, 必填): 交易外幣 (e.g. "JPY", "USD")
+    - `quoteCurrency` (string, 必填): 結算本幣 (台灣卡為 "TWD")
+    - `ratePpm` (integer, 必填): 百萬分率匯率 (整數)
+    - `capturedAt` (string, 必填): ISO 8601 UTC 時間
+    - `provider` (string, 必填): 報價銀行或組織代碼
+    - `rateType` (string, 必填): **封閉枚舉**：`"card_scheme"` \| `"cash_selling"` \| `"spot_selling"` \| `"mid_market"`
+  - `eligibilityFacts` (array of object, 選填): 補充資格自報事實陣列
   - `expectedResultVersion` (string, 重試時選填): 鎖定版本防止並行漂移
   - `limit` (number, 選填): 每頁回傳筆數 (預設 10)
+
 
 ```json
 {
@@ -103,9 +113,10 @@
 - **Properties 結構**：
   - `cardId` (string, 選填): 依卡片 ID 篩選
   - `canonicalMerchantId` (string, 選填): 依特店 ID 篩選
-  - `page` (number, 選填): 頁碼
-  - `limit` (number, 選填): 筆數
-  - `projection` (string, 選填): "summary" | "detail"
+  - `page` (number, 選填): 頁碼 (1-based)
+  - `limit` (number, 選填): 筆數 (上限 50)
+  - `projection` (string, 選填): 投影深度，**封閉枚舉**：`"summary"` \| `"detail"`
+
 
 ```json
 {
