@@ -23,12 +23,16 @@ SWITCH 使用者意圖:
         → 進入 [卡片登錄與權益設定 SOP](workflows/card-onboarding-and-benefit-enrollment.md)
         使用工具:register_card,list_cards, upsert_user_benefit_status
 
-    CASE  "查詢最新優惠" | "驗證卡片規則" | "建立官方來源 ingestion" | "更新條款":
-        → 進入 [官方來源研究與 Ingestion SOP](workflows/research-source-and-ingestion.md)
-        使用工具:  create_ingestion, get_ingestion, submit_ingestion_source,
+    CASE "查詢最新優惠" | "驗證卡片規則" | "建立簡單優惠":
+        → 進入 [官方條款研究與優惠規則提交 SOP](workflows/research-official-source.md)
+        使用工具: resolve_merchant, upsert_offer
+
+    CASE "建立官方來源 Ingestion 完整溯源" | "處理多重加碼與排除條款清單":
+        → 進入 [Ingestion 完整作業流程 SOP](workflows/ingestion-action-loop.md)
+        使用工具: create_ingestion, get_ingestion, submit_ingestion_source,
                   submit_ingestion_manifest, submit_benefit_leaf,
-                  submit_exclusion_leaf, finalize_ingestion, upsert_offer,
-                  resolve_merchant
+                  submit_exclusion_leaf, correct_ingestion_manifest, finalize_ingestion
+
 
     CASE "記錄支付路徑的特殊外幣匯率" | "為某個支付方式登錄匯率查詢來源":
         → 進入 [外幣特殊匯率登錄 SOP](workflows/fx-rate-ingestion.md)

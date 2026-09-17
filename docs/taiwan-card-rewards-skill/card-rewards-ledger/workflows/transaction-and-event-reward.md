@@ -237,22 +237,12 @@ reverse_event_reward({
 })
 ```
 
----
+## 4. 記帳狀態與異常處置指南
 
-## 4. 異常、診斷代碼與重試處置矩陣 (Diagnostic & Recovery Matrix)
+當 `record_transaction` 或 `record_event_reward` 執行後：
+- **`matched` (成功)**：交易已成功持久化，向使用者呈現完整的 `RewardBreakdown`（回饋總額、扣抵之 Cap Pool 與依據之規則 ID）。
+- **`no_match`**：消費條件明確不符合任何已知優惠規則，記錄為基礎消費，向使用者說明原因，嚴禁自創或估算回饋。
+- **拋出錯誤或需要補件 (`INSUFFICIENT_FACTS` / `NEEDS_REVIEW` / `fx_missing` / `INVALID_REFUND` / `IDEMPOTENCY_CONFLICT`)**：
+  ➔ 嚴禁猜測數值補寫帳本，請直接查閱通用手冊 [缺失事實與診斷代碼處置手冊](../../references/required-actions-and-diagnostics.md) 依序排查與重試。
 
-當記帳或事件連鎖工具回傳非成功狀態或拋出結構化錯誤時，Agent 應依據下表精準處置，嚴禁以猜測數值補寫帳本：
-
-| 診斷 / 錯誤代碼 | 觸發原因 | 處置主體 (`owner`) | Agent 具體處置與重試方式 |
-|---|---|:---:|---|
-| `INSUFFICIENT_FACTS` | 缺少結算時區（如 Cap Pool 未知時區）或關鍵交易條件未明 | `user` / `agent` | 向使用者確認消費所在時區或在 `transaction.occurredAt` 附上 ISO 8601 時區偏移（如 `+08:00`），補齊後以**相同 `idempotencyKey`** 重新調用。 |
-| `NEEDS_REVIEW`<br>(`mid_market` 匯率) | 實際交易 (`mode: "actual"`) 帶入了 `rateType: "mid_market"` 匯率快照 | `agent` | 實際記帳嚴禁使用中間價匯率。Agent 必須將 `rateType` 改為卡組織匯率 `"card_scheme"` 或銀行賣出價 `"cash_selling"`，重新查詢後重試。 |
-| `NEEDS_REVIEW`<br>(`fx_conflict`) | 匯率快照與交易清算貨幣或換匯主體上下文不符 | `agent` | 讀取回傳之 `fxResolutionRequest`，檢查 `requiredFacts`，修正 `fx.baseCurrency`、`quoteCurrency` 或 `provider` 後重新提交。 |
-| `NEEDS_REVIEW`<br>(疊加衝突) | 多重回饋規則疊加模式（`additive`, `replace`, `best_of` 等）未明確定義 | `user` | 向使用者呈現衝突的候選規則，要求使用者確認應套用哪一項特定活動回饋，確認後在 `candidate` 鎖定單一規則重試。 |
-| `fx_missing` | 外幣交易缺少對應結算貨幣的匯率快照 | `agent` | 讀取結構化 `fxResolutionRequest.sourceUrls`，前往指定核准來源查詢即時匯率，組裝 `transaction.fx` 快照後重試。 |
-| `fx_stale` | 匯率快照超出新鮮度上限 (`maxAgeSeconds`) | `agent` | 執行 `retryAction: "refresh_fx_snapshot"`，重新抓取當下即時匯率並更新 `capturedAt` 後重試。 |
-| `INVALID_REFUND` | 原消費不存在、卡片不符、幣別不一致，或累計退款金額超過原交易剩餘金額 | `agent` / `user` | 調用 `list_transactions` 查詢歷史紀錄，核對原消費的 `idempotencyKey`、`cardId`、幣別與剩餘可退額度。修正 `refundOfId` 或將退款金額調整至可退上限內重試。 |
-| `IDEMPOTENCY_CONFLICT` | 同一 `idempotencyKey` 被帶入了不同的交易參數 | `agent` | 若為同一筆操作的安全重試，確保傳入完全相同的 payload（MCP 將直接 replay 原決策）；若為新消費，必須產生全新唯一之 `idempotencyKey`。 |
-| `no_match` | 消費條件明確不符合任何已知優惠規則 | `agent` | 記錄該筆交易為基礎交易，向使用者說明未命中加碼規則之原因，嚴禁自創或估算回饋數值。 |
-| `matched` | Server 端重新計算確認符合回饋條件 | `agent` | 交易已成功持久化，向使用者呈現完整的 `RewardBreakdown`（回饋總額、扣抵之 Cap Pool 與依據之規則 ID）。 |
 

@@ -69,7 +69,7 @@ list_cards({ limit: 10, page: 1, projection: "summary" })
 詢問使用者：「要同步查這些卡的最新官方優惠規則嗎？」
 
     IF 使用者回答「要」:
-        → 跳出本 SOP，進入 [研究與 Ingestion SOP](research-source-and-ingestion.md)
+        → 跳出本 SOP，進入 [官方條款研究與優惠規則提交 SOP](research-official-source.md)
 
     IF 使用者回答「不用」:
         繼續步驟 5
