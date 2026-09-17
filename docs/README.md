@@ -5,7 +5,7 @@ integration contract for `taiwan-card-rewards-mcp`.
 
 ## Current guidance
 
-- [目前可用的商家意圖推薦流程](taiwan-card-rewards-skill/card-rewards-recommendation/workflows/recommendation-intent.md)
+- [目前可用的商家意圖推薦流程](taiwan-card-rewards-skill/card-rewards-recommendation/SKILL.md)
 - [AI Agent usage guide](usage/ai-agent-usage-guide.md)
 - [Copyable AI-assisted installation](../installation/INSTALL_WITH_AI.md)
 - [Skill adapter integration](integration/skill-adapters/README.md)

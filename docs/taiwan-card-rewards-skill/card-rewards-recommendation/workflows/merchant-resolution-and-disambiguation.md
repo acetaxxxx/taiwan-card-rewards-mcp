@@ -1,40 +1,86 @@
-# 商家實體消歧義標準作業程序 (Merchant Resolution SOP)
+# 特店消歧義與自訂特店標準作業程序 (Merchant Resolution SOP)
 
-本標準作業程序規範 Agent 在推薦比價流程中收到 `merchant_ambiguous` 或 `merchant_not_found` 診斷代碼時的具體處置步驟。
+本標準作業程序規範 Agent 在調用 `recommend` 遇到特店名稱模糊 (`merchant_ambiguous`) 或型錄未收錄 (`merchant_not_found`) 時的標準處置步驟。
 
 ---
 
-## 1. 處置流程
+## 1. 觸發條件 (Trigger Conditions)
+
+| 診斷代碼 (`diagnostic.code`) | 觸發原因 | 處置主體 (`owner`) | 核心目標 |
+|---|---|:---:|---|
+| `merchant_ambiguous` | 輸入之特店名稱匹配到型錄中多個實體 | `user` | 向使用者澄清具體實體，避免誤套優惠 |
+| `merchant_not_found` | 特店名稱未收錄於在地型錄白名單 | `agent` | 保留品牌名稱作為自訂特店，套用基礎回饋 |
+
+---
+
+## 2. 處置流程演算法 (Disambiguation Algorithm)
 
 ```text
-recommend 回傳 requiredActions
-       │
-       ├─► 診斷為 merchant_ambiguous ──► 條列候選實體向使用者提問 ──► 取得選定名稱後重試
-       │
-       └─► 診斷為 merchant_not_found ──► 提示未收錄並以自訂特店帶入 ──► 回退基礎回饋重試
+SWITCH action.diagnostic.code:
+
+    CASE "merchant_ambiguous":
+        // 步驟 1：萃取候選實體清單
+        candidates = action.candidateIds 或 action.diagnostic.message
+        
+        // 步驟 2：向使用者提問（必須給出 2~3 個具體選項）
+        發問範例：
+        "請問您的消費是在哪一個通路？
+         1. 全家便利商店（超商門市）
+         2. 全家國際餐飲（大戶屋、bb.q CHICKEN 等餐飲門市）"
+        
+        // 步驟 3：等待使用者選擇
+        userChoice = 等待使用者回覆
+        
+        // 步驟 4：更新 merchant 重新調用 recommend
+        recommend({
+            ...原始 intent,
+            merchant: userChoice,
+            expectedResultVersion: response.resultVersion
+        })
+
+    CASE "merchant_not_found":
+        // 步驟 1：確認特店性質
+        IF (使用者提供明確品牌名稱，如「巷口阿嬤早餐店」):
+            // 直接保留原品牌名稱，若已知通路則補充 channel
+            recommend({
+                ...原始 intent,
+                merchant: 原始輸入名稱,
+                channel: 已知通路 (如 'in_store' 或 'online'),
+                expectedResultVersion: response.resultVersion
+            })
+            // 系統將自動回退至該卡片之一般消費基礎回饋
+            
+        ELSE IF (完全無法辨識特店名稱):
+            向使用者詢問：「請問您預計消費的店家名稱或消費類別（如餐飲、機票）是什麼？」
 ```
 
-### 情境 A：特店名稱歧義 (`diagnostic.code === 'merchant_ambiguous'`)
-- **現象**：使用者輸入的名稱匹配到型錄中多個實體（例如「全家」可能為「全家便利商店」或「全家國際餐飲」；「Uber」可能為「網約車」或「Uber Eats 外送」）。
-- **Agent 具體處置步驟**：
-  1. 檢視 `action.candidateIds` 或 `action.diagnostic.message`。
-  2. 向使用者發問，條列出 2~3 個候選選項：
-     > 「請問您的消費是在：
-     > 1. 全家便利商店（超商通路）
-     > 2. 全家國際餐飲（餐飲通路）？」
-  3. 等待使用者回覆。
-  4. 將使用者確認的店家名稱填入 `recommend` 的 `merchant` 欄位重新調用：
-     ```javascript
-     recommend({
-       merchant: "全家便利商店",
-       amount: { amountMinor: 15000, currency: "TWD" },
-       expectedResultVersion: response.resultVersion
-     })
-     ```
+---
 
-### 情境 B：未收錄特店 (`diagnostic.code === 'merchant_not_found'`)
-- **現象**：特店名稱未收錄於在地型錄白名單中（例如巷口早餐店、獨立咖啡店）。
-- **Agent 具體處置步驟**：
-  1. 若使用者已知為具體品牌，直接將使用者輸入之名稱保留在 `merchant` 欄位。
-  2. 若具備行業特徵（如「餐廳」、「機票」），可補充 `channel`（如 `in_store`、`online`）欄位重新調用。
-  3. 系統將自動回退至該卡片的一般國內/國外消費基礎回饋。
+## 3. 調用 Payload 範例
+
+### 情境 A：消歧義後重試調用
+```json
+{
+  "merchant": "全家便利商店",
+  "amount": { "amountMinor": 15000, "currency": "TWD" },
+  "expectedResultVersion": 1
+}
+```
+
+### 情境 B：未收錄自訂特店調用
+```json
+{
+  "merchant": "台北私廚小館",
+  "amount": { "amountMinor": 350000, "currency": "TWD" },
+  "channel": "in_store",
+  "expectedResultVersion": 1
+}
+```
+
+---
+
+## 4. 注意事項與防呆原則 (Guardrails)
+1. **禁止捏造 ID**：不要自行猜測或發明不存在的 `canonicalId`，直接傳遞使用者確認的名稱字串。
+2. **鎖定版本**：重試時務必帶入 `expectedResultVersion: response.resultVersion`，防止並行推薦狀態漂移。
+3. **基礎回饋保障**：若特店未收錄，告知使用者系統已改用一般消費基礎回饋進行比價，而非直接回報無回饋。
+

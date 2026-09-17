@@ -136,7 +136,7 @@ For lightweight or lower-reasoning models, load the bundled [low-reasoning playb
 1. For a recommendation, call `recommend` directly with the merchant-first intent. `list_cards` is for management, explicit inventory requests, or onboarding checks; it is not a normal recommendation prerequisite.
 2. If the user holds a new card, call `register_card` with card descriptors (e.g. `{ id: "esun-kumamon", issuer: "ESunBank", productName: "Kumamon Card", network: "JCB", country: "TW" }`).
 
-For the merchant-first recommendation shape, follow [`recommendation-intent.md`](../taiwan-card-rewards-skill/card-rewards-recommendation/workflows/recommendation-intent.md). `recommend` is the only entry point; there is no separate preflight call or legacy transaction branch.
+For the merchant-first recommendation shape, follow [`SKILL.md`](../taiwan-card-rewards-skill/card-rewards-recommendation/SKILL.md). `recommend` is the only entry point; there is no separate preflight call or legacy transaction branch.
 
 ### B. Offer Ingestion, OCR & Candidate Activation
 1. **Official Web Sources**: The Agent or UI retrieves official bank pages using its own approved browsing or ingestion path, then supplies an unverified structured source snapshot with provenance and content fingerprint. The MCP does not retrieve web content.
