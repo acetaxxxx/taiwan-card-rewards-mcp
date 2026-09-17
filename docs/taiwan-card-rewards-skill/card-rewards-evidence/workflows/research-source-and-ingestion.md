@@ -382,7 +382,18 @@ SWITCH response.status:
 
 ---
 
+### 5.3 `INSUFFICIENT_FACTS` 與 `requiredActions` 統一處置原則
+
+無論在推薦、研究或記帳情境中，當 MCP 回傳 `missing_required_fact` 或 `INSUFFICIENT_FACTS` 時，Agent 應依據回傳之 `requiredActions` 結構化欄位進行四大類處置：
+1. **交易核心要素缺失 (`path: "amount" | "merchant"`)**：`owner: "user"`，向使用者確認金額、幣別或消歧義店家，回填至 `submission` 指定欄位。
+2. **使用者資格事實缺失 (`path: "eligibilityFacts"`)**：`owner: "user"`，向使用者確認等級或啟用方案，自報事實填入 `eligibilityFacts`。
+3. **支付工具缺失 (`path: "paymentCapabilities.<id>"`)**：`owner: "user"`，引導調用 `register_card` 或切換支援之支付工具。
+4. **結算與清算要素缺失 (`path: "timezone" | "transaction.fx"`)**：`owner: "agent"`，由 Agent 自行補齊時區偏移或查詢 `sourceUrls` 組裝 `fx` 快照。
+
+---
+
 ## 6. 防呆原則 (Guardrails)
+
 
 1. **搜尋摘要非事實**：搜尋引擎 snippet、AI 生成摘要、社群貼文均非確定事實，必須核查原始官方頁面。
 2. **年份核查**：嚴禁套用前年度舊條款；必須確認生效年份（如 2026 年）與截止日。
