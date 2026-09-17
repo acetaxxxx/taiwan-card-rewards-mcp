@@ -80,7 +80,46 @@ IF 已有官方來源快照、規則結構簡單、不需要 leaf 層級追蹤:
 > [!IMPORTANT]
 > **伺服器主導 (Server-Owned) 原則**：MCP 決定 phase 順序、leaf 依賴順序與 finalization 時機。Agent 必須執行 MCP 回傳的 `nextAction`，不可自行推斷或跳過。
 
+### 4.0 核心概念解析：什麼是 Source、Manifest 與 Leaf？
+
+為了避免 Agent 混淆名詞，以下定義本流程的階層關係：
+
+```text
+┌───────────────────────────────────────────────────────────────────┐
+│ 1. Source（條款來源全篇）                                         │
+│    銀行官網公告、PDF 權益手冊整份文件全文                          │
+│    例如：「2026年富邦J卡全年度權益公告.pdf」                      │
+└─────────────────────────────────┬─────────────────────────────────┘
+                                  │ Agent 研讀後萃取出條款目錄
+                                  ▼
+┌───────────────────────────────────────────────────────────────────┐
+│ 2. Manifest（條款清單 / 藍圖）                                    │
+│    從 Source 萃取出的「條款清單邊界」（Coverage Boundary）       │
+│    宣告這篇公告包含哪幾項獨立條款，以及條款之間的依賴關係 (dependsOn)│
+└─────────────────────────────────┬─────────────────────────────────┘
+                                  │ 由多個不可再分割的單元組成
+                                  ▼
+┌───────────────────────────────────────────────────────────────────┐
+│ 3. Leaf（條款葉節點 / 最小條款單元）                              │
+│    - kind: "benefit"    ── 加碼或基礎回饋（如日韓實體加碼 3%）     │
+│    - kind: "exclusion"  ── 排除條件（如排除全聯、超商、菸酒消費）  │
+└───────────────────────────────────────────────────────────────────┘
+```
+
+#### 葉節點的兩種種類 (`leaf.kind`)
+1. **`kind: "benefit"`**：具體的權益加碼或基本回饋規則（需提供匹配通路、卡別、幣別、回饋比率與 Cap Pool）。
+2. **`kind: "exclusion"`**：排除通路、特店或特定交易類別（如「不回饋之特定特店清單」或「不適用行動支付」）。若加碼規則依賴排除規則，加碼 leaf 之 `dependsOn` 必須填入該 exclusion leaf ID。
+
+#### 葉節點的三種最終歸宿 (`disposition`)
+MCP 要求 Manifest 中的每一片 Leaf 在結束前都必須有明確的歸宿，否則無法 Finalize：
+- **`materialized`（實體化）**：成功轉換為候選回饋規則 (`candidate rule`)。
+- **`ignored`（忽略）**：該條款在此次流程中不適用（例如：公告中提到「公務人員專屬卡加碼」，但目前處理的是一般卡；必須附帶 `reason` 與 `evidenceRefs`）。
+- **`superseded`（被覆蓋）**：該條款已被後面的修訂版本或更精確的條款覆蓋（必須附帶 `reason` 與 `evidenceRefs`）。
+
+---
+
 ### 4.1 啟動與 Action Loop 演算法
+
 
 ```text
 // 啟動或繼續 Ingestion Draft
@@ -137,30 +176,81 @@ LOOP:
             })
 
         CASE "SUBMIT_BENEFIT_LEAF":
-            // 每次只提交 MCP 指定的一個 leaf（順序由 MCP 決定）
-            submit_benefit_leaf({
-                flowId,
-                actionId: nextAction.actionId,
-                expectedRevision: nextAction.expectedRevision,
-                leafId: nextAction.leafId,
-                // benefit rule payload（含 rule, snapshot, capPools 等）
-                ...
-            })
+            // 每次只提交 MCP 指定的一個 leaf（由 nextAction.leafId 指定）
+            IF 該條款適用於當前卡片 (實體化):
+                submit_benefit_leaf({
+                    flowId,
+                    actionId: nextAction.actionId,
+                    expectedRevision: nextAction.expectedRevision,
+                    leafId: nextAction.leafId,
+                    idempotencyKey: "leaf_b_<leafId>_<flowId>",
+                    evidenceRefs: ["page:1#section-offer"],
+                    offer: {
+                        snapshot: {
+                            id: "snap_<ULID>",
+                            url: 官方來源 URL,
+                            fetchedAt: 當前 UTC,
+                            contentHash: "sha256:<雜湊>",
+                            parserVersion: "1.0.0",
+                            verified: true,
+                            sourceType: "official"
+                        },
+                        rule: {
+                            id: "rule_<cardId>_<leafId>_2026",
+                            cardId: 卡片ID,
+                            version: "1",
+                            sourceSnapshotId: "snap_<ULID>",
+                            status: "candidate",  // 未 finalize 前為 candidate
+                            validFrom: "2026-01-01T00:00:00Z",
+                            validTo: "2026-12-31T23:59:59Z",
+                            settlementCurrency: "TWD",
+                            match: { channels: ["online", "in_store"] },
+                            reward: { kind: "percentage", rateBps: 300 }
+                        }
+                    },
+                    localExclusions: []
+                })
+            ELSE IF 該條款不適用 (忽略/覆蓋):
+                submit_benefit_leaf({
+                    flowId,
+                    actionId: nextAction.actionId,
+                    expectedRevision: nextAction.expectedRevision,
+                    leafId: nextAction.leafId,
+                    idempotencyKey: "leaf_b_ignore_<leafId>_<flowId>",
+                    disposition: "ignored",  // 或 "superseded"
+                    reason: "此加碼僅適用特定企業聯名卡，本卡不適用",
+                    evidenceRefs: ["page:1#fine-print"]
+                })
 
         CASE "SUBMIT_EXCLUSION_LEAF":
             // 每次只提交 MCP 指定的一個排除條款 leaf
-            submit_exclusion_leaf({
-                flowId,
-                actionId: nextAction.actionId,
-                expectedRevision: nextAction.expectedRevision,
-                leafId: nextAction.leafId,
-                // exclusion payload
-                ...
-            })
+            IF 排除條款生效 (實體化):
+                submit_exclusion_leaf({
+                    flowId,
+                    actionId: nextAction.actionId,
+                    expectedRevision: nextAction.expectedRevision,
+                    leafId: nextAction.leafId,
+                    idempotencyKey: "leaf_ex_<leafId>_<flowId>",
+                    evidenceRefs: ["page:2#exclusions"],
+                    target: "merchant",
+                    scope: { kind: "all_benefits" },
+                    predicate: { field: "transaction.merchant", op: "EQUALS", value: "全聯福利中心" }
+                })
+            ELSE IF 排除條款不適用 (忽略):
+                submit_exclusion_leaf({
+                    flowId,
+                    actionId: nextAction.actionId,
+                    expectedRevision: nextAction.expectedRevision,
+                    leafId: nextAction.leafId,
+                    idempotencyKey: "leaf_ex_ignore_<leafId>_<flowId>",
+                    disposition: "ignored",
+                    reason: "排除活動已於 2025 年終止，2026 年新制已刪除此排除項",
+                    evidenceRefs: ["page:2#note"]
+                })
 
         CASE "FINALIZE":
             // 向使用者確認後 finalize（不可在使用者確認前 finalize）
-            取得使用者明確確認
+            取得使用者明確確認（向使用者報告本次預計啟用的規則清單）
             finalize_ingestion({
                 flowId,
                 actionId: nextAction.actionId,
@@ -180,19 +270,39 @@ LOOP:
             向使用者說明阻塞原因，等待確認或補充資料後繼續
 ```
 
-### 4.2 Manifest 修正（版本衝突時）
+### 4.2 Manifest 修正（版本衝突或條款勘誤時）
 
 ```text
-// 當 MCP 回傳 manifestCorrectionAction（或使用者要求修改 manifest）
+// 當 MCP 回傳 manifestCorrectionAction（或 Agent 發現提取條款遺漏需修正時）
+// 注意：Manifest correction 必須是「全量替換」，不可只送差異補丁
 correct_ingestion_manifest({
     flowId,
     actionId: manifestCorrectionAction.actionId,
     expectedRevision: manifestCorrectionAction.expectedRevision,
     idempotencyKey: 新的冪等鍵（禁止重用舊 key）,
-    manifest: 完整替換的新 manifest（必須是完整版本，不可差異補丁）
+    manifest: 包含所有正確葉節點的完整清單陣列
 })
-// 立即 get_ingestion 確認 manifestRevision 已更新
+// 呼叫後立即 get_ingestion 驗證 manifestRevision 與 coverage
 ```
+
+---
+
+### 4.3 Ingestion 異常、衝突與中途問題處置矩陣 (Ingestion Error & Recovery Matrix)
+
+在 Ingestion flow 執行中，若遇到錯誤或阻斷狀態，Agent 應依下表精確處置：
+
+| 異常 / 錯誤代碼 | 觸發原因 | Agent 處置與重試步驟 |
+|---|---|---|
+| **`INVALID_INPUT: cycle`** | Manifest 中存在循環依賴（例如 A 依賴 B，B 又依賴 A） | 檢查 Manifest 中的 `dependsOn` 鏈結。確保排除條款優先宣告（`dependsOn: []`），優惠規則再指向排除條款，破除循環後重新提交 Manifest。 |
+| **`INVALID_FLOW_ACTION`** | 1. 順序跳步：MCP 期待 A 動作（如提交來源），Agent 卻送了 B 動作（如送 Manifest）。<br>2. Leaf 亂序：Agent 自選 leaf 提交，而非 MCP 指定的 `nextAction.leafId`。 | 立即調用 `get_ingestion({ flowId })`，讀取目前唯一的 `nextAction.kind` 與 `nextAction.leafId`，**嚴格只執行 MCP 規定的下一步**。 |
+| **`STALE_REVISION`** | Flow 的版本號已遞增（例如已經修正過 Manifest），但 Agent 仍送帶舊 `expectedRevision` 或舊 `actionId` 的請求。 | 嚴禁重送舊 actionId。立即調用 `get_ingestion({ flowId })` 取得最新 `revision` 與新 `actionId` 後重試。 |
+| **`SOURCE_SCOPE_CONFLICT`** | 提交的 `sourceCapture.url` 與當初 `create_ingestion` 宣告的 `sourceScope` 網域或範圍不相符。 | 確保 `sourceCapture.url` 與 `create_ingestion({ sourceScope })` 嚴格一致；若為全新網站來源，應建立新的 Ingestion Draft。 |
+| **`IDEMPOTENCY_CONFLICT`** | 相同的 `idempotencyKey` 被帶入了不同的 Manifest 或 Leaf 內容。 | 若為同一請求的安全重試，確保 payload 全量一致（MCP 將返回原結果）；若修改了內容，**必須產生全新的 `idempotencyKey`**。 |
+| **`NEEDS_REVIEW`<br>(特店歧義)** | 提交 Leaf 時，`rule.match.merchants` 包含的特店名稱在系統中有複數匹配實體。 | 讀取回傳的候選清單向使用者確認具體店家名稱，選定後以相同 `leafId` 重新調用 `submit_benefit_leaf`。 |
+| **`NEEDS_REVIEW`<br>(Finalize 阻塞)** | Coverage 中尚有 `pending` 或 `blocked` 的葉節點未處理完畢，就嘗試調用 `finalize_ingestion`。 | 檢查 `flow.coverage`，繼續依序處理剩餘的 `pendingLeafIds`，直至所有 leaf 均成為 `materialized`、`ignored` 或 `superseded` 且 `nextAction.kind === 'FINALIZE'`。 |
+| **`FLOW_NOT_FOUND` 或 `status: "expired"`** | 草稿因長時間未活動超過 TTL 已被伺服器標記過期並清除 incomplete artifacts。 | 舊草稿無法恢復。使用 `create_ingestion` 重新開啟一個新的 Draft，並產生全新 `idempotencyKey`。 |
+| **`MANIFEST_DIFF_PATCH_FORBIDDEN`** | 在 `correct_ingestion_manifest` 中只傳入想修改的單一 leaf，而非全量 manifest。 | 修正 Manifest 必須傳入**包含所有舊有需保留項＋新修訂項的完整陣列**。 |
+
 
 ---
 
