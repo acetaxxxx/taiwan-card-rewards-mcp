@@ -7,7 +7,7 @@ const toolsReference = join(skillRoot, 'references', 'mcp-tools.md');
 const contract = await import(join(root, 'dist', 'mcp-contract.js'));
 const toolNames = contract.mcpTools.map((tool) => tool.name);
 const text = readFileSync(toolsReference, 'utf8');
-const matrixSection = text.match(/## 28-tool matrix\s*([\s\S]*?)(?=\n##|$)/)?.[1] ?? text;
+const matrixSection = text.match(/## (?:[0-9.]+\s*)?28-tool matrix\s*([\s\S]*?)(?=\n##|$)/)?.[1] ?? text;
 const documentedNames = [...matrixSection.matchAll(/^\|\s*`([^`]+)`\s*\|/gm)].map((match) => match[1]);
 
 const documentedSet = new Set(documentedNames);

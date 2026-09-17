@@ -1,168 +1,84 @@
-# Canonical MCP tools
+# 權威 MCP 工具目錄與全域架構手冊 (Canonical MCP Tools & Architecture Reference)
 
-這份 reference 對應目前 source contract 的公開 surface：28 個工具。工具名稱、closed input、enum 與 fail-closed errors 以 `src/mcp-contract.ts`、`src/validation.ts` 和 `src/cli.ts` 為準；版本 tag 是發佈管理資訊，不是 public tool name。
+本文件為 `taiwan-card-rewards-mcp` 系統的**全域工具權威目錄與底層約束規範**。
+目前公開契約嚴格收錄 **28 個工具**，所有工具名稱、封閉輸入欄位（Closed Schemas）、列舉值域（Closed Enums）與 Fail-Closed 錯誤代碼均以 `src/mcp-contract.ts`、`src/validation.ts` 與 `src/cli.ts` 為唯一真理來源。
 
-## 28-tool matrix
+---
 
-| Tool | Read/write | 用途 |
-|---|---|---|
-| `calculate_reward` | read | 以提供的 rule、transaction、context 做單筆試算，不寫帳本；適合在 `upsert_offer` 前驗證一條 rule 的數學，或對未確認的候選優惠展示假設性回饋 |
-| `register_card` | write | 登記 card descriptor（不可有 PAN/CVV） |
-| `list_cards` | read | 列出 user-scoped card 清冊 |
-| `upsert_offer` | write | 寫入 source snapshot/rule，可原子性地帶入一個候選商家；有一致證據時預設可用，衝突或歧義才需要使用者處理 |
-| `recommend` | read | merchant-first intent 的 bounded recommendation；一次呼叫回傳直接刷卡與多層付款路徑的統一候選清單 |
-| `upsert_payment_route` | write | 登記有界 route graph 與 funding identity；自帶 evidenceIds 即視為可用，使用者否認才標記 failed |
-| `upsert_payment_capability` | write | 保存與 user route 分離的公共支付能力；自帶 evidenceIds 即視為可用 |
-| `list_payment_capabilities` | read | 列出可供 planned route generation 使用的公共支付能力 |
-| `list_payment_routes` | read | 列出 user-scoped route |
-| `register_payment_account` | write | 登記 wallet/linked bank account 的 opaque identity 與 evidence |
-| `list_payment_accounts` | read | 列出可供 route 引用的 account identity |
-| `record_transaction` | write | 寫入 actual purchase 或 linked refund、更新 cap usage |
-| `list_transactions` | read | 查詢歷史實際交易清單，支援 occurred_at 或 recorded_at 雙時間基準與分頁投影 |
-| `record_event_reward` | write | server 重新判斷 event-local rule 或 explicit `funded_by` chain 後記帳 |
-| `reverse_event_reward` | write | 依 explicit refund/reversal relation 反轉 event reward |
-| `remaining_caps` | read | 查詢 actual usage 後的 cap 餘額 |
-| `get_user_benefit_status` | read | 查詢使用者權益狀態與可執行候選 |
-| `upsert_user_benefit_status` | write | 寫入 user-confirmed benefit action |
-| `resolve_merchant` | read | 驗證 Agent 提供的 merchant identity/candidate |
-| `search_active_offers` | read | 有界搜尋 active offer，不直接套用回饋 |
-| `create_ingestion` | write | 建立或恢復一個 source-scoped ingestion draft |
-| `get_ingestion` | read | 取得 MCP 決定的下一個 ingestion action 與 coverage |
-| `submit_ingestion_source` | write | 提交不可變 source capture；MCP 不會自行抓 URL |
-| `submit_ingestion_manifest` | write | 提交完整 manifest，驗證 dependency graph |
-| `correct_ingestion_manifest` | write | 建立 server-owned manifest revision 並保留舊 revision lineage |
-| `submit_benefit_leaf` | write | 解析 merchant references、驗證並 materialize 單一 candidate benefit rule；未 finalize 前不可推薦 |
-| `submit_exclusion_leaf` | write | 提交 server-selected shared exclusion；ignored exclusion 必須提供 reason |
-| `finalize_ingestion` | write | 原子重驗完整 manifest，啟用 verified candidate rules 並回傳 completion proof |
+## 1. 漸進式揭露架構導引 (Progressive Disclosure)
 
-工具 schema 與欄位以 `tools/list` 及 `src/mcp-contract.ts` 為準；adapter 會遞迴正規化 snake_case，runtime validator 會拒絕未公開欄位。所有 arrays、page/limit、route graph、event source list 都有上限。
+為維持高訊噪比並避免 Context 混亂，本 Skill 體系採取三層漸進式揭露：
+- **Level 1（意圖路由）**：各目錄之 `SKILL.md`，負責意圖識別與分流。
+- **Level 2（專門工作流程與專屬工具規格）**：針對特定情境，直接查閱專屬工具規格與 Payload 骨架：
+  - 🛍️ **消費推薦與試算** ➔ [`recommendation-tools-specification.md`](file:///Users/hankyin/Practice/taiwan-card-rewards-mcp/docs/taiwan-card-rewards-skill/card-rewards-recommendation/workflows/recommendation-tools-specification.md) (4 工具)
+  - 📜 **卡片/權益/條款研究** ➔ [`evidence-tools-specification.md`](file:///Users/hankyin/Practice/taiwan-card-rewards-mcp/docs/taiwan-card-rewards-skill/card-rewards-evidence/workflows/evidence-tools-specification.md) (19 工具)
+  - 💳 **記帳/對帳/跨事件連鎖** ➔ [`ledger-tools-specification.md`](file:///Users/hankyin/Practice/taiwan-card-rewards-mcp/docs/taiwan-card-rewards-skill/card-rewards-ledger/workflows/ledger-tools-specification.md) (8 工具)
+- **Level 3（全域權威與例外手冊）**：
+  - 工具總覽與全域枚舉 ➔ 本文件 [`mcp-tools.md`](file:///Users/hankyin/Practice/taiwan-card-rewards-mcp/docs/taiwan-card-rewards-skill/references/mcp-tools.md)
+  - 缺失事實與診斷手冊 ➔ [`required-actions-and-diagnostics.md`](file:///Users/hankyin/Practice/taiwan-card-rewards-mcp/docs/taiwan-card-rewards-skill/references/required-actions-and-diagnostics.md)
 
-`submit_benefit_leaf` 可在同一次提交帶入 `merchantRefs`。MCP 會直接執行 merchant
-resolution：唯一匹配時自動綁定 canonical ID；多重匹配時在 `NEEDS_REVIEW` details
-回傳候選清單，Agent 選定後以相同 leaf action 重試；完全未知時才需要附上來源支持的
-`candidate` merchant。Agent 不需要先額外呼叫 `resolve_merchant`。
+---
 
-`upsert_fx_policy`、`list_fx_policies`、`upsert_fx_observation`、`list_fx_observations`、`recommendation_preflight` 已完全移除——FX 收斂成單一 inline snapshot（見下），`recommend` 本身就是唯一、完整的推薦入口，不再需要獨立的 preflight 呼叫。`rank_cards` 也已移除：它只是把呼叫端自帶的 cards/rules 排序，沒有存取 store，Agent 重複呼叫 `calculate_reward` 就能自己排序，因此收斂成單一用途的 `calculate_reward`。`recommend_payment_paths_v1`、`record_event_reward_v1`、`record_event_reward_v2`、`reverse_event_reward_v1` 這些版本化別名也一併移除；只使用上表的正式名稱。
+## 2. 28-tool matrix
 
-## `recommend`：merchant-first intent
+以下為系統中完整 28 個 MCP 工具的權威清單，依業務領域分類索引：
 
-唯一入口是 merchant-first intent：`merchant` 必填，其餘消費條件與 `cardIds`／
-`routeIds` 篩選皆可省略。省略篩選時由 MCP 讀取目前 user state；回應使用 typed
-candidate envelope，並帶狀態、required actions 與 bounded coverage。這個入口不
-要求先呼叫任何 list tool。
+| Tool | 領域 | 模式 | 核心用途 | 專屬規格手冊 |
+|---|:---:|:---:|---|---|
+| `recommend` | 推薦 | read | 特店優先的統合推薦入口，同時評估直接刷卡與多層支付路徑 | [推薦規格](file:///Users/hankyin/Practice/taiwan-card-rewards-mcp/docs/taiwan-card-rewards-skill/card-rewards-recommendation/workflows/recommendation-tools-specification.md#21-recommend) |
+| `calculate_reward` | 推薦 | read | 單筆回饋純數學試算（不寫入帳本、不累積 Cap） | [推薦規格](file:///Users/hankyin/Practice/taiwan-card-rewards-mcp/docs/taiwan-card-rewards-skill/card-rewards-recommendation/workflows/recommendation-tools-specification.md#22-calculate_reward) |
+| `resolve_merchant` | 推薦 | read | 驗證特店識別資訊或查詢特店候選清冊 | [推薦規格](file:///Users/hankyin/Practice/taiwan-card-rewards-mcp/docs/taiwan-card-rewards-skill/card-rewards-recommendation/workflows/recommendation-tools-specification.md#23-resolve_merchant) |
+| `search_active_offers` | 推薦 | read | 有界搜尋生效中之優惠條款規則 | [推薦規格](file:///Users/hankyin/Practice/taiwan-card-rewards-mcp/docs/taiwan-card-rewards-skill/card-rewards-recommendation/workflows/recommendation-tools-specification.md#24-search_active_offers) |
+| `register_card` | 卡片/權益 | write | 登記持卡清冊描述符（嚴禁卡號與 CVV） | [條款/卡片規格](file:///Users/hankyin/Practice/taiwan-card-rewards-mcp/docs/taiwan-card-rewards-skill/card-rewards-evidence/workflows/evidence-tools-specification.md#register_card) |
+| `list_cards` | 查詢共用 | read | 查詢使用者已登記之卡片清單 | [條款/卡片規格](file:///Users/hankyin/Practice/taiwan-card-rewards-mcp/docs/taiwan-card-rewards-skill/card-rewards-evidence/workflows/evidence-tools-specification.md#list_cards) |
+| `get_user_benefit_status` | 卡片/權益 | read | 查詢指定卡片目前啟用的權益方案或活動登錄狀態 | [條款/卡片規格](file:///Users/hankyin/Practice/taiwan-card-rewards-mcp/docs/taiwan-card-rewards-skill/card-rewards-evidence/workflows/evidence-tools-specification.md#get_user_benefit_status) |
+| `upsert_user_benefit_status` | 卡片/權益 | write | 記錄使用者確認切換的方案或活動登錄紀錄 | [條款/卡片規格](file:///Users/hankyin/Practice/taiwan-card-rewards-mcp/docs/taiwan-card-rewards-skill/card-rewards-evidence/workflows/evidence-tools-specification.md#upsert_user_benefit_status) |
+| `upsert_offer` | 條款快速路徑 | write | 快速路徑：原子寫入官方來源快照與優惠規則 | [條款/卡片規格](file:///Users/hankyin/Practice/taiwan-card-rewards-mcp/docs/taiwan-card-rewards-skill/card-rewards-evidence/workflows/evidence-tools-specification.md#22-快速優惠規則建立upsert_offer) |
+| `create_ingestion` | 條款 Ingestion | write | 建立或恢復一個 source-scoped Ingestion 草稿流程 | [條款/卡片規格](file:///Users/hankyin/Practice/taiwan-card-rewards-mcp/docs/taiwan-card-rewards-skill/card-rewards-evidence/workflows/evidence-tools-specification.md#create_ingestion) |
+| `get_ingestion` | 條款 Ingestion | read | 讀取 MCP 決定的下一個 Ingestion 動作與葉節點覆蓋進度 | [條款/卡片規格](file:///Users/hankyin/Practice/taiwan-card-rewards-mcp/docs/taiwan-card-rewards-skill/card-rewards-evidence/workflows/evidence-tools-specification.md#get_ingestion) |
+| `submit_ingestion_source` | 條款 Ingestion | write | 提交官方來源不可變快照（MCP 不會主動抓取外部網址） | [條款/卡片規格](file:///Users/hankyin/Practice/taiwan-card-rewards-mcp/docs/taiwan-card-rewards-skill/card-rewards-evidence/workflows/evidence-tools-specification.md#submit_ingestion_source) |
+| `submit_ingestion_manifest` | 條款 Ingestion | write | 提交完整條款清單（Manifest）並驗證依賴拓撲無環 | [條款/卡片規格](file:///Users/hankyin/Practice/taiwan-card-rewards-mcp/docs/taiwan-card-rewards-skill/card-rewards-evidence/workflows/evidence-tools-specification.md#submit_ingestion_manifest) |
+| `correct_ingestion_manifest` | 條款 Ingestion | write | 全量勘誤條款清單，保留舊修訂版之血統關聯 | [條款/卡片規格](file:///Users/hankyin/Practice/taiwan-card-rewards-mcp/docs/taiwan-card-rewards-skill/card-rewards-evidence/workflows/evidence-tools-specification.md#correct_ingestion_manifest) |
+| `submit_benefit_leaf` | 條款 Ingestion | write | 逐一實體化優惠加碼葉節點為 Candidate Rule（未發布前外部隱形） | [條款/卡片規格](file:///Users/hankyin/Practice/taiwan-card-rewards-mcp/docs/taiwan-card-rewards-skill/card-rewards-evidence/workflows/evidence-tools-specification.md#submit_benefit_leaf) |
+| `submit_exclusion_leaf` | 條款 Ingestion | write | 逐一提交排除條件葉節點（可設定忽略或生效層級） | [條款/卡片規格](file:///Users/hankyin/Practice/taiwan-card-rewards-mcp/docs/taiwan-card-rewards-skill/card-rewards-evidence/workflows/evidence-tools-specification.md#submit_exclusion_leaf) |
+| `finalize_ingestion` | 條款 Ingestion | write | 原子校驗完整 Manifest 覆蓋率，正式發布所有候選規則 | [條款/卡片規格](file:///Users/hankyin/Practice/taiwan-card-rewards-mcp/docs/taiwan-card-rewards-skill/card-rewards-evidence/workflows/evidence-tools-specification.md#finalize_ingestion) |
+| `upsert_payment_capability` | 支付能力 | write | 登錄公開可用之支付能力與流轉狀態（供路徑規劃使用） | [條款/卡片規格](file:///Users/hankyin/Practice/taiwan-card-rewards-mcp/docs/taiwan-card-rewards-skill/card-rewards-evidence/workflows/evidence-tools-specification.md#upsert_payment_capability) |
+| `list_payment_capabilities` | 支付能力 | read | 列出公開登錄之所有支付能力 | [條款/卡片規格](file:///Users/hankyin/Practice/taiwan-card-rewards-mcp/docs/taiwan-card-rewards-skill/card-rewards-evidence/workflows/evidence-tools-specification.md#list_payment_capabilities) |
+| `upsert_payment_route` | 支付路徑 | write | 登錄使用者自訂之支付路徑圖拓撲（支援節點與邊緣轉移） | [條款/卡片規格](file:///Users/hankyin/Practice/taiwan-card-rewards-mcp/docs/taiwan-card-rewards-skill/card-rewards-evidence/workflows/evidence-tools-specification.md#upsert_payment_route) |
+| `list_payment_routes` | 查詢共用 | read | 列出已登錄之支付路徑清單 | [條款/卡片規格](file:///Users/hankyin/Practice/taiwan-card-rewards-mcp/docs/taiwan-card-rewards-skill/card-rewards-evidence/workflows/evidence-tools-specification.md#list_payment_routes) |
+| `register_payment_account` | 支付帳戶 | write | 登記電子錢包或連結銀行帳戶身分識別（不存機敏憑證） | [條款/卡片規格](file:///Users/hankyin/Practice/taiwan-card-rewards-mcp/docs/taiwan-card-rewards-skill/card-rewards-evidence/workflows/evidence-tools-specification.md#register_payment_account) |
+| `list_payment_accounts` | 查詢共用 | read | 列出已登記之電子錢包或帳戶清單 | [條款/卡片規格](file:///Users/hankyin/Practice/taiwan-card-rewards-mcp/docs/taiwan-card-rewards-skill/card-rewards-evidence/workflows/evidence-tools-specification.md#list_payment_accounts) |
+| `record_transaction` | 記帳帳本 | write | 記錄實際購買或退款交易，原子更新 Cap Pool 上限累計 | [記帳規格](file:///Users/hankyin/Practice/taiwan-card-rewards-mcp/docs/taiwan-card-rewards-skill/card-rewards-ledger/workflows/ledger-tools-specification.md#21-record_transaction) |
+| `list_transactions` | 記帳帳本 | read | 查詢歷史實際交易清冊，支援雙時間基準與分頁投影 | [記帳規格](file:///Users/hankyin/Practice/taiwan-card-rewards-mcp/docs/taiwan-card-rewards-skill/card-rewards-ledger/workflows/ledger-tools-specification.md#22-list_transactions) |
+| `remaining_caps` | 記帳帳本 | read | 查詢特定卡片目前週期累積後之剩餘可回饋額度 (Cap) | [記帳規格](file:///Users/hankyin/Practice/taiwan-card-rewards-mcp/docs/taiwan-card-rewards-skill/card-rewards-ledger/workflows/ledger-tools-specification.md#23-remaining_caps) |
+| `record_event_reward` | 記帳連鎖 | write | 伺服器端重算資格並記錄跨事件（如儲值後扣款）連鎖回饋 | [記帳規格](file:///Users/hankyin/Practice/taiwan-card-rewards-mcp/docs/taiwan-card-rewards-skill/card-rewards-ledger/workflows/ledger-tools-specification.md#24-record_event_reward) |
+| `reverse_event_reward` | 記帳連鎖 | write | 依明確退款/反轉關聯原子撤銷先前已入帳的事件回饋 | [記帳規格](file:///Users/hankyin/Practice/taiwan-card-rewards-mcp/docs/taiwan-card-rewards-skill/card-rewards-ledger/workflows/ledger-tools-specification.md#25-reverse_event_reward) |
 
-`candidates` 是單一、統一的陣列：每個 candidate 的 `kind` 是 `direct_card`（直接刷卡）或 `payment_path`（跨錢包/多層中介的付款路徑，如信用卡→儲值錢包→商家）。同一次 `recommend` 呼叫就會同時比較兩種候選並排序，不需要再呼叫任何額外的路徑專用 tool。
+---
 
-外幣交易由 Agent 自行取得目前匯率，直接以單一 `fx` snapshot 附在 intent 上：
+## 3. 全域架構規則與呼叫鐵律 (Global Invariants)
 
-```json
-{
-  "merchant": { "rawStatement": "示例商家", "country": "JP" },
-  "amount": { "amountMinor": 10000, "currency": "JPY" },
-  "channel": "in_store",
-  "fx": {
-    "id": "fx_illustrative",
-    "baseCurrency": "JPY",
-    "quoteCurrency": "TWD",
-    "ratePpm": 220000,
-    "capturedAt": "2026-09-06T07:00:00Z",
-    "provider": "Example Bank",
-    "rateType": "card_scheme",
-    "sourceUrl": "https://bank.example/fx"
-  },
-  "limit": 10
-}
-```
+全域調用工具時，Agent 必須恪遵以下核心約束：
 
-`fx` 一旦通過幣別配對與新鮮度檢查（且 actual 情境下不是 `mid_market`）就會被直接信任套用，沒有額外的「政策」或「觀測值儲存」層——不需要先呼叫任何 FX 專用 tool 才能使用。跨路徑報價可用 `routeFacts: [{"routeId":"route_illustrative","edgeId":"edge_illustrative","fx":{...}}]` 針對特定 route/edge 提供更精確的匯率；同一 route/edge scope 不可重複。若同時提供籠統的 `fx` 與精確的 `routeFacts`，`routeFacts` 優先，`fx` 只作為找不到精確匹配時的 fallback（此時對應 candidate 的 `fxEstimate.status` 會標成 `estimated_fallback`）。
+### 3.1 欄位命名與自動適配
+- **標準命名**：以公開 Schema 定義之 **camelCase** 為準（如 `idempotencyKey`, `observedAt`, `asOfUtc`）。
+- **寬容相容**：MCP Adapter 在入口層會自動將 `snake_case` 映射轉換為 camelCase；但**嚴禁在同一物件中混用兩種拼法**。
+- **封閉物件檢查**：所有工具一律拒絕未公開欄位，傳入多餘屬性將立即觸發 `INVALID_INPUT` 或 fail-closed。
 
-Intent recommendation 預設每頁 10 筆；一般流程使用 `limit` + 1-based `page`、送回的
-`resultVersion` 與相同
-`resultVersion` 續查，`cursor/nextCursor` 僅保留給 legacy。只有 `coverage.explorationComplete` 為 true 時，
-`coverage.total` 才是完整總數。
+### 3.2 零敏感憑證鐵律 (Zero Sensitive Data)
+- **嚴禁卡號與機敏個資**：全系統禁止接收或存儲信用卡號 (PAN, 13~19 位連續數字)、CVV/CVC、OTP、銀行帳密、Cookie 或 Token。卡片僅以 `cardId`、`last4` 與卡名識別；帳戶僅以 opaque `id` 與 `providerId` 識別。
+- **禁絕多租戶洩漏鍵**：嚴禁在 Payload 中傳入 `ownerUser`、`owner_user`、`userId` 或 `user_id`，使用者身分由伺服器認證上下文嚴格控管。
 
-若要單獨篩選卡片，使用 `cardIds`；若要限制路徑搜尋範圍，使用 `routeIds`。這兩個欄位是選填的縮小條件，不是必要的前置查詢。
+### 3.3 信任模型與伺服器端重算防線
+- **自報事實 (Agent-Asserted Facts)**：匯率快照 (`fx`)、資格事實 (`eligibilityFacts`) 與證據關聯 (`evidenceIds`) 採信任自報機制，通過型別與時效驗證後即套用，不需要前置呼叫額外的存儲工具。
+- **伺服器端權威核算**：在 `record_event_reward` 與 `record_transaction` 中，回饋金額與累積上限一律由伺服器端嚴格重算，Agent 無法自行偽造 `matched` 或規避上限。
+- **嚴格退款關聯**：退款或反轉（`reverse_event_reward` / `record_transaction` with refund）必須明確關聯至**唯一一筆已存在的原交易**，嚴禁孤立退款。
 
-若付款路徑上的規則要求 prerequisite/stacking 資格（例如「使用者是金卡會員」），用 `eligibilityFacts: [{"factKey":"user.membership","value":"gold"}]` 直接在同一次 `recommend` 呼叫裡提供；這些事實由 Agent 自報並直接信任，同一個 `factKey`（依 `cardId` 區分）不可提供互相衝突的值，否則整體回應會 fail-closed 成 `needs_review`。
+---
 
-Response 中每個 candidate 的 `fxEstimate.status` 可能是 `estimated`（有精確的 routeFacts 匹配）、`estimated_fallback`（用籠統的 `fx` 做貨幣對匹配，不是精確的 per-edge fact）、`stale_estimate`（套用的 fx 已超過新鮮度視窗）或 `unavailable`（外幣規則需要 fx 但完全沒有可用資料）。直接刷卡且 Agent 已在本次呼叫提供 `fx` 時不會有 `fxEstimate` 標註——Agent 本來就知道自己提供了什麼。
+## 4. 全域封閉枚舉對照表 (Closed Enums Index)
 
-## Route、capability 與 account payloads
-
-`register_payment_account` 接受 opaque provider identity，不接受帳號或憑證：
-
-```json
-{
-  "account": {
-    "providerId": "wallet_illustrative",
-    "kind": "wallet_balance",
-    "displayName": "Wallet (illustrative)",
-    "status": "active",
-    "observedAt": "2026-09-06T07:00:00Z",
-    "evidenceIds": ["ev_official_illustrative"],
-    "confirmation": { "confirmedAt": "2026-09-06T07:05:00Z", "confirmedBy": "user" },
-    "idempotencyKey": "account-onboard-illustrative"
-  }
-}
-```
-
-`upsert_payment_route` 接受 `route`，含 `layers`、`funding`、`observedAt`、`idempotencyKey`；要參與路徑搜尋還需要 `nodes` 和 `edges`。node 的 kind 是 `funding_source`、`wallet_balance`、`payment_service`、`acceptance_network`、`merchant` 之一。edge 的 transition 是 `card_authorization`、`account_debit`、`wallet_top_up`、`wallet_debit`、`service_to_acceptance`、`merchant_settlement`、`direct_settlement`、`split_tender` 之一，且必須指向已存在的 node。edge 的 `direction` 可為 `inbound` 或 `outbound`，須依有證據的資金流向填寫；不可自行反轉或推測。`evidenceIds` 必須非空但直接信任 Agent 自帶的內容，不需要另外呼叫任何 evidence tool 先行提交。`provenance: 'model_fixture'` 只給測試使用，production 會拒絕。
-
-新 payload 的正規 property name 以 `tools/list` schema 明列的 **camelCase** 為準（例如 `idempotencyKey`、`observedAt`、`edgeId`）。MCP adapter 在每個工具的入口、所有巢狀 object/array 一律接受等價的 snake_case（例如 `idempotency_key`、`observed_at`、`edge_id`）並轉為 internal camelCase；camelCase 也持續支援。不可在同一個 object 同時傳兩種拼法，未知欄位（包含未公開的 `ownerUser`）仍會 fail closed，絕不因此放寬 tenancy 或敏感欄位限制。`id` 是 MCP 產生的 durable route identity，呼叫端只提供穩定的 `idempotencyKey`。route 的 `authority` 必須是 `issuer`、`network`、`wallet`、`merchant`、`secondary`、`community` 或 `user`。
-
-`upsert_payment_capability` 同樣直接信任 Agent 提供的 `evidenceIds`（至少一筆），一旦 `status: 'active'` 就可能被 `recommend` 用來自動產生 planned route（例如「持有信用卡 + 錢包支援」→ 自動組出信用卡儲值進錢包再付款的路徑）。
-
-路徑與能力一旦被 `recommend` 使用，若使用者明確表示該路徑/能力不可用，用相同的 `upsert_payment_route`／未來的等效呼叫把 `status` 改成 `failed`（route）即可，不需要撤銷任何 evidence 紀錄。
-
-## Event reward and durable ledger calls
-
-Event calls use one `event` and one `candidate`; the public event tool additionally requires exactly one `rule` or `chainRule` (a chain also requires bounded `sourceEvents`):
-
-```json
-{
-  "event": {
-    "id": "evt_purchase_illustrative",
-    "kind": "purchase",
-    "amount": { "amountMinor": 10000, "currency": "TWD" },
-    "occurredAt": "2026-09-06T07:10:00Z",
-    "funding": { "kind": "account", "subtype": "wallet_balance", "accountId": "account_illustrative" },
-    "relations": { "funded_by": ["evt_topup_illustrative"] }
-  },
-  "sourceEvents": [
-    {
-      "id": "evt_topup_illustrative",
-      "kind": "top_up",
-      "amount": { "amountMinor": 10000, "currency": "TWD" },
-      "occurredAt": "2026-09-06T07:00:00Z",
-      "funding": { "kind": "account", "subtype": "linked_bank_account", "accountId": "bank_illustrative" }
-    }
-  ],
-  "chainRule": {
-    "id": "chain_illustrative",
-    "version": "evidence-version-1",
-    "relation": "funded_by",
-    "windowSeconds": 2592000,
-    "sourceRule": { "id": "source-rule", "version": "1", "eventKind": "top_up", "fundingKind": "account", "fundingSubtype": "linked_bank_account" },
-    "targetRule": { "id": "target-rule", "version": "1", "eventKind": "purchase", "fundingKind": "account", "fundingSubtype": "wallet_balance" }
-  },
-  "candidate": {
-    "eventId": "evt_purchase_illustrative",
-    "ruleId": "rule_illustrative",
-    "ruleVersion": "evidence-version-1",
-    "evidenceId": "ev_official_illustrative",
-    "sponsor": "sponsor_illustrative",
-    "benefitGroup": "benefit_illustrative",
-    "eligibility": { "status": "matched", "reasons": [] }
-  },
-  "idempotencyKey": "event-reward-illustrative"
-}
-```
-
-`record_event_reward` recomputes eligibility and stacking server-side; a caller cannot forge `matched`. `reverse_event_reward` is `{event,idempotencyKey}` and requires exactly one explicit refund relation to a recorded event. For card purchase/refund, `record_transaction` takes `{transaction:{cardId,kind,mode,occurredAt,amount,idempotencyKey,...}}`, and actual refunds reference `transaction.refundOfId`.
-
-## 3. 全域封閉枚舉對照表 (Closed Enums Index)
-
-以下為全系統在 Runtime 驗證中嚴格限制的封閉枚舉值域。Agent 在組裝 Payload 時必須精確使用下列小寫或特定字串，嚴禁自創別名：
+以下為全系統在 Runtime 驗證中嚴格限制的封閉枚舉值域。Agent 在組裝 Payload 時必須精確使用下列特定字串，嚴禁自創別名：
 
 | 欄位名稱 (`path`) | 合法枚舉值域 (`enum`) | 說明 |
 |---|---|---|
@@ -179,6 +95,8 @@ Event calls use one `event` and one `candidate`; the public event tool additiona
 | `leaf.kind` | `'benefit'` \| `'exclusion'` | Ingestion 條款種類：加碼優惠或排除條件 |
 | `leaf.disposition` | `'materialized'` \| `'ignored'` \| `'superseded'` | 葉節點歸宿：實體化、忽略不適用、被覆蓋 |
 | `exclusion.target` | `'merchant'` \| `'transaction_fact'` \| `'payment_route'` \| `'payment_method'` | 排除目標層級 |
+| `transitions` | `'card_authorization'` \| `'account_debit'` \| `'wallet_top_up'` \| `'wallet_debit'` \| `'service_to_acceptance'` \| `'merchant_settlement'` \| `'direct_settlement'` \| `'split_tender'` | 支付路徑流轉狀態轉移 |
+| `paymentRouteLayer.kind` | `'merchant_loyalty'` \| `'merchant_acceptance'` \| `'consumer_app'` \| `'payment_provider'` \| `'wallet'` \| `'interoperability_scheme'` \| `'intermediate_provider'` \| `'card_network'` \| `'card_issuer'` | 支付路由層級角色 |
 | `capPool.metric` | `'spend'` \| `'reward'` \| `'transaction_count'` | Cap 額度度量：累積消費、累積回饋、交易筆數 |
 | `capPool.period` | `'calendar_month'` \| `'billing_cycle'` \| `'quarter'` \| `'year'` \| `'campaign'` | Cap 週期：日曆月、帳單週期、季、年、活動期間 |
 | `rule.status` | `'candidate'` \| `'active'` \| `'stale'` \| `'superseded'` \| `'needs_review'` \| `'unknown'` | 優惠規則狀態 |
@@ -188,7 +106,11 @@ Event calls use one `event` and one `candidate`; the public event tool additiona
 
 ---
 
-## 4. 廢棄工具警告 (Deprecated Tools)
+## 5. 廢棄工具警告 (Deprecated Tools)
 
-`upsert_fx_policy`、`list_fx_policies`、`upsert_fx_observation`、`list_fx_observations`、`recommendation_preflight`、`rank_cards`、`recommend_payment_paths_v1`、`record_event_reward_v1`、`record_event_reward_v2`、`reverse_event_reward_v1` 這些名稱已經完全從 `tools/list` 與 dispatch 層移除，不是隱藏別名，呼叫會直接得到 `TOOL_NOT_FOUND`。不要在任何新的 Skill 範例或整合程式碼裡引用它們。
+以下名稱已徹底從合約與 Dispatch 層完全移除，呼叫將直接回傳 `TOOL_NOT_FOUND`，嚴禁在任何代碼或對話中引用：
+- ❌ **外幣舊工具**：`upsert_fx_policy`、`list_fx_policies`、`upsert_fx_observation`、`list_fx_observations`（已整合為 `recommend` inline `fx` 快照）。
+- ❌ **推薦前置/排序舊工具**：`recommendation_preflight`（已由 `recommend` 整合）、`rank_cards`（請改用 `calculate_reward`）。
+- ❌ **歷史版本後綴別名**：`recommend_payment_paths_v1`、`record_event_reward_v1`、`record_event_reward_v2`、`reverse_event_reward_v1`（請一律使用無版本後綴之正式名稱）。
+
 
