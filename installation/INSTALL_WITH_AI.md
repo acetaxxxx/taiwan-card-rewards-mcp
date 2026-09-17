@@ -62,9 +62,9 @@ Complete these steps:
 6. Tell me whether the host must be restarted or its MCP/skills reloaded. Do
    not claim the installation is active until reload has happened.
 7. After reload, initialize the MCP server, confirm
-   `serverInfo.name = taiwan_card_rewards_mcp`, confirm version 0.14.0, and
-   confirm tools/list exposes the complete 20-tool contract including
-   `recommend` and `list_transactions`.
+   `serverInfo.name = taiwan_card_rewards_mcp`, confirm version 0.16.0, and
+   confirm tools/list exposes the complete 28-tool contract including
+   `recommend`, `list_transactions`, and ingestion tools.
 8. Run a read-only smoke check with list_cards. Do not create cards, offers,
    routes, transactions, or benefit records during installation.
 9. Report the files changed, installed skill path, data directory, handshake

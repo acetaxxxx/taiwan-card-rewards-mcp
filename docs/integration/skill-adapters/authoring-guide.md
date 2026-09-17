@@ -133,7 +133,7 @@ every mutation has an affirmative user confirmation immediately before it.
 ## 6. Final review checklist
 
 - MCP package/version is pinned to a reviewed release and the handshake checks
-  the complete 20-tool manifest and every nested tool schema.
+  the complete 28-tool manifest and every nested tool schema.
 - MCP errors stop the flow; no fallback calculator, anonymous scope, or default
   data store is introduced.
 - Official sources are preferred and third-party material remains candidate

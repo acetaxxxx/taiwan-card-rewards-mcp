@@ -1,7 +1,7 @@
 # 使用者安裝與 Skill 分發標準作業程序 (SOP)
 
 **文件狀態**：正式營運與分發規範 (Normative Distribution & Installation SOP)
-**適用範圍**：canonical 20-tool MCP contract（release tag 僅供部署管理）
+**適用範圍**：canonical 28-tool MCP contract（release tag 僅供部署管理）
 **語言**：繁體中文
 **公開 contract**：以 MCP 的 `tools/list` 為準；bundle 內的 [`mcp-tools.md`](../docs/taiwan-card-rewards-skill/references/mcp-tools.md) 是可讀的配套指引。
 
@@ -18,7 +18,7 @@
 │  - docs/taiwan-card-rewards-skill/references/ (公開 contract)            │
 │  - docs/taiwan-card-rewards-skill/card-rewards-{recommendation,          │
 │    evidence,ledger}/ (任務 skill)                                        │
-│  - canonical contract：20 tools | 語系：繁體中文 (zh-Hant-TW)             │
+│  - canonical contract：28 tools | 語系：繁體中文 (zh-Hant-TW)             │
 └────────────────────────────────────┬────────────────────────────────────┘
                                      │
            ┌─────────────────────────┴─────────────────────────┐
@@ -146,10 +146,10 @@ Agent 在接收到安裝或初始化指令時，應依照以下 Checklist 進行
 - [ ] 2. 伺服器握手 (Handshake Validation)
       - 發送 `initialize` JSON-RPC 請求。
       - 驗證回應中的 `protocolVersion` 為 `2024-11-05`。
-      - 驗證 `serverInfo.name` 為 `taiwan_card_rewards_mcp`，`serverInfo.version` 為 `0.14.0` (或更新相容版本)。
+      - 驗證 `serverInfo.name` 為 `taiwan_card_rewards_mcp`，`serverInfo.version` 為 `0.16.0` (或更新相容版本)。
 
-- [ ] 3. 20 項 canonical 公開工具檢核 (20-Tool Contract Verification)
-      - 發送 `tools/list` 請求，確認 [`mcp-tools.md`](../docs/taiwan-card-rewards-skill/references/mcp-tools.md) 的 20 項工具完整存在：
+- [ ] 3. 28 項 canonical 公開工具檢核 (28-Tool Contract Verification)
+      - 發送 `tools/list` 請求，確認 [`mcp-tools.md`](../docs/taiwan-card-rewards-skill/references/mcp-tools.md) 的 28 項工具完整存在：
         [ ] recommend (唯讀，merchant-first intent，同時回傳直接刷卡與多層路徑候選)
         [ ] calculate_reward (唯讀，純數學計算)
         [ ] resolve_merchant (唯讀，實體消歧義)
@@ -170,6 +170,14 @@ Agent 在接收到安裝或初始化指令時，應依照以下 Checklist 進行
         [ ] list_transactions (唯讀，依 occurred_at/recorded_at 查詢交易與分頁投影)
         [ ] record_event_reward (寫入，event rule/chain eligibility)
         [ ] reverse_event_reward (寫入，explicit event refund reversal)
+        [ ] create_ingestion (寫入，建立或恢復 ingestion draft)
+        [ ] get_ingestion (唯讀，檢視 ingestion 狀態與下一個 action)
+        [ ] submit_ingestion_source (寫入，提交不可變 source capture)
+        [ ] submit_ingestion_manifest (寫入，提交完整來源 manifest)
+        [ ] correct_ingestion_manifest (寫入，修正 manifest revision)
+        [ ] submit_benefit_leaf (寫入，提交並 materialize 候選權益葉節點)
+        [ ] submit_exclusion_leaf (寫入，提交共用排除條件葉節點)
+        [ ] finalize_ingestion (寫入，原子啟用完成之 ingestion 並回傳 proof)
 
 - [ ] 4. 聯通性健康檢查 (Connectivity Ping)
       - 呼叫 `list_cards`，預期回傳空陣列 `[]`（初始狀態）或已登記卡片。

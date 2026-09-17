@@ -10,7 +10,7 @@ Uses `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, and `wo
 
 ### Usage guide
 
-For MCP server startup, 20-tool workflows, fail-closed statuses, and sensitive-field invariants, see `docs/usage/ai-agent-usage-guide.md`. For lightweight or lower-reasoning runtime models, see `docs/taiwan-card-rewards-skill/references/low-reasoning-playbook.md`.
+For MCP server startup, 28-tool workflows, fail-closed statuses, and sensitive-field invariants, see `docs/usage/ai-agent-usage-guide.md`. For lightweight or lower-reasoning runtime models, see `docs/taiwan-card-rewards-skill/references/low-reasoning-playbook.md`.
 
 ### Domain docs
 

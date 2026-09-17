@@ -24,15 +24,39 @@ claim: { factKey: "user.membership", value: "gold", version: "terms-1" }
 Agent 應先走 evidence/research 流程，將官方 snapshot/rule 交給 `upsert_offer`。
 Eligibility fact（例如 Gold 會員資格）本身是 self-asserted：只要 Agent 提供
 `factKey`/`value`（見下），系統直接信任並用來評估 predicate，不需要另外呼叫
-任何 evidence 提交 tool 先行核准——現行 27-tool public surface 也沒有這種
+任何 evidence 提交 tool 先行核准——現行 28-tool public surface 也沒有這種
 tool，不能在文件中假裝它存在。同一個 `factKey`（同一張卡）出現兩個不同的
 `value` 會被視為衝突並導致 `needs_review`，這是唯一剩下的內建保護。
 
 ## 2. Card predicate 用 eligibility fact
 
-`recommend` 的 merchant-first intent 目前沒有暴露 `context`/`eligibilityFacts`
-欄位；需要精確控制 predicate 輸入時改用 `calculate_reward`（單一 rule 試算，
-接受完整 `context`）：
+`recommend` 的 merchant-first intent 直接支援頂層 `eligibilityFacts`（亦可在 `supplementalFacts.eligibilityFacts` 提供）；若需要對單一 rule 進行純試算，亦可改用 `calculate_reward`（接受完整 `context.eligibilityFacts`）：
+
+### A. 使用 `recommend` 提供 eligibility fact
+
+```json
+{
+  "merchant": "示例商家",
+  "amount": { "amountMinor": 100000, "currency": "TWD" },
+  "country": "TW",
+  "channel": "online",
+  "paymentMethod": "direct_card",
+  "eligibilityFacts": [
+    {
+      "id": "fact_gold_illustrative",
+      "version": "terms-1",
+      "cardId": "card_illustrative",
+      "factKey": "user.membership",
+      "value": "gold",
+      "validFrom": "2026-01-01T00:00:00Z",
+      "validTo": "2026-12-31T23:59:59Z"
+    }
+  ],
+  "limit": 10
+}
+```
+
+### B. 使用 `calculate_reward` 精確控制單一 rule 試算
 
 ```json
 {
@@ -79,16 +103,14 @@ tool，不能在文件中假裝它存在。同一個 `factKey`（同一張卡）
 若 rule 沒有明確 predicate/combination/cap，或 fact 已過期，MCP 應回
 unknown/needs_review，而不是把 Gold bonus 當成 guaranteed。
 
-## 3. Payment-path eligibility fact 尚未公開
+## 3. Payment-path stacking 與 eligibility fact
 
-`recommendPaymentPaths` 內部（`upsert_payment_route` 建立的路徑進行 stacking
-prerequisite 判斷時）支援同樣的 `eligibilityFacts` 機制，一樣是直接信任、
-不需要先提交 evidence。但 `recommend` 目前唯一的公開 intent schema
-（`merchant`/`amount`/`fx`/`routeFacts`/…）沒有暴露 `eligibilityFacts` 欄位，
-所以透過公開 MCP 呼叫，暫時無法對 payment-path 的 stacking prerequisite 提供
-這類 fact。需要此能力的呼叫者應回報這是目前的 schema 缺口，改用不依賴
-eligibility fact 的 route，或等待 `recommend` 的 intent schema 擴充；不要
-移除 fact 後聲稱 Gold 已判定。
+`recommend` 內部在進行 payment-path stacking prerequisite 判斷時，支援相同的
+`eligibilityFacts` 機制，一樣是直接信任自報 facts、不需要先行提交 evidence。
+在呼叫公開 `recommend` 工具時，可在頂層 `eligibilityFacts` 傳入包含 `factKey`、`value`、
+`validFrom`、`validTo` 的條款事實陣列（例如 Gold 會員身份）。同一個 `factKey`（同一張卡）
+不可提供互相衝突的數值，否則整體回報 `needs_review`。若未提供必要 fact，路徑評估
+會 fail-closed 回傳 `needs_review` 或 `blocked`，要求補件；不要移除 fact 後聲稱 Gold 已判定。
 
 ## 4. Valuation、FX 與 fee 的 fail-closed recovery
 
@@ -107,7 +129,7 @@ version: valuation-terms-1
 evidenceId: ev_valuation_official_illustrative
 ```
 
-目前 public 27-tool surface 沒有提交此 valuation snapshot 的工具；若 durable
+目前 public 28-tool surface 沒有提交此 valuation snapshot 的工具；若 durable
 store 也沒有已驗證 snapshot，payment-path candidate 必須帶
 `requiredActions: ["provide a validated valuation snapshot for each reward unit"]`
 並為 `blocked`/`needs_review`。Agent 不可用「1 point = NT$1」臆測。
@@ -142,7 +164,7 @@ selected DCC 的明確 currency。若費用 currency 仍不能用該 event 的 F
 | Blocker | 補救 | 可完成標準 |
 |---|---|---|
 | Gold fact missing/stale/conflicting | 重新確認官方條款後，直接以正確的 `factKey`/`value` 重新提供 | server 能重算 predicate，status 不再 unknown |
-| payment-path eligibility fact 未公開 | 改用不依賴該 fact 的 route，或等待 `recommend` intent schema 擴充 | `recommend` 公開 `eligibilityFacts` 前先明示這個限制 |
+| payment-path eligibility fact 缺失或衝突 | 在 `recommend` 頂層 `eligibilityFacts` 直接提供一致的自報 facts | server 能驗證 stacking prerequisite，不再 fail-closed |
 | native valuation missing | 提供已接受的 official valuation snapshot（目前缺 public tool） | reward units 可轉到比較 currency |
 | FX/fee missing | 提供完整 `fx` 快照與費用來源、期間、currency | `feeTotal`/`netValue` 可重算 |
 | stacking/cap ambiguous | 提交條款明示的 combination mode、group、cap pool | additive/replace/best_of 等決策可重現 |

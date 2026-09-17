@@ -230,14 +230,14 @@ selection is needed. Do not make a separate `resolve_merchant` call first.
 3. Call `upsert_offer` directly only for legacy/non-ingestion offer writes, with
 the extracted rule and required user confirmation. A community page is lead-only,
 not authoritative activation evidence.
-3. For foreign currency, follow section B above — supply `fx` inline, never
+4. For foreign currency, follow section B above — supply `fx` inline, never
 guess a rate or fall back to 1:1.
-4. If fee currency cannot be converted, or a reward unit lacks an authoritative
+5. If fee currency cannot be converted, or a reward unit lacks an authoritative
 valuation snapshot, present blocked/unknown and ask for recovery.
 
 ## F. Retired names
 
-New agents call only the 25 names in `mcp-tools.md`. `upsert_fx_policy`,
+New agents call only the 28 names in `mcp-tools.md`. `upsert_fx_policy`,
 `list_fx_policies`, `upsert_fx_observation`, `list_fx_observations`,
 `recommendation_preflight`, `recommend_payment_paths_v1`,
 `record_event_reward_v1`, `record_event_reward_v2`, and `reverse_event_reward_v1`

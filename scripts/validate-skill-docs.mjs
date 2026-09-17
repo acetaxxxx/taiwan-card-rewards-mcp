@@ -38,9 +38,27 @@ function inspect(value, source) {
   }
 }
 
+const toolCountPatterns = [
+  /\b(\d+)-tool\b/gi,
+  /\b(\d+)\s+tools\b/gi,
+  /(\d+)\s*個工具/g,
+  /(\d+)\s*項工具/g,
+  /\b(\d+)\s*names in `mcp-tools\.md`/gi,
+];
+
 for (const file of files) {
   const source = relative(root, file);
   const markdown = readFileSync(file, 'utf8');
+  for (const pattern of toolCountPatterns) {
+    for (const match of markdown.matchAll(pattern)) {
+      const count = parseInt(match[1], 10);
+      if (count !== toolNames.length) {
+        throw new Error(
+          `Tool count drift in ${source}: found "${match[0]}" (${count}), expected runtime mcpTools count of ${toolNames.length}`
+        );
+      }
+    }
+  }
   for (const match of markdown.matchAll(/```(?:json)?\s*\n([\s\S]*?)```/g)) {
     try { inspect(JSON.parse(match[1]), source); } catch (error) {
       if (error instanceof SyntaxError) continue;
