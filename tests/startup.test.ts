@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { assertToolDataDir, parseStartupArgs, StartupContractError } from '../src/index.js';
+import { assertToolDataDir, getHelpText, parseStartupArgs, StartupContractError } from '../src/index.js';
 
 describe('startup contract', () => {
   it('requires and canonicalizes an existing non-root data directory', () => {
@@ -39,4 +39,19 @@ describe('startup contract', () => {
     expect(() => parseStartupArgs(['--data-dir', file])).toThrowError(/directory/);
     fs.rmSync(parent, { recursive: true, force: true });
   });
+  it('supports --help and -h flags with getHelpText', () => {
+    expect(parseStartupArgs(['--help'])).toEqual({ help: true });
+    expect(parseStartupArgs(['-h'])).toEqual({ help: true });
+    expect(parseStartupArgs(['--data-dir', '/nonexistent/path', '--help'])).toEqual({ help: true });
+    expect(parseStartupArgs(['-h', '--data-dir', '/nonexistent/path'])).toEqual({ help: true });
+    const help = getHelpText();
+    expect(help).toContain('Usage:');
+    expect(help).toContain('--data-dir <path>');
+    expect(help).toContain('--user <label>');
+    expect(help).toContain('-h, --help');
+    expect(help).toContain('JSON-RPC');
+    expect(help).not.toContain('--shared-owner');
+    expect(help).not.toContain('--shared-bridge');
+  });
 });
+

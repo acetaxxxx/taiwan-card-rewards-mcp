@@ -1,55 +1,118 @@
-# 初次使用與卡片登錄工作流程 (Card Onboarding & Benefit Enrollment SOP)
+# 卡片登錄與權益設定標準作業程序 (Card Onboarding & Benefit Enrollment SOP)
 
-本工作流程定義當使用者首次使用或新增持有卡片時，Agent 應遵循的漸進式揭露（Progressive Disclosure）引導、安全元資料收集、優惠研究分流與登錄驗證流程。
+本 SOP 規範當使用者宣告持有信用卡、新增卡片，或需要設定/切換卡片權益方案時，Agent 應遵循的結構化登錄步驟。
 
 ---
 
-## 1. 核心原則與安全防線
+## 本 SOP 使用工具速查 (Scoped Tools)
+
+| 工具 | 類型 | 本 SOP 中的用途 | 關鍵必填欄位 |
+|---|:---:|---|---|
+| `register_card` | write | 登錄每一張持有卡片的描述符 | `card.{id, issuer, productName}` |
+| `list_cards` | read | 驗證登錄結果，確認持卡清冊正確 | `limit`, `page`, `projection` |
+| `upsert_user_benefit_status` | write | 記錄多方案卡片的目前啟用方案 | `input.{kind, cardId, benefit, completedAt, effectiveFrom, idempotencyKey, confirmation}` |
+
+> [!NOTE]
+> 詳細工具 Property 結構與 JSON 骨架，請參考 [條款與權益專屬工具規格](evidence-tools-specification.md)。
+
+---
+
+
+
+## 1. 觸發條件 (Trigger Conditions)
+
+進入本 SOP 的時機：
+- 使用者說「我有 XX 卡」、「我新辦了一張 YY 卡」
+- `recommend` 回傳 `requiredActions` 中包含 `action: "bind_payment_method"` 或 `action: "ask_user"` 且 `path` 涉及卡片持有事實
+
+---
+
+## 2. 安全元資料白名單 (Safe Metadata Allowlist)
 
 > [!CAUTION]
-> **嚴格禁止索取或傳輸敏感金融欄位 (Zero Sensitive Credentials)**：
-> 1. ❌ **禁止真實完整卡號 (PAN)**：僅允許記錄卡片識別別名（如 `fubon_j_cash`, `cathay_cube`）或卡號末四碼 (`last4: "1234"`)。
-> 2. ❌ **禁止卡片安全碼 (CVV/CVC)**：嚴禁索取或儲存。
-> 3. ❌ **禁止簡訊認證碼 (OTP)**：嚴禁索取或轉發。
-> 4. ❌ **禁止網銀帳密與 Token**：嚴禁索取銀行登入憑證。
-> 5. ❌ **禁止使用者自訂 user_id 覆寫**：租戶身分完全由 MCP 啟動參數與宿主環境鎖定。
+> **嚴格禁止索取或傳輸敏感金融欄位**：
+> - ❌ 完整卡號 (PAN)、安全碼 (CVV/CVC)、簡訊認證碼 (OTP)、網銀帳密
 
-### 允許收集的安全元資料 (Safe Metadata Allowlist)
-- **卡片唯一標識符** (`id`): 英文數字或底線識別碼，例如 `fubon_j_points`、`taishin_gogo`。
-- **發卡機構** (`issuer`): 例如「台北富邦銀行」、「國泰世華銀行」、「台新銀行」。
-- **卡片產品名稱** (`productName`): 例如「富邦 J 卡」、「CUBE 卡」、「@GoGo 卡」。
-- **發卡國家/地區** (`country`): 選填，ISO 3166-1 alpha-2 大寫代碼（如 `"TW"`）。
-- **發卡組織** (`network`): 選填，`"VISA"`, `"Mastercard"`, `"JCB"`, `"American Express"`。
-- **卡號末四碼** (`last4`): 選填，四位數字字串（如 `"5678"`）。
-- **結帳日** (`billingCycleDay`): 選填，整數 1~31。
-- **所屬時區** (`timezone`): 選填，合法 IANA 時區（如 `"Asia/Taipei"`）。
+**允許收集的欄位**：
+| 欄位 | 說明 | 必填 |
+|---|---|:---:|
+| `id` | 英文數字識別碼，如 `fubon_j_cash`、`cathay_cube` | ✅ |
+| `issuer` | 發卡機構，如「台北富邦銀行」 | ✅ |
+| `productName` | 卡片商品名稱，如「富邦 J 卡」 | ✅ |
+| `network` | 發卡組織：`VISA`、`Mastercard`、`JCB`、`American Express` | 選填 |
+| `country` | ISO 3166-1 alpha-2，如 `TW` | 選填 |
+| `last4` | 卡號末四碼字串，如 `"5678"` | 選填 |
+| `billingCycleDay` | 結帳日，整數 1~31 | 選填 |
+| `timezone` | IANA 時區，如 `Asia/Taipei` | 選填 |
 
 ---
 
-## 2. 登錄對話與作業步驟 (Step-by-Step SOP)
+## 3. 登錄執行演算法 (Onboarding Algorithm)
 
+```text
+// 步驟 1：確認安全元資料
+向使用者確認卡片清冊（卡片名稱、結帳日）
+告知：「我們只需要以上基本資料，不會索取卡號或密碼」
+
+// 步驟 2：逐張呼叫 register_card
+FOR EACH card IN 使用者持有卡片:
+    register_card({ card: { id, issuer, productName, network, last4, country, billingCycleDay, timezone } })
+
+    SWITCH response:
+        CASE { success: true, status: "registered" }:
+            繼續下一張
+        CASE { success: false } 或 error:
+            回報錯誤訊息，詢問使用者是否修正 id 衝突或欄位問題
+            不要繼續登錄後續卡片直到問題解決
+
+// 步驟 3：呼叫 list_cards 驗證持卡清冊
+list_cards({ limit: 10, page: 1, projection: "summary" })
+向使用者確認登錄結果是否符合預期
+
+// 步驟 4：詢問是否要同步查詢最新優惠（明確分流）
+詢問使用者：「要同步查這些卡的最新官方優惠規則嗎？」
+
+    IF 使用者回答「要」:
+        → 跳出本 SOP，進入 [官方條款研究與優惠規則提交 SOP](research-official-source.md)
+
+    IF 使用者回答「不用」:
+        繼續步驟 5
+
+// 步驟 5：詢問是否有多方案權益切換（選填，但主動詢問）
+IF 卡片具備多方案切換機制（如 CUBE 卡、Richart 等）:
+    詢問使用者：「請問目前 App 設定的是哪一個方案？」
+
+    取得使用者確認後呼叫:
+    upsert_user_benefit_status({
+        input: {
+            kind: "card_switch",
+            action: "record",
+            cardId: 卡片ID,
+            timezone: "Asia/Taipei",
+            completedAt: 使用者確認時間（ISO 8601）,
+            effectiveFrom: 方案生效時間,
+            benefit: 方案識別碼（如 "digital_play"）,
+            sourceUrl: 銀行官方說明網頁 URL,
+            sourceSnapshotAt: 查核時間,
+            ruleVersion: 版本標識（如 "2026.09.01"）,
+            confirmation: {
+                confirmedBy: "user_explicit_statement",
+                confirmedAtUtc: 確認時間 UTC,
+                completed: true
+            },
+            idempotencyKey: "benefit_<cardId>_switch_<日期>_001"
+        }
+    })
+
+// 步驟 6：完成回報
+回報使用者所有登錄的卡片與方案設定摘要
 ```
-[使用者宣告持卡] ──► [Agent 收集安全元資料] ──► [呼叫 register_card]
-                                                    │
-                                                    ▼
-[列出卡片驗證 list_cards] ◄┘
-       │
-       ├── 使用者要查最新優惠？ ──► [執行 Research SOP 進行雙軌檢索 + 商家解析 + upsert_offer]
-       │                                      │
-       └── 使用者只要登記卡片 ────────────────┘
-                                               ▼
-                                   [確認權益方案/活動]
-                                               │
-                                               ▼
-                          [呼叫 upsert_user_benefit_status] ──► [Onboarding 完成]
-```
 
-### 步驟 1：詢問並整理持卡安全清冊
-當使用者表示「我有富邦 J 卡和國泰 CUBE 卡」時，Agent 僅詢問必要別名與結帳日，絕不詢問卡號。
+---
 
-### 步驟 2：呼叫 `register_card` 寫入卡片描述
-針對每一張卡片發起工具呼叫：
+## 4. 標準 Payload 範例
 
+### `register_card` 呼叫
 ```json
 {
   "card": {
@@ -65,43 +128,7 @@
 }
 ```
 
-**MCP 回傳預期**：
-```json
-{
-  "success": true,
-  "cardId": "cathay_cube",
-  "status": "registered"
-}
-```
-
-### 步驟 3：呼叫 `list_cards` 驗證持卡清冊
-完成登記後，呼叫 `list_cards` 進行確認：
-```json
-{
-  "limit": 10,
-  "page": 1,
-  "projection": "summary"
-}
-```
-
-### 步驟 4：詢問是否要同步研究這些卡的優惠（選填，但必須明確分流）
-
-登記信用卡本身**不會自動建立商家或優惠 rule**。完成 `list_cards` 後，Agent 應詢問：
-
-> 「要不要現在查這些卡的最新官方優惠？如果要查，我會先透過官方網站與社群整理站進行交叉查核；遇到指定商家，會先建立或解析 canonical merchant identity，再寫入 rule。」
-
-- 使用者回答「不用」：進入步驟 5 的權益方案詢問，或直接完成卡片 onboarding。
-- 使用者回答「要」：**必須完整執行 [Research SOP](research-and-evidence-submission.md)**。
-  - 依照 Research SOP 進行雙軌資料查找（官方一手來源 verified + 非官方公開線索 community/secondary 交叉比對）。
-  - 對特定商家執行 Merchant Identity Gate（`resolve_merchant`），取得 `mch_<ULID>` 後再呼叫 `upsert_offer` 提交規則與來源快照。
-  - 若遇衝突或過期資訊，一律採 **Fail-Closed** 原則向使用者確認。
-
-### 步驟 5：主動引導並登錄動態權益方案（選填）
-若卡片具備多權益切換機制（如國泰 CUBE 卡方案切換、台新 Richart 扣繳加碼），向使用者確認目前已啟用的方案：
-- Agent：「請問您的國泰 CUBE 卡目前 App 設定的是哪一個權益方案？（如：玩數位、樂響購、趣旅行、集精選）」
-- 使用者：「玩數位」。
-
-取得使用者明確確認後，呼叫 `upsert_user_benefit_status`：
+### `upsert_user_benefit_status` 呼叫（方案切換）
 ```json
 {
   "input": {
@@ -109,18 +136,18 @@
     "action": "record",
     "cardId": "cathay_cube",
     "timezone": "Asia/Taipei",
-    "completedAt": "2026-09-06T09:00:00+08:00",
-    "effectiveFrom": "2026-09-06T00:00:00+08:00",
+    "completedAt": "2026-09-17T09:00:00+08:00",
+    "effectiveFrom": "2026-09-17T00:00:00+08:00",
     "benefit": "digital_play",
     "sourceUrl": "https://www.cathaybk.com.tw/cathaybk/personal/product/credit-card/cards/cube/",
-    "sourceSnapshotAt": "2026-09-06T00:00:00Z",
+    "sourceSnapshotAt": "2026-09-17T00:00:00Z",
     "ruleVersion": "2026.09.01",
     "confirmation": {
       "confirmedBy": "user_explicit_statement",
-      "confirmedAtUtc": "2026-09-06T09:00:00Z",
+      "confirmedAtUtc": "2026-09-17T01:00:00Z",
       "completed": true
     },
-    "idempotencyKey": "benefit_cube_switch_20260906_001"
+    "idempotencyKey": "benefit_cathay_cube_switch_20260917_001"
   }
 }
 ```

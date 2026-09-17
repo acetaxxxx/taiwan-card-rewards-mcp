@@ -454,7 +454,12 @@ function resolveFieldFact(field: string, tx: TransactionTuple, context: Evaluati
       }
 
       if (matchingFacts.length > 0) {
-        return { kind: 'missing', reason: `missing ${field}`, diagnostic: diagnostic('missing_required_fact', field, [field], 'ask_user', `缺少 ${field} 的有效值`) };
+        const isStale = matchingFacts.some((f) => f.validTo && Number.isFinite(Date.parse(f.validTo)) && checkTime > Date.parse(f.validTo));
+        return {
+          kind: 'missing',
+          reason: `missing ${field}`,
+          diagnostic: diagnostic(isStale ? 'stale_fact' : 'missing_required_fact', field, [field], isStale ? 'refresh_user_facts' : 'ask_user', isStale ? `${field} 已過期，需重新確認` : `缺少 ${field} 的有效值`),
+        };
       }
     }
 
@@ -662,6 +667,12 @@ export function evaluateOffer(
   }
   if (rule.status !== 'active') {
     return { ...base, status: rule.status === 'stale' ? 'stale' : 'needs_review', ruleId: rule.id, unknownReasons: [`rule status is ${rule.status}`], diagnostics: [diagnostic(rule.status === 'stale' ? 'stale_rule' : 'needs_review', 'rule.status', ['rule confirmation'], 'refresh_or_confirm_offer')] };
+  }
+  for (const exclusion of rule.sharedExclusions ?? []) {
+    const outcome = evaluatePredicate(exclusion.predicate, tx, context);
+    if (outcome.conflicts.length) return { ...base, status: 'needs_review', ruleId: rule.id, ruleVersion: rule.version, unknownReasons: outcome.conflicts, diagnostics: outcome.diagnostics };
+    if (outcome.missing.length) return { ...base, status: 'unknown', ruleId: rule.id, ruleVersion: rule.version, unknownReasons: outcome.missing, diagnostics: outcome.diagnostics };
+    if (outcome.matched) return { ...base, ruleId: rule.id, ruleVersion: rule.version, matchedExclusions: [exclusion] };
   }
   const trustReasons: string[] = [];
   const source = context.sourceSnapshots?.[rule.sourceSnapshotId];

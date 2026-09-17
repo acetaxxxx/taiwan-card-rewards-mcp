@@ -1,54 +1,100 @@
-# 商家實體消歧義與解析標準作業程序 (Merchant Resolution SOP)
+# 特店消歧義與自訂特店標準作業程序 (Merchant Resolution SOP)
 
-本程序規範 Agent 如何透過 `resolve_merchant` 進行確定性商家辨識，以及遇到歧義（Ambiguity）時的 Fail-Closed 處理流程。
-
----
-
-## 1. `resolve_merchant` 呼叫規範
-
-`resolve_merchant` 採用嚴格確定性匹配，絕不在內部進行不可控的模糊自動採納（No Fuzzy Auto-Accept）。
-
-### 輸入參數
-- `rawQuery`: `string` (必填，原始查詢字串，長度 1~128 字元)
-- `country`: `string` (選填，ISO 雙字元國碼，如 `"TW"`, `"JP"`)
-- `market`: `string` (選填，市場或行業別，如 `"food_delivery"`, `"transportation"`, `"ecommerce"`)
-- `mcc`: `string` (選填，4 位 MCC 碼，如 `"5812"`, `"4121"`)
-- `channel`: `string` (選填，支付通道，如 `"direct_card"`, `"line_pay"`)
+本標準作業程序規範 Agent 在調用 `recommend` 遇到特店名稱模糊 (`merchant_ambiguous`) 或型錄未收錄 (`merchant_not_found`) 時的標準處置步驟。
 
 ---
 
-## 2. 匹配結果分類與 Agent 行為
+## 本 SOP 使用工具速查 (Scoped Tools)
 
+| 工具 | 類型 | 本 SOP 中的用途 | 關鍵必填欄位 |
+|---|:---:|---|---|
+| `recommend` | read | 消歧義或補齊特店後重新調用推薦 | `merchant`（使用者選定名稱）, `expectedResultVersion` |
+| `resolve_merchant` | read | 選填：在歧義時輔助查詢候選實體清單 | `query`（商家名稱字串） |
+
+> [!NOTE]
+> 詳細工具 Property 結構與 JSON 骨架，請參考 [推薦專屬工具規格](recommendation-tools-specification.md)。
+
+---
+
+
+
+## 1. 觸發條件 (Trigger Conditions)
+
+| 診斷代碼 (`diagnostic.code`) | 觸發原因 | 處置主體 (`owner`) | 核心目標 |
+|---|---|:---:|---|
+| `merchant_ambiguous` | 輸入之特店名稱匹配到型錄中多個實體 | `user` | 向使用者澄清具體實體，避免誤套優惠 |
+| `merchant_not_found` | 特店名稱未收錄於在地型錄白名單 | `agent` | 保留品牌名稱作為自訂特店，套用基礎回饋 |
+
+---
+
+## 2. 處置流程演算法 (Disambiguation Algorithm)
+
+```text
+SWITCH action.diagnostic.code:
+
+    CASE "merchant_ambiguous":
+        // 步驟 1：萃取候選實體清單
+        candidates = action.candidateIds 或 action.diagnostic.message
+        
+        // 步驟 2：向使用者提問（必須給出 2~3 個具體選項）
+        發問範例：
+        "請問您的消費是在哪一個通路？
+         1. 全家便利商店（超商門市）
+         2. 全家國際餐飲（大戶屋、bb.q CHICKEN 等餐飲門市）"
+        
+        // 步驟 3：等待使用者選擇
+        userChoice = 等待使用者回覆
+        
+        // 步驟 4：更新 merchant 重新調用 recommend
+        recommend({
+            ...原始 intent,
+            merchant: userChoice,
+            expectedResultVersion: response.resultVersion
+        })
+
+    CASE "merchant_not_found":
+        // 步驟 1：確認特店性質
+        IF (使用者提供明確品牌名稱，如「巷口阿嬤早餐店」):
+            // 直接保留原品牌名稱，若已知通路則補充 channel
+            recommend({
+                ...原始 intent,
+                merchant: 原始輸入名稱,
+                channel: 已知通路 (如 'in_store' 或 'online'),
+                expectedResultVersion: response.resultVersion
+            })
+            // 系統將自動回退至該卡片之一般消費基礎回饋
+            
+        ELSE IF (完全無法辨識特店名稱):
+            向使用者詢問：「請問您預計消費的店家名稱或消費類別（如餐飲、機票）是什麼？」
 ```
-                       [呼叫 resolve_merchant]
-                                 │
-         ┌───────────────────────┼───────────────────────┐
-         ▼                       ▼                       ▼
-    [精確匹配]              [歧義候選]              [未匹配/未知]
-  (Exact Match)         (Ambiguous Matches)      (Unresolved / None)
-         │                       │                       │
-         ▼                       ▼                       ▼
-保留權威 ID 與分類      向使用者列出候選確認      回退至一般國內/國外
-帶入後續 Preflight      使用者選擇後再行帶入      基礎規則 (Non-blocking)
+
+---
+
+## 3. 調用 Payload 範例
+
+### 情境 A：消歧義後重試調用
+```json
+{
+  "merchant": "全家便利商店",
+  "amount": { "amountMinor": 15000, "currency": "TWD" },
+  "expectedResultVersion": 1
+}
 ```
 
-### 1. 精確匹配 (Exact / Normalized Match)
-- 狀態：回傳唯一的 `canonicalId` (`mch_<ULID>`)。
-- Agent 行為：保留以下欄位並帶入推薦流程：
-  - `canonicalId`: 例如 `"mch_01J8Y7A9B0C1D2E3F4G5H6J7K8"`
-  - `canonicalNameZhHant`: 例如 `"Uber Eats (優食外送)"`
-  - `market`: `"food_delivery"`
-  - `country`: `"TW"`
-  - `mcc`: `"5812"`
+### 情境 B：未收錄自訂特店調用
+```json
+{
+  "merchant": "台北私廚小館",
+  "amount": { "amountMinor": 350000, "currency": "TWD" },
+  "channel": "in_store",
+  "expectedResultVersion": 1
+}
+```
 
-### 2. 歧義候選 (Ambiguous Candidates)
-- 情境：查詢字串可能對應不同業務實體（例如 "Uber" 可能為「Uber 網約車」或「Uber Eats 外送」；"台灣高鐵" 可能為「一般購票」或「TGo 會員商城」）。
-- Preflight 狀態：回傳 `ready: false`, `requiredActions: ["clarify_merchant"]`。
-- Agent 行為：
-  - **嚴禁自作主張猜測**。
-  - 向使用者輸出清晰的多選詢問：「請問您的消費是：1) Uber 網約車 (乘車) 還是 2) Uber Eats (外送美食)？」
-  - 依據使用者回覆選定對應的 `canonicalId`，重新執行 Preflight。
+---
 
-### 3. 未匹配 / 無指定促銷 (Unresolved / No Active Offer)
-- 情境：商家未在特定活動白名單中（如巷口早餐店、一般診所）。
-- 處理原則：**Non-blocking Base Rules**。系統不中斷執行，而是自動套用一般國內/國外消費基礎回饋。
+## 4. 注意事項與防呆原則 (Guardrails)
+1. **禁止捏造 ID**：不要自行猜測或發明不存在的 `canonicalId`，直接傳遞使用者確認的名稱字串。
+2. **鎖定版本**：重試時務必帶入 `expectedResultVersion: response.resultVersion`，防止並行推薦狀態漂移。
+3. **基礎回饋保障**：若特店未收錄，告知使用者系統已改用一般消費基礎回饋進行比價，而非直接回報無回饋。
+

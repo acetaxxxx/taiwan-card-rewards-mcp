@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.16.0
+
+- Expose 28-tool MCP contract with server-owned workflow authority and source-scoped ingestion sequence (`create_ingestion`, `get_ingestion`, `submit_ingestion_source`, `submit_ingestion_manifest`, `correct_ingestion_manifest`, `submit_benefit_leaf`, `submit_exclusion_leaf`, `finalize_ingestion`).
+- Candidate offer rules remain invisible until atomic manifest finalization; official rules supersede matching predecessors safely across card, componentKind, and tenant boundaries.
+- Add transparent `schemaVersion: 4` persistence migration for persisted v2 and v3 ledgers.
+- Connect recommendation stale-benefit handoff to ingestion drafts, returning typed continuation tokens (`childFlowId`, `resumedFlowId`, `expectedResultVersion`).
+- Reconcile user-facing skill documentation, gold-evidence examples, and tool matrix verification script.
+
+## 0.15.0
+
+- Expose nested transaction predicate contract and structured predicate diagnostics.
+- Add nested fact diagnostics and derive server version from package metadata.
+
 ## 0.14.1
 
 - Ignore unknown and sensitive input fields at validation boundaries instead of

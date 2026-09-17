@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync, readdirSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, readdirSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -45,7 +45,7 @@ describe("LedgerStore persistence seam and FileStore adapter", () => {
     try {
       const store: LedgerStore = new FileStore(config(dir));
       const initial = store.read();
-      expect(initial.schemaVersion).toBe(2);
+      expect(initial.schemaVersion).toBe(4);
       expect(initial.cards).toEqual([]);
       expect(initial.snapshots).toEqual([]);
       expect(initial.rules).toEqual([]);
@@ -82,7 +82,7 @@ describe("LedgerStore persistence seam and FileStore adapter", () => {
 
       const store2: LedgerStore = new FileStore(config(dir));
       const recovered = store2.read();
-      expect(recovered.schemaVersion).toBe(2);
+      expect(recovered.schemaVersion).toBe(4);
       expect(recovered.cards).toHaveLength(1);
       expect(recovered.cards[0]?.id).toBe("card-1");
       expect(recovered.snapshots[0]?.id).toBe("snap-1");
@@ -156,7 +156,7 @@ describe("LedgerStore persistence seam and FileStore adapter", () => {
     try {
       writeFileSync(join(dir, "card-rewards.lock"), JSON.stringify({ pid: 2147483647, startedAt: "2026-09-02T00:00:00.000Z" }));
       const store = new FileStore(config(dir));
-      expect(store.read().schemaVersion).toBe(2);
+      expect(store.read().schemaVersion).toBe(4);
       store.close();
     } finally {
       rmSync(dir, { recursive: true, force: true });
@@ -250,5 +250,63 @@ describe("LedgerStore persistence seam and FileStore adapter", () => {
 
     memoryStore.close();
     expect(memoryStore.closed).toBe(true);
+  });
+
+  it("transparently migrates schemaVersion 2 and 3 stored states to schemaVersion 4", () => {
+    const dir = mkdtempSync(join(tmpdir(), "card-rewards-migration-"));
+    try {
+      const stateFile = join(dir, "card-rewards.json");
+
+      // Test schemaVersion 2 migration
+      writeFileSync(
+        stateFile,
+        JSON.stringify({
+          schemaVersion: 2,
+          cards: [{ id: "card-v2", issuer: "BankA", productName: "Product V2" }],
+          snapshots: [],
+          rules: [],
+          transactions: [],
+          capPools: [],
+        })
+      );
+      const storeV2 = new FileStore(config(dir));
+      const readV2 = storeV2.read();
+      expect(readV2.schemaVersion).toBe(4);
+      expect(readV2.cards).toHaveLength(1);
+      expect(readV2.cards[0]?.id).toBe("card-v2");
+      expect(readV2.ingestionFlows).toEqual([]);
+      expect(readV2.ingestionDraftTombstones).toEqual([]);
+      storeV2.update((state) => {
+        state.cards.push({ id: "card-v2-migrated", issuer: "BankA", productName: "Product V2 Migrated" });
+      });
+      storeV2.close();
+
+      const diskAfterV2 = JSON.parse(readFileSync(stateFile, "utf8"));
+      expect(diskAfterV2.schemaVersion).toBe(4);
+      expect(diskAfterV2.cards).toHaveLength(2);
+
+      // Test schemaVersion 3 migration
+      writeFileSync(
+        stateFile,
+        JSON.stringify({
+          schemaVersion: 3,
+          cards: [{ id: "card-v3", issuer: "BankB", productName: "Product V3" }],
+          snapshots: [],
+          rules: [],
+          transactions: [],
+          capPools: [],
+        })
+      );
+      const storeV3 = new FileStore(config(dir));
+      const readV3 = storeV3.read();
+      expect(readV3.schemaVersion).toBe(4);
+      expect(readV3.cards).toHaveLength(1);
+      expect(readV3.cards[0]?.id).toBe("card-v3");
+      expect(readV3.ingestionFlows).toEqual([]);
+      expect(readV3.ingestionDraftTombstones).toEqual([]);
+      storeV3.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

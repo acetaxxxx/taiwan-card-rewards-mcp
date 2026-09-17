@@ -328,6 +328,8 @@ export interface OfferRuleVersion {
   settlementCurrency: Currency;
   match: RuleMatch;
   predicate?: Predicate | undefined;
+  /** Source-backed exclusions applied to this rule during ingestion. */
+  sharedExclusions?: readonly AppliedExclusion[] | undefined;
   requires?: readonly CalculationTrustRequirement[] | undefined;
   reward: RewardSpec;
   componentKind?: RewardComponentKind | undefined;
@@ -463,6 +465,8 @@ export interface RewardBreakdown {
   capRemainingBefore?: Money | undefined;
   capRemainingAfter?: Money | undefined;
   unknownReasons: string[];
+  /** Exclusions that matched, including the source leaf and its evidence. */
+  matchedExclusions?: readonly AppliedExclusion[] | undefined;
   diagnostics?: readonly Diagnostic[] | undefined;
   components?: readonly RewardComponent[] | undefined;
 }
@@ -513,12 +517,13 @@ export interface ListTransactionsResult {
 }
 
 export interface Diagnostic {
-  code: 'missing_required_fact' | 'invalid_fact' | 'conflicting_fact' | 'unsupported_field' | 'stale_fact' | 'fx_missing' | 'fx_stale' | 'fx_pair_mismatch' | 'fx_scope_mismatch' | 'fx_conflict' | 'merchant_ambiguous' | 'merchant_not_found' | 'no_active_offer' | 'source_untrusted' | 'stale_rule' | 'invalid_input' | 'needs_review';
+  code: 'missing_required_fact' | 'invalid_fact' | 'conflicting_fact' | 'unsupported_field' | 'stale_fact' | 'fx_missing' | 'fx_stale' | 'fx_pair_mismatch' | 'fx_scope_mismatch' | 'fx_conflict' | 'merchant_ambiguous' | 'merchant_not_found' | 'no_active_offer' | 'source_untrusted' | 'stale_rule' | 'invalid_input' | 'needs_review' | 'flow_failed' | 'flow_cancelled';
   path: string;
   requiredFacts: readonly string[];
   retryAction: string;
   message: string;
   nextAction: string;
+  candidateIds?: readonly string[] | undefined;
 }
 
 export interface FxResolutionRequest {
@@ -728,6 +733,37 @@ export interface RecommendationIntent {
   fx?: FxSnapshot;
   routeFacts?: readonly { routeId: string; edgeId?: string; fx: FxSnapshot }[];
   eligibilityFacts?: readonly EligibilityFact[];
+  /** Typed facts supplied on a stateless retry; never persisted by recommendation. */
+  supplementalFacts?: RecommendationSupplementalFacts | undefined;
+  /** Version returned by the preceding recommendation that this retry expects. */
+  expectedResultVersion?: string | undefined;
+  childFlowId?: string | undefined;
+  resumedFlowId?: string | undefined;
+}
+
+export interface RecommendationSupplementalFacts {
+  merchant?: { canonicalId: string; canonicalNameZhHant?: string; country?: string; market?: string } | undefined;
+  amount?: Money | undefined;
+  transaction?: {
+    amount?: Money;
+    country?: string;
+    market?: string;
+    channel?: string;
+    paymentMethod?: string;
+    occurredAt?: string;
+  } | undefined;
+  fx?: FxSnapshot | undefined;
+  routeFacts?: readonly { routeId: string; edgeId?: string; fx: FxSnapshot }[] | undefined;
+  eligibilityFacts?: readonly EligibilityFact[] | undefined;
+  benefitEvidence?: readonly {
+    evidenceId: string;
+    observedAt: string;
+    sourceUrl?: string;
+    contentHash?: string;
+    scope?: string;
+  }[] | undefined;
+  childFlowId?: string | undefined;
+  resumedFlowId?: string | undefined;
 }
 export interface IntentCandidate {
   id: string;
@@ -764,19 +800,53 @@ export interface IntentRule {
   reward?: Money;
   reasons: readonly string[];
 }
+export interface RecommendationAction {
+  id: string;
+  action: string;
+  owner: 'agent' | 'user';
+  path?: string | undefined;
+  requiredFacts: readonly string[];
+  candidateIds?: readonly string[] | undefined;
+  submission?: { tool: string; field: string } | undefined;
+  completionCondition?: string | undefined;
+  diagnostic?: Diagnostic | undefined;
+  fxResolutionRequest?: FxResolutionRequest | undefined;
+  refreshBenefit?: {
+    sourceScope: IngestionSourceScope;
+    familyId?: string | undefined;
+    sourceSnapshotId?: string | undefined;
+    ruleId?: string | undefined;
+    cardId?: string | undefined;
+    reason: string;
+    freshnessRequired: { asOf: string; maxAgeSeconds?: number | undefined };
+    childFlowId?: string | undefined;
+    flowStatus?: IngestionFlowStatus | undefined;
+  } | undefined;
+}
+
 export interface RecommendationIntentResult {
   status: 'ready' | 'partial' | 'needs_input' | 'no_match';
   candidates: readonly IntentCandidate[];
-  requiredActions: readonly { id: string; action: string; owner: 'agent' | 'user'; path?: string; requiredFacts: readonly string[]; candidateIds?: readonly string[]; submission?: { tool: string; field: string }; completionCondition?: string; fxResolutionRequest?: FxResolutionRequest }[];
-  coverage: { scope: string; discoveredCount: number; bounded: boolean; explorationComplete: boolean; total?: number; notes: readonly string[] };
+  requiredActions: readonly RecommendationAction[];
+  coverage: {
+    scope: string;
+    discoveredCount: number;
+    bounded: boolean;
+    explorationComplete: boolean;
+    total?: number | undefined;
+    notes: readonly string[];
+    actionCount?: number | undefined;
+    unpopulatedScopes?: readonly string[] | undefined;
+  };
   evaluatedAt: string;
-  fxResolutionRequest?: FxResolutionRequest;
-  fxResolutionRequests?: readonly FxResolutionRequest[];
+  fxResolutionRequest?: FxResolutionRequest | undefined;
+  fxResolutionRequests?: readonly FxResolutionRequest[] | undefined;
   pageSize: number;
   page: number;
   hasMore: boolean;
-  nextCursor?: string;
+  nextCursor?: string | undefined;
   resultVersion: string;
+  diagnostics?: readonly Diagnostic[] | undefined;
 }
 
 export interface PaymentPathRequest {
@@ -841,8 +911,85 @@ export interface PaymentPathCandidate {
   exclusionReasons: readonly string[];
   status?: 'ready' | 'blocked' | 'no_match';
   pathSignature?: string;
+  diagnostics?: readonly Diagnostic[] | undefined;
 }
 export interface PaymentPathRecommendation { status: 'ok' | 'partial' | 'needs_facts' | 'needs_review' | 'no_match'; candidates: readonly PaymentPathCandidate[]; evaluatedAt: string; blocked?: readonly { routeId: string; reason: string }[]; diagnostics?: readonly string[]; limits?: { maxCandidates: number; maxHops: number; maxEvents: number; maxBranchesPerNode: number }; }
+
+/** A non-sensitive, canonical handle used to deduplicate unfinished source ingestion. */
+export interface IngestionSourceScope { kind: 'official_url' | 'offer_family'; value: string; }
+export type IngestionFlowStatus = 'awaiting_source' | 'awaiting_manifest' | 'processing_leaves' | 'ready_to_finalize' | 'complete' | 'needs_review' | 'conflict' | 'failed' | 'cancelled' | 'expired';
+export interface IngestionSourceCapture { sourceType: 'official' | 'user_input'; url?: string; description?: string; retrievedAt: string; contentHash: string; artifactRef: string; submitter: string; submittedAt: string; }
+export interface IngestionManifestLeaf { id: string; kind: 'benefit' | 'exclusion'; summary: string; evidenceLocator: string; dependsOn: readonly string[]; disposition?: 'materialized' | 'ignored' | 'superseded'; dispositionReason?: string; dispositionEvidence?: string; }
+export interface IngestionLocalExclusion { scope: 'benefit'; predicate: Predicate; evidenceRefs: readonly string[]; }
+export type IngestionExclusionTarget = 'merchant' | 'transaction_fact' | 'payment_route' | 'payment_method';
+export interface IngestionExclusionScope { kind: 'all_benefits' | 'benefit_ids'; benefitIds?: readonly string[]; }
+/** A persisted exclusion retains provenance after its candidate rule is finalized. */
+export interface AppliedExclusion { sourceLeafId: string; sourceFlowId: string; target: IngestionExclusionTarget; predicate: Predicate; evidenceRefs: readonly string[]; }
+export interface IngestionExclusionLeafSubmission { flowId: string; actionId: string; expectedRevision: number; idempotencyKey: string; leafId: string; target: IngestionExclusionTarget; scope: IngestionExclusionScope; predicate: Predicate; evidenceRefs: readonly string[]; disposition?: 'materialized' | 'ignored' | 'superseded'; reason?: string; }
+export interface IngestionExclusionArtifact extends AppliedExclusion { id: string; revision: number; scope: IngestionExclusionScope; idempotencyKey: string; payloadHash: string; status: 'candidate'; }
+export interface IngestionMerchantReference { rawQuery: string; canonicalId?: string; country?: string; market?: string; mcc?: string; channel?: string; candidate?: Omit<MerchantIdentity, 'canonicalId' | 'status'> & { canonicalId?: string; status?: 'candidate' }; }
+export interface IngestionBenefitLeafSubmission { flowId: string; actionId: string; expectedRevision: number; idempotencyKey: string; leafId: string; disposition?: 'materialized' | 'ignored' | 'superseded'; reason?: string; offer?: { snapshot: OfferSourceSnapshot; rule: OfferRuleVersion; capPools?: readonly CapPoolDefinition[]; merchant?: Omit<MerchantIdentity, 'canonicalId'> & { canonicalId?: string }; }; merchantRefs?: readonly IngestionMerchantReference[]; evidenceRefs: readonly string[]; localExclusions?: readonly IngestionLocalExclusion[]; }
+export interface IngestionBenefitArtifact { id: string; flowId: string; revision: number; leafId: string; ruleId: string; ruleVersion: string; snapshotId: string; evidenceRefs: readonly string[]; localExclusions: readonly IngestionLocalExclusion[]; idempotencyKey: string; payloadHash: string; status: 'candidate'; }
+export interface IngestionCompletionProof {
+  flowId: string;
+  finalizeActionId: string;
+  finalizedRevision: number;
+  completedAt: string;
+  sourceCapture: Pick<IngestionSourceCapture, 'artifactRef' | 'contentHash' | 'retrievedAt' | 'sourceType'>;
+  leafTotals: { total: number; materialized: number; ignored: number; superseded: number; };
+  leaves: readonly { id: string; kind: IngestionManifestLeaf['kind']; disposition: NonNullable<IngestionManifestLeaf['disposition']>; reason?: string; evidenceLocator: string; evidenceRefs: readonly string[]; }[];
+  activatedRules: readonly { ruleId: string; ruleVersion: string; }[];
+  awaitingConfirmationRules: readonly { ruleId: string; ruleVersion: string; reason: string; }[];
+}
+export interface IngestionCoverageLedger {
+  total: number;
+  materialized: number;
+  ignored: number;
+  superseded: number;
+  pending: number;
+  blocked: number;
+  pendingLeafIds: readonly string[];
+  blockedLeafIds: readonly string[];
+  blockedBy: readonly { leafId: string; dependsOn: readonly string[] }[];
+  complete: false;
+}
+export interface IngestionParentContinuation {
+  intentFingerprint: string;
+  parentResultVersion: string;
+  childFlowId?: string | undefined;
+  sourceScope?: IngestionSourceScope | undefined;
+  ruleFamily?: string | undefined;
+}
+export interface IngestionFlowRecord {
+  id: string;
+  ownerUser: string;
+  sourceScope: IngestionSourceScope;
+  revision: number;
+  status: IngestionFlowStatus;
+  idempotencyKey: string;
+  createdAt: string;
+  lastActivityAt: string;
+  expiresAt: string;
+  sourceCapture?: IngestionSourceCapture;
+  manifest?: readonly IngestionManifestLeaf[];
+  manifestRevision?: number;
+  manifestHistory?: readonly { revision: number; manifest: readonly IngestionManifestLeaf[]; supersededByRevision: number; }[];
+  manifestCorrectionKeys?: readonly { idempotencyKey: string; payloadHash: string; revision: number; }[];
+  benefitArtifacts?: readonly IngestionBenefitArtifact[];
+  exclusionArtifacts?: readonly IngestionExclusionArtifact[];
+  completionProof?: IngestionCompletionProof;
+  parentContinuation?: IngestionParentContinuation | undefined;
+  terminalReason?: string | undefined;
+}
+export interface IngestionDraftTombstone {
+  id: string;
+  ownerUser: string;
+  sourceScope: IngestionSourceScope;
+  revision: number;
+  createdAt: string;
+  expiredAt: string;
+  retentionExpiresAt: string;
+}
 
 export interface McpToolContract {
   name: string;

@@ -1,6 +1,6 @@
 {
   "name": "taiwan-card-rewards-mcp",
-  "version": "0.15.0",
+  "version": "0.16.0",
   "type": "module",
   "files": [
     "dist"
@@ -17,7 +17,9 @@
     "prebuild": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
     "build": "tsc -p tsconfig.json",
     "prepare": "npm run build",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:migration": "vitest run tests/persistence.test.ts",
+    "docs:check": "npm run build && node scripts/validate-skill-docs.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

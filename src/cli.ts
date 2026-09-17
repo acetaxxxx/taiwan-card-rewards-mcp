@@ -2,7 +2,7 @@
 import * as readline from 'node:readline';
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { parseStartupArgs, StartupContractError } from './startup.js';
+import { getHelpText, parseStartupArgs, StartupContractError } from './startup.js';
 import type { StartupConfig } from './startup.js';
 import { FileStore, contentHash, type LedgerStore } from './store.js';
 import { RewardService } from './service.js';
@@ -111,6 +111,10 @@ async function runBridge(config: StartupConfig): Promise<void> {
 
 async function main(): Promise<void> {
   const config = parseStartupArgs(process.argv.slice(2));
+  if (config.help) {
+    process.stdout.write(`${getHelpText()}\n`);
+    return;
+  }
   if (config.mode === 'shared-owner') { await runOwner(config); return; }
   if (config.mode === 'shared-bridge') { await runBridge(config); return; }
   const store: LedgerStore = new FileStore(config);
@@ -150,6 +154,14 @@ async function callTool(service: RewardService, params: Record<string, unknown>)
     return projectPage(projected, { page: effectivePage, limit: effectiveLimit, maxItems, maxBytes: 256 * 1024, evaluatedAt: new Date().toISOString(), dataVersion: contentHash(JSON.stringify(projected)).slice(0, 16), sortKey });
   };
   switch (name) {
+    case 'create_ingestion': return service.createIngestion(args);
+    case 'get_ingestion': return service.inspectIngestion(String(args.flowId));
+    case 'submit_ingestion_source': return service.submitIngestionSource(args);
+    case 'submit_ingestion_manifest': return service.submitIngestionManifest(args);
+    case 'correct_ingestion_manifest': return service.correctIngestionManifest(args);
+    case 'submit_benefit_leaf': return service.submitBenefitLeaf(args);
+    case 'submit_exclusion_leaf': return service.submitExclusionLeaf(args);
+    case 'finalize_ingestion': return service.finalizeIngestion(args);
     case 'register_card': return service.registerCard(validateCard(args.card));
     case 'list_cards': return maybePaged(service.listCards(), (item) => String((item as CardDescriptor).id), 50);
     case 'upsert_offer': return service.upsertOffer(validateSnapshot(args.snapshot), validateRule(args.rule), args.confirmation !== undefined ? validateConfirmation(args.confirmation) : undefined, args.capPools === undefined ? undefined : (Array.isArray(args.capPools) ? args.capPools.map(validateCapPool) : []), args.merchant as any);

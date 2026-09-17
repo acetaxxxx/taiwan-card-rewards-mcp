@@ -1,15 +1,97 @@
 ---
 name: card-rewards-recommendation
-description: Recommend Taiwan credit-card rewards for a merchant, payment route, or foreign-currency purchase; recover missing facts and explain unresolved candidates.
+description: "台灣信用卡消費推薦與最佳支付路徑比價 (Recommend Taiwan credit-card rewards)."
 ---
 
-# Taiwan card-rewards recommendation
+# 信用卡消費推薦黃金路徑 (Recommendation Golden Path)
 
-Before constructing an MCP payload, read the shared [`mcp-tools.md`](../references/mcp-tools.md). Use this skill for a planned purchase, card comparison, merchant ambiguity, payment-path choice, or FX estimate.
+本技能專注於消費前的**卡片比較、通路回饋與最佳支付路徑推薦**。
 
-- Start merchant intent with [`workflows/recommendation-intent.md`](workflows/recommendation-intent.md).
-- Resolve an ambiguous merchant with [`workflows/merchant-resolution-and-disambiguation.md`](workflows/merchant-resolution-and-disambiguation.md); discover offers with [`workflows/offer-discovery-and-pagination.md`](workflows/offer-discovery-and-pagination.md).
-- For a wallet, payment route, or foreign currency, read [`workflows/payment-route-and-fx.md`](workflows/payment-route-and-fx.md).
-- When `recommend` returns `requiredActions`, follow [`workflows/preflight-and-required-actions.md`](workflows/preflight-and-required-actions.md) and retry only after the required facts or official evidence are available.
+## 1. 任務工具視野 (Scoped Tools)
+為避免認知干擾，本推薦任務**僅允許**使用以下唯讀查詢工具：
+- `recommend`：核心推薦比價工具（計算命中規則、扣除海外手續費、剩餘回饋上限與排名）。
+- `resolve_merchant`：僅在商家名稱有歧義（如「全家」有多個實體）時用於特店消歧義。
+- 嚴禁在本推薦流程調用任何寫入型工具（如 `record_transaction`, `create_ingestion`）。
 
-Return a recommendation only at the certainty represented by the MCP response. A blocked or unknown candidate is useful output when the missing fact matters.
+---
+
+## 2. 推薦執行演算法 (Recommendation Loop Algorithm)
+
+Agent 執行推薦時，**必須遵循以下結構化虛擬碼狀態機**：
+
+### 階段一：要素萃取 (Input Extraction)
+從使用者對話中解析以下三要素：
+- `merchant`：特店名稱（如「唐吉訶德」、「全家便利商店」、「中華航空」）。
+- `amount`：預計消費金額（整數或小數），幣別預設 `TWD`；若為國外消費則填對應外幣（如 `JPY`）。
+- `paymentMethod`：支付方式（如「Apple Pay」、「街口支付」），若未指定則留空。
+
+### 階段二：調用工具 (Initial Call)
+呼叫 `recommend({ merchant, amount, currency, paymentMethod })`。
+
+### 階段三：狀態機循環 (Recommendation Loop)
+
+```text
+WHILE (response.status !== 'ready'):
+    🚨 觸發 Hard Gate 阻斷：
+    嚴禁向使用者輸出任何推薦卡片名稱、趴數或排名！即使 candidates 有初步計算，一律視為未定案。
+
+    FOR EACH action IN response.requiredActions:
+        MATCH action.diagnostic.code WITH:
+
+            CASE "merchant_ambiguous" (特店名稱模糊):
+                -> 檢視 action.candidateIds 或 action.diagnostic.message
+                -> 參考 [`workflows/merchant-resolution-and-disambiguation.md`](workflows/merchant-resolution-and-disambiguation.md) 流程
+                -> 向使用者列出 2~3 個候選實體請其選擇（例如：「請問是 1. 全家便利商店 還是 2. 全家餐飲？」）
+                -> 等待使用者回覆選定項目
+
+            CASE "missing_required_fact" (缺少必要消費事實，如金額或通路):
+                -> 依據 action.path 向使用者提問（例如：「請問這筆消費預計金額是多少？」）
+                -> 等待使用者回覆
+
+            CASE "fx_missing" | "fx_stale" | "fx_pair_mismatch" | "fx_scope_mismatch" (缺少或過期外幣匯率):
+                -> 責任為 agent (owner === 'agent')，禁止向使用者索取技術代碼
+                -> 讀取 [`workflows/payment-route-and-fx.md`](workflows/payment-route-and-fx.md) 獲取已知即時匯率快照與組裝格式
+                -> 組裝 fx 物件 (ratePpm, capturedAt, provider, rateType)
+
+            CASE "conflicting_fact" | "stale_fact" | "invalid_fact" (卡片資格事實衝突):
+                -> 向使用者確認真實資格（例如目前持有的卡片會員等級或已切換方案）
+
+            CASE "stale_rule" | "needs_review" (卡片權益條款需覆核):
+                -> 該卡片候選標記為需要覆核，若其他卡片已 ready 則繼續進行；若為核心目標卡則提示使用者可能需要更新條款
+
+        END MATCH
+
+    [組裝重試 Payload]：
+        - 保留原始交易意圖（merchant, amount 等）
+        - 將補齊的事實填入 action.submission.field（例如填入 fx、或填入 supplementalFacts）
+        - 帶入 expectedResultVersion: response.resultVersion（鎖定版本，防止並行漂移）
+        - 再次調用 recommend 工具
+        - 更新 response 為最新回傳結果
+
+END WHILE
+```
+
+### 階段四：結案輸出 (Final Presentation)
+
+- **情境 A (`response.status === 'ready'`)**：
+  1. 依據 `candidates` 排名，依序輸出推薦卡片名稱。
+  2. 標註名目回饋趴數、命中之權益規則名稱。
+  3. 若為外幣交易，明確列出海外手續費（1.5%）與**預估實質淨回饋金額**。
+  4. 提示該卡回饋上限剩餘額度。
+- **情境 B (`response.status === 'no_match'`)**：
+  - 誠實告知使用者目前登記的卡片無特定加碼通路，依據 `candidates` 排名，依序輸出推薦卡片名稱。
+
+---
+
+## 3. 診斷代碼與缺失事實處置 (Diagnostics & Required Actions)
+
+當 `recommend` 回傳 `status !== 'ready'` 時，嚴禁自行臆測。依據回傳之 `requiredActions` 與 `diagnostics`，按需載入專屬處理程序：
+
+- **特店名稱模糊 / 未收錄** (`merchant_ambiguous` / `merchant_not_found`)：
+  ➔ 進入 [特店消歧義 SOP](workflows/merchant-resolution-and-disambiguation.md)
+- **缺少外幣匯率快照** (`fx_missing` / `fx_stale`)：
+  ➔ 進入 [外幣匯率查詢與組裝 SOP](workflows/payment-route-and-fx.md)
+- **缺少金額、會員資格、綁定支付工具或時區** (`missing_required_fact` / `INSUFFICIENT_FACTS`)：
+  ➔ 查閱通用手冊 [缺失事實與診斷代碼處置手冊](../references/required-actions-and-diagnostics.md)
+
+

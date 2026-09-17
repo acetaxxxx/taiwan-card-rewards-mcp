@@ -43,7 +43,7 @@ npx --yes github:acetaxxxx/taiwan-card-rewards-mcp#main \
 Pin a release tag for repeatable use:
 
 ```bash
-npx --yes github:acetaxxxx/taiwan-card-rewards-mcp#v0.14.1 \
+npx --yes github:acetaxxxx/taiwan-card-rewards-mcp#v0.16.0 \
   --data-dir /absolute/tenant-directory
 ```
 
@@ -63,13 +63,23 @@ node dist/cli.js --data-dir <absolute-path> [--user <user-id>]
 | `--data-dir <path>` | **Required** | Absolute directory for user storage. Missing nested directories are created securely, then canonicalized via `realpath`; filesystem roots (`/`) and non-directories are rejected. Tools cannot override this path. |
 | `--user <id>` | **Optional** | Display and audit log metadata only. Never used as an access control or storage partition selector. |
 
+### Safe Help & Tool Discovery (No Invented Flags)
+
+The CLI executable supports `--help` and `-h` to safely print usage options to stdout and exit with code 0 without any filesystem side effects or lock acquisition. For service operation, it strictly accepts `--data-dir` (and optional `--user`); any unadvertised or invented flags fail closed with `UNKNOWN_ARGUMENT`.
+
+To safely inspect available tools, instructions, and schemas:
+1. **CLI Usage**: Run `taiwan-card-rewards-mcp --help` (or `-h`) to inspect supported startup parameters.
+2. **MCP Handshake & Dynamic Listing**: Connect to the running stdio server with `--data-dir <path>` and issue the standard JSON-RPC `initialize` request (returns server info and instructions) followed by `tools/list` (dynamically returns all 28 canonical tools with complete input schemas).
+3. **Offline Tool Reference**: Consult [`mcp-tools.md`](../taiwan-card-rewards-skill/references/mcp-tools.md) for the authoritative 28-tool matrix, inputs, and fail-closed error contracts.
+
 ---
 
 ## 3. The MCP Tool Surface
 
-The MCP server exposes reward tools plus bounded merchant resolution and generic
-benefit tools. Standalone `confirm_offer` is not part of the surface; candidate
-activation is folded directly into `upsert_offer`. There is no separate
+The MCP server exposes 28 canonical tools: reward tools, bounded merchant resolution,
+generic benefit tools, payment route/capability/account management, and source-scoped
+ingestion workflow tools. Standalone `confirm_offer` is not part of the surface;
+candidate activation is folded directly into `upsert_offer`. There is no separate
 preflight tool — `recommend` is the single recommendation entry point and its
 response already carries every diagnostic an Agent needs.
 
@@ -79,6 +89,14 @@ response already carries every diagnostic an Agent needs.
 | `register_card` | Mutating | Register or update a card product descriptor (`id`, `issuer`, `productName`, `network`, `country`). | `INVALID_CARD`, `STORE_UNAVAILABLE` |
 | `list_cards` | Read-only | List all registered cards in the user's store. | `STORE_UNAVAILABLE` |
 | `upsert_offer` | Mutating | Ingest an official or candidate source snapshot and versioned rule; activates candidate if valid confirmation is supplied. | `INVALID_OFFER`, `INVALID_CONFIRMATION`, `STORE_UNAVAILABLE` |
+| `create_ingestion` | Mutating | Start or resume one source-scoped ingestion draft. | `UNAUTHENTICATED`, `IDEMPOTENCY_CONFLICT`, `STORE_UNAVAILABLE` |
+| `get_ingestion` | Read-only | Inspect the server-owned next ingestion action and manifest coverage. | `UNAUTHENTICATED`, `FLOW_NOT_FOUND`, `STORE_UNAVAILABLE` |
+| `submit_ingestion_source` | Mutating | Persist one immutable source capture; the MCP never fetches the URL. | `STALE_REVISION`, `INVALID_FLOW_ACTION`, `SOURCE_SCOPE_CONFLICT` |
+| `submit_ingestion_manifest` | Mutating | Submit the complete bounded manifest; the MCP rejects missing dependencies and cycles. | `STALE_REVISION`, `INVALID_FLOW_ACTION`, `INVALID_INPUT` |
+| `correct_ingestion_manifest` | Mutating | Create a server-owned manifest revision while preserving superseded manifest lineage. | `UNAUTHENTICATED`, `STALE_REVISION`, `INVALID_FLOW_ACTION`, `IDEMPOTENCY_CONFLICT`, `INVALID_INPUT`, `STORE_UNAVAILABLE` |
+| `submit_benefit_leaf` | Mutating | Validate the server-selected benefit leaf and materialize one candidate rule plus its evidence/local exclusions. Candidate rules remain invisible until finalization. | `STALE_REVISION`, `INVALID_FLOW_ACTION`, `SOURCE_SCOPE_CONFLICT`, `NEEDS_REVIEW`, `IDEMPOTENCY_CONFLICT` |
+| `submit_exclusion_leaf` | Mutating | Materialize or explicitly ignore the server-selected shared exclusion; ignored leaves require a reason. | `STALE_REVISION`, `INVALID_FLOW_ACTION`, `NEEDS_REVIEW`, `IDEMPOTENCY_CONFLICT` |
+| `finalize_ingestion` | Mutating | Atomically revalidate the complete manifest, activate verified candidates, and return a durable completion proof. | `STALE_REVISION`, `INVALID_FLOW_ACTION`, `NEEDS_REVIEW`, `STORE_UNAVAILABLE` |
 | `recommend` | Read-only | Merchant-first planned recommendation; reads registered cards and verified routes and returns direct-card and multi-layer payment-path candidates together in one ranked list. Results are bounded (default 10) and do not mutate usage. | `INSUFFICIENT_FACTS`, `NEEDS_REVIEW`, `STALE` |
 | `upsert_payment_route` | Mutating | Register a payment route; MCP assigns its route identity, trusts the caller's self-asserted `evidenceIds` directly, and stores no credentials. | `INVALID_INPUT`, `IDEMPOTENCY_CONFLICT`, `SENSITIVE_FIELD_FORBIDDEN` |
 | `list_payment_routes` | Read-only | List the current user's registered payment routes as bounded projections. | `INVALID_INPUT`, `STORE_UNAVAILABLE` |
@@ -96,6 +114,18 @@ response already carries every diagnostic an Agent needs.
 | `get_user_benefit_status` | Read-only | Show current benefit plus available-now and action-required candidates. | `CARD_NOT_FOUND`, `STORE_UNAVAILABLE` |
 | `upsert_user_benefit_status` | Mutating | Record or correct a user-confirmed completed card switch or campaign registration. | `CARD_NOT_FOUND`, `INVALID_CONFIRMATION`, `IDEMPOTENCY_CONFLICT` |
 
+### Ingestion action order
+
+For a complete official source, follow `create_ingestion` → `get_ingestion` →
+`submit_ingestion_source` → `submit_ingestion_manifest`. Then repeatedly call
+`get_ingestion` and submit exactly the returned `PROCESS_LEAF` using
+`submit_benefit_leaf` or `submit_exclusion_leaf` for the returned leaf kind;
+ignored exclusions must carry a reason. Never invent a leaf order or declare
+completion from source text alone. A materialized rule is a candidate artifact
+and must not be treated as recommendable until `finalize_ingestion` returns its
+completion proof. After every write, call `get_ingestion` again; expired actions
+require the new revision rather than resending the old payload.
+
 ---
 
 ## 4. Workflow Guidelines for AI Agents
@@ -106,7 +136,7 @@ For lightweight or lower-reasoning models, load the bundled [low-reasoning playb
 1. For a recommendation, call `recommend` directly with the merchant-first intent. `list_cards` is for management, explicit inventory requests, or onboarding checks; it is not a normal recommendation prerequisite.
 2. If the user holds a new card, call `register_card` with card descriptors (e.g. `{ id: "esun-kumamon", issuer: "ESunBank", productName: "Kumamon Card", network: "JCB", country: "TW" }`).
 
-For the merchant-first recommendation shape, follow [`recommendation-intent.md`](../taiwan-card-rewards-skill/card-rewards-recommendation/workflows/recommendation-intent.md). `recommend` is the only entry point; there is no separate preflight call or legacy transaction branch.
+For the merchant-first recommendation shape, follow [`SKILL.md`](../taiwan-card-rewards-skill/card-rewards-recommendation/SKILL.md). `recommend` is the only entry point; there is no separate preflight call or legacy transaction branch.
 
 ### B. Offer Ingestion, OCR & Candidate Activation
 1. **Official Web Sources**: The Agent or UI retrieves official bank pages using its own approved browsing or ingestion path, then supplies an unverified structured source snapshot with provenance and content fingerprint. The MCP does not retrieve web content.

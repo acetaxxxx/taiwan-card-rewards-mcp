@@ -1,7 +1,7 @@
 import * as crypto from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import type { CardDescriptor, CardSwitchCampaign, CardSwitchEnrollment, CardSwitchProjection, CapPoolDefinition, MerchantIdentity, OfferRuleVersion, OfferSourceSnapshot, RewardBreakdown, RewardComponentRecord, TransactionTuple, EvidenceRecord, FactCandidate, PaymentRouteRecord, PaymentCapabilityRecord, PaymentAccountRecord, EventRewardLedgerRecord, EventRewardReversalRecord, EventRewardCapUsageRecord, RewardValuationSnapshot, AppliedFxRate } from './types.js';
+import type { CardDescriptor, CardSwitchCampaign, CardSwitchEnrollment, CardSwitchProjection, CapPoolDefinition, MerchantIdentity, OfferRuleVersion, OfferSourceSnapshot, RewardBreakdown, RewardComponentRecord, TransactionTuple, EvidenceRecord, FactCandidate, PaymentRouteRecord, PaymentCapabilityRecord, PaymentAccountRecord, EventRewardLedgerRecord, EventRewardReversalRecord, EventRewardCapUsageRecord, RewardValuationSnapshot, AppliedFxRate, IngestionFlowRecord, IngestionDraftTombstone } from './types.js';
 import type { StartupConfig } from './startup.js';
 import { validateStoredState } from './validation.js';
 
@@ -15,7 +15,7 @@ export interface RecordedTransaction {
 }
 
 export interface StoredState {
-  schemaVersion: 2;
+  schemaVersion: 4;
   cards: CardDescriptor[];
   snapshots: OfferSourceSnapshot[];
   rules: OfferRuleVersion[];
@@ -36,9 +36,11 @@ export interface StoredState {
   eventRewardLedger: EventRewardLedgerRecord[];
   eventRewardReversals: EventRewardReversalRecord[];
   eventRewardCapUsage: EventRewardCapUsageRecord[];
+  ingestionFlows: IngestionFlowRecord[];
+  ingestionDraftTombstones: IngestionDraftTombstone[];
 }
 
-export const emptyState = (): StoredState => ({ schemaVersion: 2, cards: [], snapshots: [], rules: [], transactions: [], campaigns: [], switchEnrollments: [], cardSwitches: [], capPools: [], rewardComponents: [], merchants: [], evidence: [], factCandidates: [], paymentRoutes: [], paymentCapabilities: [], paymentAccounts: [], valuationSnapshots: [], eventRewardSchemaVersion: 1, eventRewardLedger: [], eventRewardReversals: [], eventRewardCapUsage: [] });
+export const emptyState = (): StoredState => ({ schemaVersion: 4, cards: [], snapshots: [], rules: [], transactions: [], campaigns: [], switchEnrollments: [], cardSwitches: [], capPools: [], rewardComponents: [], merchants: [], evidence: [], factCandidates: [], paymentRoutes: [], paymentCapabilities: [], paymentAccounts: [], valuationSnapshots: [], eventRewardSchemaVersion: 1, eventRewardLedger: [], eventRewardReversals: [], eventRewardCapUsage: [], ingestionFlows: [], ingestionDraftTombstones: [] });
 
 export class StoreError extends Error {
   constructor(public readonly code: string, message: string) {
