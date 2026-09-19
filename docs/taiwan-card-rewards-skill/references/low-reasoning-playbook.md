@@ -72,11 +72,13 @@ Recommendation:
 ```json
 {
   "merchant": "唐吉訶德",
-  "amount": { "amountMinor": 500000, "currency": "JPY" },
+  "amount": 5000,
+  "currency": "JPY",
   "country": "JP",
   "occurredAt": "2026-09-14T10:00:00Z"
 }
 ```
+
 
 Actual cash transaction:
 

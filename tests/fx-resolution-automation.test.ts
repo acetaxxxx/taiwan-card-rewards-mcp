@@ -272,7 +272,7 @@ describe('Track B: FX Resolution & Provenance Freeze', () => {
           kind: 'purchase',
           mode: 'actual',
           occurredAt: '2026-09-01T12:00:00Z',
-          amount: { amountMinor: 100000, currency: 'JPY' }, // 1000 JPY = 215 TWD
+          amount: { amountMinor: 1000, currency: 'JPY' }, // 1000 JPY = 215 TWD
           fx: validFx,
         };
 
@@ -305,7 +305,7 @@ describe('Track B: FX Resolution & Provenance Freeze', () => {
           kind: 'purchase',
           mode: 'actual',
           occurredAt: '2026-08-15T12:00:00Z',
-          amount: { amountMinor: 100000, currency: 'JPY' }, // 1000 JPY
+          amount: { amountMinor: 1000, currency: 'JPY' }, // 1000 JPY
           fx: initialFx,
         };
 
@@ -322,7 +322,7 @@ describe('Track B: FX Resolution & Provenance Freeze', () => {
           kind: 'refund',
           mode: 'actual',
           occurredAt: '2026-09-15T12:00:00Z',
-          amount: { amountMinor: 50000, currency: 'JPY' }, // 500 JPY
+          amount: { amountMinor: 500, currency: 'JPY' }, // 500 JPY
         };
 
         const refundResult = service.recordTransaction(refundTx);

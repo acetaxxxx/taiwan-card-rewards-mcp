@@ -21,45 +21,74 @@
 - **用途**：消費前比價，支援直接刷卡與多層付款路徑。
 - **Properties 結構**：
   - `merchant` (string, 必填): 商家名稱或模糊字串
-  - `amount` (object, 選填): `{ amountMinor: number, currency: string }`
-  - `country` (string, 選填): 國別代碼 (e.g. "TW", "JP")
+  - `amount` (number, 選填): 交易自然金額（直接填入畫面上的數字，如 `4.8`、`20`、`50000`），MCP 伺服器自動依幣別次方換算，Agent 無須乘 100
+  - `currency` (string, 選填): ISO 4217 幣別代碼（如 `"JPY"`、`"USD"`）。**省略時預設 `"TWD"`**
+  - `country` (string, 選填): 國別代碼 (e.g. "TW", "JP", "US")
   - `channel` (string, 選填): 交易通路，**封閉枚舉**：
     - `"online"`: 線上網購、APP 內扣款
     - `"in_store"`: 實體門市刷卡
-  - `paymentMethod` (string, 選填): 支付方式代碼（如 `"direct_card"`, `"line_pay"`, `"jkopay"`, `"apple_pay"`）
+  - `paymentMethod` (string, 選填): 支付方式代碼（如 `"direct_card"`, `"line_pay"`, `"jkopay"`, `"apple_pay"`；未填時自動展開各卡最佳姿勢）
   - `cardIds` (array of string, 選填): 限制篩選之特定卡片 ID 陣列
   - `routeIds` (array of string, 選填): 限制篩選之支付路徑 ID 陣列
-  - `fx` (object, 外幣時選填):
-    - `id` (string, 必填): 快照識別碼
-    - `baseCurrency` (string, 必填): 交易外幣 (e.g. "JPY", "USD")
-    - `quoteCurrency` (string, 必填): 結算本幣 (台灣卡為 "TWD")
-    - `ratePpm` (integer, 必填): 百萬分率匯率 (整數)
-    - `capturedAt` (string, 必填): ISO 8601 UTC 時間
-    - `provider` (string, 必填): 報價銀行或組織代碼
-    - `rateType` (string, 必填): **封閉枚舉**：`"card_scheme"` \| `"cash_selling"` \| `"spot_selling"` \| `"mid_market"`
+  - `routeFacts` (array of object, 重試或特定路徑補充時選填): 針對個別支付路徑補充專屬事實或匯率（`[{ routeId, edgeId, fx }]`）
   - `eligibilityFacts` (array of object, 選填): 補充資格自報事實陣列
   - `expectedResultVersion` (string, 重試時選填): 鎖定版本防止並行漂移
   - `limit` (number, 選填): 每頁回傳筆數 (預設 10)
 
+> [!NOTE]
+> - `amount` 與 `currency` 直接放頂層，不需要包成內層物件。
+> - 省略 `currency` 時系統預設為 `"TWD"`，台灣本地消費可直接傳 `"amount": 150`。
+> - 針對外幣金額（如 JPY、USD），記得指定 `currency`；伺服器會自動依幣別次方計算，避免 Agent 端計算錯誤。
+> - 透過 `routeFacts` 陣列提供特定支付路徑的專屬匯率（如信用卡國際組織匯率或電子錢包現鈔賣出牌告）。
 
+#### 範例 1：台灣本地消費（省略 `currency`，預設 TWD）
+```json
+{
+  "merchant": "全聯",
+  "amount": 150,
+  "channel": "in_store"
+}
+```
+
+#### 範例 2：外幣消費（指定 `currency`）
+```json
+{
+  "merchant": "Uber",
+  "amount": 4.8,
+  "currency": "USD",
+  "country": "US",
+  "channel": "online"
+}
+```
+
+#### 範例 3：信用卡補充國際卡組織匯率（`routeFacts`）
 ```json
 {
   "merchant": "Bic Camera",
-  "amount": { "amountMinor": 5000000, "currency": "JPY" },
+  "amount": 50000,
+  "currency": "JPY",
   "country": "JP",
   "channel": "in_store",
-  "fx": {
-    "id": "fx_jpy_twd_bot",
-    "baseCurrency": "JPY",
-    "quoteCurrency": "TWD",
-    "ratePpm": 215400,
-    "capturedAt": "2026-09-17T08:00:00Z",
-    "provider": "BankOfTaiwan",
-    "rateType": "cash_selling"
-  },
-  "limit": 5
+  "routeFacts": [
+    {
+      "routeId": "card:fubon-jcb",
+      "fx": {
+        "id": "fx_quote_jpy_twd_jcb",
+        "baseCurrency": "JPY",
+        "quoteCurrency": "TWD",
+        "rate": 0.215,
+        "capturedAt": "2026-09-17T12:00:00Z",
+        "maxAgeSeconds": 86400,
+        "provider": "JCB",
+        "rateType": "card_scheme",
+        "cardScheme": "jcb",
+        "sourceUrl": "https://www.jcb.tw/rate/jpy.html"
+      }
+    }
+  ]
 }
 ```
+
 
 ---
 

@@ -76,7 +76,7 @@ SWITCH action.diagnostic.code:
 ```json
 {
   "merchant": "全家便利商店",
-  "amount": { "amountMinor": 15000, "currency": "TWD" },
+  "amount": 150,
   "expectedResultVersion": 1
 }
 ```
@@ -85,11 +85,12 @@ SWITCH action.diagnostic.code:
 ```json
 {
   "merchant": "台北私廚小館",
-  "amount": { "amountMinor": 350000, "currency": "TWD" },
+  "amount": 3500,
   "channel": "in_store",
   "expectedResultVersion": 1
 }
 ```
+
 
 ---
 

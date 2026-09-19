@@ -14,11 +14,11 @@
 
 | 工具 | 類型 | 本 SOP 中的用途 | 關鍵必填欄位 |
 |---|:---:|---|---|
-| `recommend` | read | 觸發點（收到 `fx_missing`）與重試點（帶入 `fx` snapshot） | `merchant`, `amount`, `fx.{id,baseCurrency,quoteCurrency,ratePpm,capturedAt,provider,rateType}`, `expectedResultVersion` |
+| `recommend` | read | 消費前比價（預設無須帶 `fx`，系統自動估算各路徑；重試特定路徑時可帶入 `routeFacts`） | `merchant`, `amount` (必填)；重試時：`routeFacts`, `expectedResultVersion` |
 
 > [!NOTE]
-> 本 SOP 的 `fx` snapshot 為**當次一次性信任**，MCP 不會持久化匯率數值。
-> 若需要長期記憶某支付路徑的匯率查詢來源（讓 MCP 之後能自動提供 `sourceUrls`），請參考 [`fx-rate-ingestion.md`](../../card-rewards-evidence/workflows/fx-rate-ingestion.md)。
+> 外幣推薦**預設無須在頂層傳入單一 `fx` 物件**！系統內部會為直接刷卡與跨境電子錢包分別採用適當的牌告匯率試算實質淨回饋。
+> 唯有當系統回傳 `requiredActions` 要求補充特定路徑的事實時，才於重試時透過 `routeFacts: [{ routeId, fx }]` 陣列提供該路徑專屬匯率。
 > 詳細工具 Property 結構與 JSON 骨架，請參考 [推薦專屬工具規格](recommendation-tools-specification.md)。
 
 ---
@@ -61,18 +61,15 @@ ELSE:
             targetUrl = 發卡銀行牌告現鈔賣出價
     rateQuote = 查詢 targetUrl 對應之 rateType 牌告匯率
 
-// 步驟 3：量化計算 PPM 整數值
-ratePpm = Math.round(rateQuote * 1000000)
-
-// 步驟 4：組裝快照並重新調用
+// 步驟 3：組裝快照並重新調用（直接填入牌告自然匯率，MCP 會自動換算 PPM）
 fxSnapshot = {
     id: "fx_quote_" + baseCurrency.toLowerCase() + "_" + quoteCurrency.toLowerCase(),
     baseCurrency: baseCurrency,
     quoteCurrency: quoteCurrency,
-    ratePpm: ratePpm,
+    rate: rateQuote, // 直接填入畫面上看到的牌告匯率（例如 0.215 或 32.5），無需手動乘 1,000,000
     capturedAt: 當前 ISO 8601 UTC 時間,
     maxAgeSeconds: 86400,
-    provider: 報價機構名稱 (例如 "BankOfTaiwan", "TaishinBank"),
+    provider: 報價機構名稱 (例如 "JCB", "BankOfTaiwan", "TaishinBank"),
     rateType: rateType,
     sourceUrl: targetUrl
 }
@@ -103,37 +100,137 @@ recommend({
 
 ## 4. 標準 Payload 範例
 
-### `fx` Snapshot 結構
-```json
-{
-  "id": "fx_quote_jpy_twd",
-  "baseCurrency": "JPY",
-  "quoteCurrency": "TWD",
-  "ratePpm": 209300,
-  "capturedAt": "2026-09-17T12:00:00Z",
-  "maxAgeSeconds": 86400,
-  "provider": "TaishinBank",
-  "rateType": "cash_selling",
-  "sourceUrl": "https://www.taishinbank.com.tw/TSB/personal/deposit/lookup/realtime/"
-}
-```
-
-### 攜帶 `fx` 重試調用
+### 4.1 初次探索推薦（自然金額輸入，預設無須帶任何 `fx`）
+直接傳入商家與自然金額，`amount` 與 `currency` 放頂層；省略 `currency` 預設 `"TWD"`。系統自動依 ISO 4217 次方換算並展開所有可用卡片與多層路徑：
 ```json
 {
   "merchant": "Bic Camera",
-  "amount": { "amountMinor": 10000, "currency": "JPY" },
-  "fx": {
-    "id": "fx_quote_jpy_twd",
-    "baseCurrency": "JPY",
-    "quoteCurrency": "TWD",
-    "ratePpm": 209300,
-    "capturedAt": "2026-09-17T12:00:00Z",
-    "maxAgeSeconds": 86400,
-    "provider": "TaishinBank",
-    "rateType": "cash_selling",
-    "sourceUrl": "https://www.taishinbank.com.tw/TSB/personal/deposit/lookup/realtime/"
-  },
-  "expectedResultVersion": 1
+  "amount": 10000,
+  "currency": "JPY",
+  "country": "JP",
+  "channel": "in_store"
 }
 ```
+
+```json
+{
+  "merchant": "全聯",
+  "amount": 150,
+  "channel": "in_store"
+}
+```
+
+```json
+{
+  "merchant": "Uber",
+  "amount": 4.8,
+  "currency": "USD",
+  "country": "US",
+  "channel": "online"
+}
+```
+
+
+### 4.2 特定跨境路徑重試（使用 `routeFacts` 補充專屬匯率）
+透過 `routeFacts` 陣列提供各結算路徑（信用卡直刷或跨境錢包）的專屬匯率，彼此嚴格隔離、互不干擾。
+
+#### 範例 A：信用卡專用匯率（走國際卡組織 JCB / Visa / Mastercard 匯率）
+```json
+{
+  "merchant": "Bic Camera",
+  "amount": 50000,
+  "currency": "JPY",
+  "country": "JP",
+  "channel": "in_store",
+  "routeFacts": [
+    {
+      "routeId": "card:fubon-jcb",
+      "fx": {
+        "id": "fx_quote_jpy_twd_jcb",
+        "baseCurrency": "JPY",
+        "quoteCurrency": "TWD",
+        "rate": 0.215,
+        "capturedAt": "2026-09-17T12:00:00Z",
+        "maxAgeSeconds": 86400,
+        "provider": "JCB",
+        "rateType": "card_scheme",
+        "cardScheme": "jcb",
+        "sourceUrl": "https://www.jcb.tw/rate/jpy.html"
+      }
+    }
+  ],
+  "expectedResultVersion": "v1"
+}
+```
+
+#### 範例 B：跨境電子錢包專用匯率（走合作銀行現鈔賣出牌告價）
+```json
+{
+  "merchant": "東京燒肉店",
+  "amount": 30000,
+  "currency": "JPY",
+  "country": "JP",
+  "channel": "in_store",
+  "routeFacts": [
+    {
+      "routeId": "route_taishin_paypay",
+      "fx": {
+        "id": "fx_quote_jpy_twd_taishin",
+        "baseCurrency": "JPY",
+        "quoteCurrency": "TWD",
+        "rate": 0.2185,
+        "capturedAt": "2026-09-17T12:00:00Z",
+        "maxAgeSeconds": 86400,
+        "provider": "TaishinBank",
+        "rateType": "cash_selling",
+        "sourceUrl": "https://www.taishinbank.com.tw/TSB/personal/deposit/lookup/realtime/"
+      }
+    }
+  ],
+  "expectedResultVersion": "v1"
+}
+```
+
+#### 範例 C：多軌道同時比較（信用卡組織匯率 vs 錢包現鈔賣出並陳）
+```json
+{
+  "merchant": "東京電器行",
+  "amount": 50000,
+  "currency": "JPY",
+  "country": "JP",
+  "channel": "in_store",
+  "routeFacts": [
+    {
+      "routeId": "card:fubon-jcb",
+      "fx": {
+        "id": "fx_quote_jpy_twd_jcb",
+        "baseCurrency": "JPY",
+        "quoteCurrency": "TWD",
+        "rate": 0.215,
+        "capturedAt": "2026-09-17T12:00:00Z",
+        "maxAgeSeconds": 86400,
+        "provider": "JCB",
+        "rateType": "card_scheme",
+        "cardScheme": "jcb",
+        "sourceUrl": "https://www.jcb.tw/rate/jpy.html"
+      }
+    },
+    {
+      "routeId": "route_taishin_paypay",
+      "fx": {
+        "id": "fx_quote_jpy_twd_taishin",
+        "baseCurrency": "JPY",
+        "quoteCurrency": "TWD",
+        "rate": 0.2185,
+        "capturedAt": "2026-09-17T12:00:00Z",
+        "maxAgeSeconds": 86400,
+        "provider": "TaishinBank",
+        "rateType": "cash_selling",
+        "sourceUrl": "https://www.taishinbank.com.tw/TSB/personal/deposit/lookup/realtime/"
+      }
+    }
+  ],
+  "expectedResultVersion": "v1"
+}
+```
+

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.16.1
+
+- Auto-scale zero-decimal currencies (JPY, KRW) per ISO 4217 exponents so agents input natural amounts without manual multiplication.
+- Support `fx` as an array or single object in `recommend` and `supplementalFacts`, strictly scoped to prevent rateType cross-poisoning across cards and routes.
+- Automatically fan out candidate payment postures (e.g. Apple Pay) when `paymentMethod` is omitted in `recommend`, surfacing optimal reward paths.
+- Remove invalid `contentHash` from `buildFxResolutionRequest` requiredFields.
+- Fix stateless typed recommendation retry fact forwarding for `supplementalFacts`, `transaction`, and `routeFacts`.
+
 ## 0.16.0
 
 - Expose 28-tool MCP contract with server-owned workflow authority and source-scoped ingestion sequence (`create_ingestion`, `get_ingestion`, `submit_ingestion_source`, `submit_ingestion_manifest`, `correct_ingestion_manifest`, `submit_benefit_leaf`, `submit_exclusion_leaf`, `finalize_ingestion`).

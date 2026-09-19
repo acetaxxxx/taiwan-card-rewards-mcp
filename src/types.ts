@@ -1,6 +1,26 @@
 import type { PageInfo } from './projections.js';
 
 export type Currency = string;
+export const CURRENCY_EXPONENTS: Record<string, number> = {
+  TWD: 2,
+  USD: 2,
+  EUR: 2,
+  GBP: 2,
+  HKD: 2,
+  SGD: 2,
+  AUD: 2,
+  CAD: 2,
+  CHF: 2,
+  CNY: 2,
+  THB: 2,
+  JPY: 0,
+  KRW: 0,
+};
+
+export function getCurrencyExponent(currency: string): number {
+  return CURRENCY_EXPONENTS[currency.toUpperCase()] ?? 2;
+}
+
 export type FxRateType = 'cash_selling' | 'spot_selling' | 'mid_market' | 'card_scheme';
 export type EvaluationStatus = 'ok' | 'no_match' | 'unknown' | 'needs_review' | 'stale';
 export type TransactionKind = 'purchase' | 'refund';
@@ -374,6 +394,8 @@ export interface FxSnapshot {
   id: string;
   baseCurrency: Currency;
   quoteCurrency: Currency;
+  /** Natural exchange rate as displayed on quotes/banks (e.g. 0.215 for JPY/TWD). */
+  rate?: number | undefined;
   /** quote minor units per base minor unit, in parts per million. */
   ratePpm: number;
   capturedAt: string;
@@ -730,7 +752,7 @@ export interface RecommendationIntent {
   page?: number;
   cursor?: string;
   resultVersion?: string;
-  fx?: FxSnapshot;
+  fx?: FxSnapshot | readonly FxSnapshot[];
   routeFacts?: readonly { routeId: string; edgeId?: string; fx: FxSnapshot }[];
   eligibilityFacts?: readonly EligibilityFact[];
   /** Typed facts supplied on a stateless retry; never persisted by recommendation. */
@@ -752,7 +774,7 @@ export interface RecommendationSupplementalFacts {
     paymentMethod?: string;
     occurredAt?: string;
   } | undefined;
-  fx?: FxSnapshot | undefined;
+  fx?: FxSnapshot | readonly FxSnapshot[] | undefined;
   routeFacts?: readonly { routeId: string; edgeId?: string; fx: FxSnapshot }[] | undefined;
   eligibilityFacts?: readonly EligibilityFact[] | undefined;
   benefitEvidence?: readonly {

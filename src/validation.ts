@@ -1,4 +1,4 @@
-import { SUPPORTED_PREDICATE_FIELDS } from './types.js';
+import { SUPPORTED_PREDICATE_FIELDS, getCurrencyExponent } from './types.js';
 import type { CardDescriptor, CardProduct, CapPeriod, CapPoolDefinition, CardSwitchCampaign, CardSwitchConfirmation, CardSwitchInput, CardSwitchEnrollment, CardSwitchProjection, EligibilityFact, EvaluationContext, FxSnapshot, HeldCard, MerchantIdentity, MerchantProvenance, Money, OfferConfirmation, OfferProvenance, OfferRuleVersion, OfferSourceSnapshot, Predicate, PredicateValue, RewardBreakdown, RewardSpec, RuleMatch, TransactionTuple, PaymentRouteKind, RewardComponentKind, RewardComponentRecord, PaymentRouteContext, PaymentRouteRecord, PaymentCapabilityRecord, PaymentAccountRecord, PaymentEvent, PaymentEventKind, PaymentEventRule, PaymentEventChainRule, EventRewardLedgerRecord, EventRewardReversalRecord, EventRewardCapUsageRecord, PaymentEventRewardCandidate, PaymentEventRewardCandidateInput, PaymentEventMatch, RewardValuationSnapshot, PaymentRouteSelector, FundingInstrument, ListTransactionsOptions, TransactionTimeBasis, AppliedFxRate, FxRateType, IngestionSourceScope, IngestionFlowRecord, IngestionDraftTombstone, IngestionManifestLeaf, IngestionBenefitLeafSubmission, IngestionLocalExclusion, IngestionMerchantReference, AppliedExclusion, IngestionExclusionArtifact, IngestionExclusionLeafSubmission, IngestionExclusionScope, IngestionExclusionTarget, IngestionParentContinuation } from './types.js';
 import type { StoredState } from './store.js';
 import type { EvidenceRecord, FactCandidate } from './types.js';
@@ -54,8 +54,31 @@ export function validateTimezone(value: unknown, name: string): string {
 
 export function validateMoney(value: unknown, name: string): Money {
   const item = object(value, name);
-  keys(item, ['amountMinor', 'currency'], name);
-  return { amountMinor: safeInt(item.amountMinor, `${name}.amountMinor`), currency: requiredString(item.currency, `${name}.currency`, true).toUpperCase() };
+  keys(item, ['amountMinor', 'amount', 'value', 'currency'], name);
+  const currency = requiredString(item.currency, `${name}.currency`, true).toUpperCase();
+  const exponent = getCurrencyExponent(currency);
+
+  let amountMinor: number;
+  if (item.value !== undefined || item.amount !== undefined) {
+    const raw = item.value ?? item.amount;
+    if (typeof raw !== 'number' || !Number.isFinite(raw) || raw < 0) {
+      throw new RewardServiceError('INVALID_INPUT', `${name} natural amount must be a non-negative finite number`);
+    }
+    amountMinor = Math.round(raw * (10 ** exponent));
+  } else if (item.amountMinor !== undefined) {
+    if (typeof item.amountMinor !== 'number' || !Number.isFinite(item.amountMinor) || item.amountMinor < 0) {
+      throw new RewardServiceError('INVALID_INPUT', `${name}.amountMinor must be a non-negative finite number`);
+    }
+    if (!Number.isInteger(item.amountMinor)) {
+      amountMinor = Math.round(item.amountMinor * (10 ** exponent));
+    } else {
+      amountMinor = item.amountMinor;
+    }
+  } else {
+    throw new RewardServiceError('INVALID_INPUT', `${name} must include amount, value, or amountMinor`);
+  }
+
+  return { amountMinor, currency };
 }
 
 export function validateRewardValuationSnapshot(value: unknown): RewardValuationSnapshot {
@@ -77,7 +100,7 @@ export function validateRewardValuationSnapshot(value: unknown): RewardValuation
 
 export function validateFxSnapshot(value: unknown, name: string): FxSnapshot {
   const item = object(value, name);
-  keys(item, ['id', 'baseCurrency', 'quoteCurrency', 'ratePpm', 'capturedAt', 'maxAgeSeconds', 'provider', 'rateType', 'sourceUrl', 'contentHash', 'cardIdScope', 'issuerScope', 'rateDirection', 'conversionOwner', 'conversionTiming', 'cardScheme', 'routeIdScope', 'edgeIdScope'], name);
+  keys(item, ['id', 'baseCurrency', 'quoteCurrency', 'ratePpm', 'rate', 'exchangeRate', 'capturedAt', 'maxAgeSeconds', 'provider', 'rateType', 'sourceUrl', 'contentHash', 'cardIdScope', 'issuerScope', 'rateDirection', 'conversionOwner', 'conversionTiming', 'cardScheme', 'routeIdScope', 'edgeIdScope'], name);
   const rateType = requiredString(item.rateType, `${name}.rateType`);
   if (!['cash_selling', 'spot_selling', 'mid_market', 'card_scheme'].includes(rateType)) throw new RewardServiceError('INVALID_INPUT', `${name}.rateType is invalid`);
   if (item.rateDirection !== undefined && !['base_to_quote', 'quote_to_base'].includes(String(item.rateDirection))) {
@@ -89,11 +112,37 @@ export function validateFxSnapshot(value: unknown, name: string): FxSnapshot {
   if (item.conversionTiming !== undefined && !['transaction', 'clearing', 'settlement', 'posting'].includes(String(item.conversionTiming))) {
     throw new RewardServiceError('INVALID_INPUT', `${name}.conversionTiming is invalid`);
   }
+
+  let ratePpm: number;
+  let rate: number | undefined;
+  if (item.rate !== undefined || item.exchangeRate !== undefined) {
+    const rawRate = item.rate ?? item.exchangeRate;
+    if (typeof rawRate !== 'number' || !Number.isFinite(rawRate) || rawRate <= 0) {
+      throw new RewardServiceError('INVALID_INPUT', `${name}.rate must be a positive finite number`);
+    }
+    rate = rawRate;
+    ratePpm = Math.round(rawRate * 1_000_000);
+  } else if (item.ratePpm !== undefined) {
+    if (typeof item.ratePpm !== 'number' || !Number.isFinite(item.ratePpm) || item.ratePpm <= 0) {
+      throw new RewardServiceError('INVALID_INPUT', `${name}.ratePpm must be a positive finite number`);
+    }
+    if (item.ratePpm < 100) {
+      rate = item.ratePpm;
+      ratePpm = Math.round(item.ratePpm * 1_000_000);
+    } else {
+      ratePpm = Math.round(item.ratePpm);
+      rate = ratePpm / 1_000_000;
+    }
+  } else {
+    throw new RewardServiceError('INVALID_INPUT', `${name} must include rate or ratePpm`);
+  }
+
   return {
     id: requiredString(item.id, `${name}.id`, true),
     baseCurrency: requiredString(item.baseCurrency, `${name}.baseCurrency`, true).toUpperCase(),
     quoteCurrency: requiredString(item.quoteCurrency, `${name}.quoteCurrency`, true).toUpperCase(),
-    ratePpm: finiteRate(item.ratePpm, `${name}.ratePpm`, 1),
+    ...(rate !== undefined ? { rate } : {}),
+    ratePpm,
     capturedAt: iso(item.capturedAt, `${name}.capturedAt`),
     ...(item.maxAgeSeconds === undefined ? {} : { maxAgeSeconds: safeInt(item.maxAgeSeconds, `${name}.maxAgeSeconds`, 1) }),
     provider: requiredString(item.provider, `${name}.provider`),
@@ -1461,7 +1510,11 @@ export function validateRecommendationSupplementalFacts(value: unknown): Recomme
     ...(merchant ? { merchant } : {}),
     ...(item.amount === undefined ? {} : { amount: validateMoney(item.amount, 'recommend supplementalFacts.amount') }),
     ...(transaction ? { transaction } : {}),
-    ...(item.fx === undefined ? {} : { fx: validateFxSnapshot(item.fx, 'recommend supplementalFacts.fx') }),
+    ...(item.fx === undefined ? {} : {
+      fx: Array.isArray(item.fx)
+        ? item.fx.map((entry, idx) => validateFxSnapshot(entry, `recommend supplementalFacts.fx[${idx}]`))
+        : validateFxSnapshot(item.fx, 'recommend supplementalFacts.fx')
+    }),
     ...(routeFacts ? { routeFacts } : {}),
     ...(eligibilityFacts ? { eligibilityFacts } : {}),
     ...(benefitEvidence ? { benefitEvidence } : {}),
@@ -1472,7 +1525,7 @@ export function validateRecommendationSupplementalFacts(value: unknown): Recomme
 
 export function validateRecommendationIntent(value: unknown): RecommendationIntent {
   const input = object(value, 'recommend intent');
-  keys(input, ['merchant', 'amount', 'country', 'market', 'channel', 'paymentMethod', 'occurredAt', 'cardIds', 'routeIds', 'limit', 'page', 'cursor', 'resultVersion', 'expectedResultVersion', 'childFlowId', 'resumedFlowId', 'supplementalFacts', 'fx', 'routeFacts', 'eligibilityFacts'], 'recommend intent');
+  keys(input, ['merchant', 'amount', 'currency', 'country', 'market', 'channel', 'paymentMethod', 'occurredAt', 'cardIds', 'routeIds', 'limit', 'page', 'cursor', 'resultVersion', 'expectedResultVersion', 'childFlowId', 'resumedFlowId', 'supplementalFacts', 'fx', 'routeFacts', 'eligibilityFacts'], 'recommend intent');
   let merchant: RecommendationIntent['merchant'];
   if (typeof input.merchant === 'string') merchant = requiredString(input.merchant, 'merchant');
   else {
@@ -1494,7 +1547,22 @@ export function validateRecommendationIntent(value: unknown): RecommendationInte
   const page = input.page === undefined ? 1 : safeInt(input.page, 'page', 1);
   return {
     merchant, limit, page,
-    ...(input.amount === undefined ? {} : { amount: validateMoney(input.amount, 'amount') }),
+    ...(input.amount === undefined ? {} : {
+      amount: (() => {
+        // Flat form: amount is a bare number, use top-level currency (default TWD)
+        if (typeof input.amount === 'number') {
+          const currency = typeof input.currency === 'string' ? input.currency : 'TWD';
+          return validateMoney({ amount: input.amount, currency }, 'amount');
+        }
+        // Object form: if currency is missing inside the object, fall back to top-level currency or TWD
+        const amtObj = input.amount as Record<string, unknown>;
+        if (amtObj.currency === undefined) {
+          const currency = typeof input.currency === 'string' ? input.currency : 'TWD';
+          return validateMoney({ ...amtObj, currency }, 'amount');
+        }
+        return validateMoney(input.amount, 'amount');
+      })()
+    }),
     ...(input.country === undefined ? {} : { country: requiredString(input.country, 'country') }),
     ...(input.market === undefined ? {} : { market: requiredString(input.market, 'market') }),
     ...(input.channel === undefined ? {} : { channel: requiredString(input.channel, 'channel') }),
@@ -1508,7 +1576,11 @@ export function validateRecommendationIntent(value: unknown): RecommendationInte
     ...(input.childFlowId === undefined ? {} : { childFlowId: requiredString(input.childFlowId, 'childFlowId', true) }),
     ...(input.resumedFlowId === undefined ? {} : { resumedFlowId: requiredString(input.resumedFlowId, 'resumedFlowId', true) }),
     ...(input.supplementalFacts === undefined ? {} : { supplementalFacts: validateRecommendationSupplementalFacts(input.supplementalFacts) }),
-    ...(input.fx === undefined ? {} : { fx: validateFxSnapshot(input.fx, 'recommend fx') }),
+    ...(input.fx === undefined ? {} : {
+      fx: Array.isArray(input.fx)
+        ? input.fx.map((entry, idx) => validateFxSnapshot(entry, `recommend fx[${idx}]`))
+        : validateFxSnapshot(input.fx, 'recommend fx')
+    }),
     ...(input.routeFacts === undefined ? {} : { routeFacts: (() => {
       if (!Array.isArray(input.routeFacts)) throw new RewardServiceError('INVALID_INPUT', 'routeFacts must be an array');
       if (input.routeFacts.length > 128) throw new RewardServiceError('INVALID_INPUT', 'routeFacts must contain at most 128 entries');
