@@ -25,6 +25,7 @@ import type {
   PaymentRouteSelector,
   PaymentRouteRecord,
 } from './types.js';
+import { getCurrencyExponent } from './types.js';
 import { RewardServiceError } from './errors.js';
 import type { LedgerStore } from './store.js';
 
@@ -544,7 +545,10 @@ export function evaluatePredicate(predicate: Predicate, tx: TransactionTuple, co
 export function convertMinor(amount: Money, currency: string, tx: TransactionTuple): number | undefined {
   if (amount.currency === currency) return amount.amountMinor;
   if (tx.fx?.baseCurrency === amount.currency && tx.fx.quoteCurrency === currency) {
-    return Math.floor((amount.amountMinor * tx.fx.ratePpm) / 1_000_000);
+    const baseExp = getCurrencyExponent(amount.currency);
+    const quoteExp = getCurrencyExponent(currency);
+    const factor = 10 ** (quoteExp - baseExp);
+    return Math.floor((amount.amountMinor * tx.fx.ratePpm * factor) / 1_000_000);
   }
   return undefined;
 }

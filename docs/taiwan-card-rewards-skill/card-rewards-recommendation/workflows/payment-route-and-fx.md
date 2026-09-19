@@ -14,11 +14,11 @@
 
 | 工具 | 類型 | 本 SOP 中的用途 | 關鍵必填欄位 |
 |---|:---:|---|---|
-| `recommend` | read | 觸發點（收到 `fx_missing`）與重試點（帶入 `fx` snapshot） | `merchant`, `amount`, `fx.{id,baseCurrency,quoteCurrency,ratePpm,capturedAt,provider,rateType}`, `expectedResultVersion` |
+| `recommend` | read | 消費前比價（預設無須帶 `fx`，系統自動估算各路徑；重試特定路徑時可帶入 `routeFacts`） | `merchant`, `amount` (必填)；重試時：`routeFacts`, `expectedResultVersion` |
 
 > [!NOTE]
-> 本 SOP 的 `fx` snapshot 為**當次一次性信任**，MCP 不會持久化匯率數值。
-> 若需要長期記憶某支付路徑的匯率查詢來源（讓 MCP 之後能自動提供 `sourceUrls`），請參考 [`fx-rate-ingestion.md`](../../card-rewards-evidence/workflows/fx-rate-ingestion.md)。
+> 外幣推薦**預設無須在頂層傳入單一 `fx` 物件**！系統內部會為直接刷卡與跨境電子錢包分別採用適當的牌告匯率試算實質淨回饋。
+> 唯有當系統回傳 `requiredActions` 要求補充特定路徑的事實時，才於重試時透過 `routeFacts: [{ routeId, fx }]` 陣列提供該路徑專屬匯率。
 > 詳細工具 Property 結構與 JSON 骨架，請參考 [推薦專屬工具規格](recommendation-tools-specification.md)。
 
 ---
@@ -103,37 +103,41 @@ recommend({
 
 ## 4. 標準 Payload 範例
 
-### `fx` Snapshot 結構
-```json
-{
-  "id": "fx_quote_jpy_twd",
-  "baseCurrency": "JPY",
-  "quoteCurrency": "TWD",
-  "ratePpm": 209300,
-  "capturedAt": "2026-09-17T12:00:00Z",
-  "maxAgeSeconds": 86400,
-  "provider": "TaishinBank",
-  "rateType": "cash_selling",
-  "sourceUrl": "https://www.taishinbank.com.tw/TSB/personal/deposit/lookup/realtime/"
-}
-```
-
-### 攜帶 `fx` 重試調用
+### 4.1 初次探索推薦（預設無須帶任何 `fx`）
+直接傳入商家與自然金額，系統自動展開所有可用卡片與多層路徑並預估淨效益：
 ```json
 {
   "merchant": "Bic Camera",
   "amount": { "amountMinor": 10000, "currency": "JPY" },
-  "fx": {
-    "id": "fx_quote_jpy_twd",
-    "baseCurrency": "JPY",
-    "quoteCurrency": "TWD",
-    "ratePpm": 209300,
-    "capturedAt": "2026-09-17T12:00:00Z",
-    "maxAgeSeconds": 86400,
-    "provider": "TaishinBank",
-    "rateType": "cash_selling",
-    "sourceUrl": "https://www.taishinbank.com.tw/TSB/personal/deposit/lookup/realtime/"
-  },
+  "country": "JP",
+  "channel": "in_store"
+}
+```
+
+### 4.2 特定跨境路徑重試（使用 `routeFacts` 補充專屬匯率）
+當針對特定跨境電子錢包（例如台新 Pay+ 掃日本 PayPay）需要指定精確報價時，使用 `routeFacts` 陣列提供該路徑專屬匯率，不影響其他直刷信用卡：
+```json
+{
+  "merchant": "東京燒肉店",
+  "amount": { "amountMinor": 30000, "currency": "JPY" },
+  "country": "JP",
+  "channel": "in_store",
+  "routeFacts": [
+    {
+      "routeId": "route_taishin_paypay",
+      "fx": {
+        "id": "fx_quote_jpy_twd_taishin",
+        "baseCurrency": "JPY",
+        "quoteCurrency": "TWD",
+        "ratePpm": 218500,
+        "capturedAt": "2026-09-17T12:00:00Z",
+        "maxAgeSeconds": 86400,
+        "provider": "TaishinBank",
+        "rateType": "cash_selling",
+        "sourceUrl": "https://www.taishinbank.com.tw/TSB/personal/deposit/lookup/realtime/"
+      }
+    }
+  ],
   "expectedResultVersion": 1
 }
 ```

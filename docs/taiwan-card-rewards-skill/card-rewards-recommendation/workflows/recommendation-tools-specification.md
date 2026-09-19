@@ -21,42 +21,28 @@
 - **用途**：消費前比價，支援直接刷卡與多層付款路徑。
 - **Properties 結構**：
   - `merchant` (string, 必填): 商家名稱或模糊字串
-  - `amount` (object, 選填): `{ amountMinor: number, currency: string }`
+  - `amount` (object, 選填): `{ amountMinor: number, currency: string }`（自然金融次單位：JPY/KRW 等無小數幣別傳入實際整數如 50000 JPY；TWD/USD 等 2 位小數幣別以分為單位，如 100 TWD 為 10000）
   - `country` (string, 選填): 國別代碼 (e.g. "TW", "JP")
   - `channel` (string, 選填): 交易通路，**封閉枚舉**：
     - `"online"`: 線上網購、APP 內扣款
     - `"in_store"`: 實體門市刷卡
-  - `paymentMethod` (string, 選填): 支付方式代碼（如 `"direct_card"`, `"line_pay"`, `"jkopay"`, `"apple_pay"`）
+  - `paymentMethod` (string, 選填): 支付方式代碼（如 `"direct_card"`, `"line_pay"`, `"jkopay"`, `"apple_pay"`；未填時自動展開各卡最佳姿勢）
   - `cardIds` (array of string, 選填): 限制篩選之特定卡片 ID 陣列
   - `routeIds` (array of string, 選填): 限制篩選之支付路徑 ID 陣列
-  - `fx` (object, 外幣時選填):
-    - `id` (string, 必填): 快照識別碼
-    - `baseCurrency` (string, 必填): 交易外幣 (e.g. "JPY", "USD")
-    - `quoteCurrency` (string, 必填): 結算本幣 (台灣卡為 "TWD")
-    - `ratePpm` (integer, 必填): 百萬分率匯率 (整數)
-    - `capturedAt` (string, 必填): ISO 8601 UTC 時間
-    - `provider` (string, 必填): 報價銀行或組織代碼
-    - `rateType` (string, 必填): **封閉枚舉**：`"card_scheme"` \| `"cash_selling"` \| `"spot_selling"` \| `"mid_market"`
+  - `routeFacts` (array of object, 重試或特定路徑補充時選填): 針對個別支付路徑補充專屬事實或匯率（`[{ routeId, edgeId, fx }]`）
   - `eligibilityFacts` (array of object, 選填): 補充資格自報事實陣列
   - `expectedResultVersion` (string, 重試時選填): 鎖定版本防止並行漂移
   - `limit` (number, 選填): 每頁回傳筆數 (預設 10)
 
+> [!NOTE]
+> 外幣推薦預設**無須在頂層提供單一 `fx` 物件**！系統內部會為直刷信用卡與跨境錢包分別套用適當的參考牌告。唯有在需要針對特定路徑注入專屬匯率時，才透過 `routeFacts` 陣列提供。
 
 ```json
 {
   "merchant": "Bic Camera",
-  "amount": { "amountMinor": 5000000, "currency": "JPY" },
+  "amount": { "amountMinor": 50000, "currency": "JPY" },
   "country": "JP",
   "channel": "in_store",
-  "fx": {
-    "id": "fx_jpy_twd_bot",
-    "baseCurrency": "JPY",
-    "quoteCurrency": "TWD",
-    "ratePpm": 215400,
-    "capturedAt": "2026-09-17T08:00:00Z",
-    "provider": "BankOfTaiwan",
-    "rateType": "cash_selling"
-  },
   "limit": 5
 }
 ```

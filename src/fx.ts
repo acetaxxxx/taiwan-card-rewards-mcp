@@ -347,7 +347,7 @@ export function buildFxResolutionRequest(params: {
     rateDirection: 'base_to_quote',
     ...(params.scope ? { scope: params.scope } : {}),
     freshness: { maxAgeSeconds: params.transaction.fx?.maxAgeSeconds ?? 7 * 24 * 3600, targetTime: params.transaction.occurredAt },
-    requiredFields: ['baseCurrency', 'quoteCurrency', 'ratePpm', 'capturedAt', 'provider', 'rateType', 'sourceUrl', 'contentHash'],
+    requiredFields: ['baseCurrency', 'quoteCurrency', 'ratePpm', 'capturedAt', 'provider', 'rateType', 'sourceUrl'],
     submission: params.submission ?? { tool: transactionKind === 'planned' ? 'recommend' : 'record_transaction', field: transactionKind === 'planned' ? 'fx' : 'transaction.fx' },
     ...(needsUserQuestion ? { userQuestion: FX_USER_QUESTION } : {}),
   };

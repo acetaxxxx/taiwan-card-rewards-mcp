@@ -3,6 +3,7 @@ import { isDeepStrictEqual } from 'node:util';
 import { type LedgerStore, type RecordedTransaction, type StoredState, contentHash } from './store.js';
 import { EventRewardLedger, convertMinor, createPaymentEventRewardCandidate, decidePaymentEventRewards, evaluateOffer, evaluatePredicate, matchPaymentEvent, matchPaymentEventChain, matchPaymentRouteSelector, rankCards, resolveCyclePeriodKey } from './evaluator.js';
 import type { CardDescriptor, CardSwitchInput, CardSwitchProjection, CardSwitchStatus, CapPeriod, CapPoolDefinition, Diagnostic, EvaluationContext, MerchantIdentity, MerchantResolution, Money, OfferConfirmation, OfferRuleVersion, OfferSourceSnapshot, RewardBreakdown, RewardComponentRecord, TransactionTuple, UserBenefitInput, UserBenefitStatus, EvidenceRecord, PaymentRouteRecord, PaymentCapabilityRecord, PaymentAccountRecord, EventRewardLedgerRecord, EventRewardReversalRecord, PaymentPathRequest, PaymentPathRecommendation, PaymentPathCandidate, PaymentPathEvent, EligibilityFact, RewardValuationSnapshot, FxResolutionRequest, FxEvaluationContext, AppliedFxRate, RecommendationIntent, RecommendationIntentResult, IntentCandidate, FxSnapshot, ListTransactionsOptions, ListTransactionsResult, TransactionSummaryItem, TransactionDetailItem, FundingInstrument, TransactionListItem, IngestionFlowRecord, IngestionSourceScope, IngestionDraftTombstone, IngestionBenefitLeafSubmission, IngestionBenefitArtifact, IngestionExclusionArtifact, AppliedExclusion, IngestionCompletionProof, IngestionParentContinuation, IngestionCoverageLedger } from './types.js';
+import { getCurrencyExponent } from './types.js';
 import type { StartupConfig } from './startup.js';
 import { RewardServiceError } from './errors.js';
 import { validateCard, validateCapPool, validateConfirmation, validateEligibilityFact, validateMerchant, validateRecommendationTransaction, validateRule, validateSnapshot, validateTransaction, validateEvidence, validateFactCandidate, validatePaymentRouteRecord, validatePaymentCapability, validatePaymentAccountRecord, validateEventRewardInput, validatePaymentEvent, validatePaymentEventChainRule, validatePaymentEventRule, validateRewardValuationSnapshot, validateListTransactionsOptions, validateIngestionSourceScope, validateIngestionSourceCapture, validateIngestionManifest, validateIngestionBenefitLeaf, validateIngestionExclusionLeaf, validateIngestionParentContinuation } from './validation.js';
@@ -1375,7 +1376,6 @@ export class RewardService {
       ...(merchant ? { merchant } : {}), ...(country ? { country } : {}),
       ...(input.channel ? { channel: input.channel } : {}),
       ...(input.paymentMethod ? { paymentMethod: input.paymentMethod } : {}),
-      ...(input.fx ? { fx: input.fx } : {}),
     }) : undefined;
     const context = {
       ...this.context(state, evaluatedAt, transaction),
@@ -1528,7 +1528,7 @@ export class RewardService {
       fxResolutionRequest ??= request;
     };
     const allSuppliedFx: FxSnapshot[] = [
-      ...(input.fx ? [input.fx] : []),
+      ...(Array.isArray(input.fx) ? input.fx : input.fx ? [input.fx] : []),
       ...(input.routeFacts?.map((f) => f.fx) ?? []),
     ];
     if (input.routeIds === undefined) for (const card of cards) {
@@ -1550,9 +1550,40 @@ export class RewardService {
       };
       const applicableFx = isCrossCurrency ? findBestMatchingFx(allSuppliedFx, cardContext) : undefined;
       const tx = transaction ? { ...transaction, cardId: card.id, route: { kind: 'direct_card' as const }, ...(applicableFx ? { fx: applicableFx } : { fx: undefined }) } : undefined;
-      const evaluations = rules.map(rule => ({ rule, result: tx ? evaluateOffer(rule, tx, context) : undefined }));
+
+      const postureMethods = new Set<string | undefined>([undefined]);
+      if (input.paymentMethod === undefined) {
+        for (const rule of rules) {
+          for (const pm of rule.match.paymentMethods ?? []) {
+            postureMethods.add(pm);
+          }
+        }
+      } else {
+        postureMethods.clear();
+        postureMethods.add(input.paymentMethod);
+      }
+
+      let bestRow: ReturnType<typeof rankCards>[0] | undefined = undefined;
+      let bestEvaluations: { rule: OfferRuleVersion; result: RewardBreakdown | undefined }[] = [];
+      let bestMethod: string | undefined = undefined;
+
+      for (const pm of postureMethods) {
+        const testTx = tx ? { ...tx, ...(pm ? { paymentMethod: pm } : { paymentMethod: undefined }) } : undefined;
+        const evals = rules.map((rule) => ({ rule, result: testTx ? evaluateOffer(rule, testTx, context) : undefined }));
+        const rowCandidate = testTx ? rankCards([card], rules, testTx, context, 1)[0] : undefined;
+        const rewardMinor = rowCandidate?.status === 'ok' ? (rowCandidate.cappedReward?.amountMinor ?? 0) : -1;
+        const currentBestMinor = bestRow?.status === 'ok' ? (bestRow.cappedReward?.amountMinor ?? 0) : -1;
+
+        if (bestRow === undefined || rewardMinor > currentBestMinor) {
+          bestRow = rowCandidate;
+          bestEvaluations = evals;
+          bestMethod = pm;
+        }
+      }
+
+      const evaluations = bestEvaluations.length ? bestEvaluations : rules.map((rule) => ({ rule, result: tx ? evaluateOffer(rule, tx, context) : undefined }));
       const projected = evaluations.map(({ rule, result }) => projectRule(rule, result));
-      const row = tx ? rankCards([card], rules, tx, context, 1)[0] : undefined;
+      const row = bestRow;
       const unresolved = projected.some(rule => rule.status === 'unknown' || rule.status === 'potential');
       if (tx) {
         for (const { rule, result } of evaluations) for (const diagnostic of result?.diagnostics ?? []) {
@@ -1677,7 +1708,7 @@ export class RewardService {
           return { status: 'unavailable' as const, assumption: 'no fx snapshot was supplied for this foreign-currency rule; the Agent must fetch a current rate and supply it inline before an estimate can be calculated' };
         }
         const stale = !isFxFresh(applicableFx, evaluatedAt);
-        const fallback = input.fx?.id === applicableFx.id && (!applicableFx.cardIdScope && !applicableFx.issuerScope && !applicableFx.cardScheme);
+        const fallback = allSuppliedFx.some(f => f.id === applicableFx.id) && (!applicableFx.cardIdScope && !applicableFx.issuerScope && !applicableFx.cardScheme);
         return {
           status: stale ? 'stale_estimate' as const : fallback ? 'estimated_fallback' as const : 'estimated' as const,
           provider: applicableFx.provider,
@@ -1704,7 +1735,7 @@ export class RewardService {
       candidates.push({
         id: `card:${card.id}`, kind: 'direct_card', cardId: card.id,
         fundingSource: { kind: 'credit_card', cardId: card.id },
-        nodes: [{ id: 'funding', kind: 'funding_source', displayName: card.productName }, { id: 'merchant', kind: 'merchant', displayName: rawMerchant }],
+        nodes: [{ id: 'funding', kind: 'funding_source', displayName: card.productName }, ...(bestMethod ? [{ id: 'payment_method', kind: 'payment_service' as const, displayName: bestMethod }] : []), { id: 'merchant', kind: 'merchant', displayName: rawMerchant }],
         events: tx ? [{ kind: 'purchase', fromNodeId: 'funding', toNodeId: 'merchant', amount: tx.amount, transition: 'card_authorization' }] : [],
         status: row?.status === 'ok' ? 'ready' : !tx || unresolved || !rules.length ? 'unknown' : 'no_match',
         matchedRules: projected,
@@ -1718,7 +1749,8 @@ export class RewardService {
     if (transaction && this.metadataUser) {
       const routeFactMap = new Map<string, { routeId: string; edgeId?: string; fx: FxSnapshot }>();
       for (const fact of input.routeFacts ?? []) routeFactMap.set(`${fact.routeId}|${fact.edgeId ?? '*'}`, fact);
-      if (input.fx) for (const route of routes) {
+      const topLevelFxList: FxSnapshot[] = Array.isArray(input.fx) ? [...input.fx] : input.fx ? [input.fx] : [];
+      if (topLevelFxList.length > 0) for (const route of routes) {
         const fundingCardId = route.funding.kind === 'credit_card' ? route.funding.cardId : undefined;
         const card = fundingCardId ? state.cards.find((candidate) => candidate.id === fundingCardId) : undefined;
         for (const edge of route.edges ?? []) {
@@ -1741,9 +1773,10 @@ export class RewardService {
               asOf: evaluatedAt,
               requireFresh: false,
             };
-            if (isFxCompatible({ snapshot: input.fx, context: edgeContext })) {
+            const matchedSnapshot = findBestMatchingFx(topLevelFxList, edgeContext);
+            if (matchedSnapshot) {
               const key = `${route.id}|${edge.edgeId}`;
-              if (!routeFactMap.has(key)) routeFactMap.set(key, { routeId: route.id, edgeId: edge.edgeId, fx: input.fx });
+              if (!routeFactMap.has(key)) routeFactMap.set(key, { routeId: route.id, edgeId: edge.edgeId, fx: matchedSnapshot });
             }
           }
         }
@@ -1778,7 +1811,7 @@ export class RewardService {
         }) ? (() => {
           const stale = fxCostEvents.some((event) => !isFxFresh(event.fx!, evaluatedAt));
           const observation = fxCostEvents[0]!.fx!;
-          const fallback = input.fx?.id === observation.id && (!observation.edgeIdScope && !observation.routeIdScope && !observation.cardIdScope && !observation.cardScheme);
+          const fallback = allSuppliedFx.some(f => f.id === observation.id) && (!observation.edgeIdScope && !observation.routeIdScope && !observation.cardIdScope && !observation.cardScheme);
           return { status: stale ? 'stale_estimate' as const : fallback ? 'estimated_fallback' as const : 'estimated' as const, provider: observation.provider, capturedAt: observation.capturedAt, ...(observation.sourceUrl ? { sourceUrl: observation.sourceUrl } : {}), assumption: stale ? 'using a route FX snapshot beyond its freshness window; refresh before relying on the value' : fallback ? 'using the Agent-supplied fx snapshot as a general currency-pair fallback, not an exact per-edge fact; route policy and final settlement cost remain unconfirmed' : 'using the route or edge FX snapshot for foreign-currency costs' };
         })() : { status: 'unavailable' as const, assumption: 'foreign-currency route costs cannot be compared without a matching route or edge FX snapshot' };
         const candidateStatus = supported || readyNoReward ? 'ready' : path.status === 'blocked' ? 'blocked' : 'unknown';
@@ -2353,7 +2386,10 @@ export class RewardService {
       const convertCost = (cost: Money, fx: NonNullable<PaymentPathEvent['fx']> | undefined): number | undefined => {
         if (cost.currency === input.amount.currency) return cost.amountMinor;
         if (!fx || fx.baseCurrency !== cost.currency || fx.quoteCurrency !== input.amount.currency) return undefined;
-        return Math.floor(cost.amountMinor * fx.ratePpm / 1_000_000);
+        const baseExp = getCurrencyExponent(cost.currency);
+        const quoteExp = getCurrencyExponent(input.amount.currency);
+        const factor = 10 ** (quoteExp - baseExp);
+        return Math.floor(cost.amountMinor * fx.ratePpm * factor / 1_000_000);
       };
       const costValues = events.flatMap((event) => [event.fee, event.markup, event.foreignTransactionFee, event.dcc?.selected ? event.dcc.fee : undefined].filter((value): value is Money => value !== undefined).map((value) => ({ value, converted: convertCost(value, event.fx), isStale: event.fx ? !isFxFresh(event.fx, asOf) : false })));
       const feeMismatch = costValues.some((cost) => cost.converted === undefined || cost.isStale);

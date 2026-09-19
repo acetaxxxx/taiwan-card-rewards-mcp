@@ -1461,7 +1461,11 @@ export function validateRecommendationSupplementalFacts(value: unknown): Recomme
     ...(merchant ? { merchant } : {}),
     ...(item.amount === undefined ? {} : { amount: validateMoney(item.amount, 'recommend supplementalFacts.amount') }),
     ...(transaction ? { transaction } : {}),
-    ...(item.fx === undefined ? {} : { fx: validateFxSnapshot(item.fx, 'recommend supplementalFacts.fx') }),
+    ...(item.fx === undefined ? {} : {
+      fx: Array.isArray(item.fx)
+        ? item.fx.map((entry, idx) => validateFxSnapshot(entry, `recommend supplementalFacts.fx[${idx}]`))
+        : validateFxSnapshot(item.fx, 'recommend supplementalFacts.fx')
+    }),
     ...(routeFacts ? { routeFacts } : {}),
     ...(eligibilityFacts ? { eligibilityFacts } : {}),
     ...(benefitEvidence ? { benefitEvidence } : {}),
@@ -1508,7 +1512,11 @@ export function validateRecommendationIntent(value: unknown): RecommendationInte
     ...(input.childFlowId === undefined ? {} : { childFlowId: requiredString(input.childFlowId, 'childFlowId', true) }),
     ...(input.resumedFlowId === undefined ? {} : { resumedFlowId: requiredString(input.resumedFlowId, 'resumedFlowId', true) }),
     ...(input.supplementalFacts === undefined ? {} : { supplementalFacts: validateRecommendationSupplementalFacts(input.supplementalFacts) }),
-    ...(input.fx === undefined ? {} : { fx: validateFxSnapshot(input.fx, 'recommend fx') }),
+    ...(input.fx === undefined ? {} : {
+      fx: Array.isArray(input.fx)
+        ? input.fx.map((entry, idx) => validateFxSnapshot(entry, `recommend fx[${idx}]`))
+        : validateFxSnapshot(input.fx, 'recommend fx')
+    }),
     ...(input.routeFacts === undefined ? {} : { routeFacts: (() => {
       if (!Array.isArray(input.routeFacts)) throw new RewardServiceError('INVALID_INPUT', 'routeFacts must be an array');
       if (input.routeFacts.length > 128) throw new RewardServiceError('INVALID_INPUT', 'routeFacts must contain at most 128 entries');
