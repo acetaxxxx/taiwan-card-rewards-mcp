@@ -40,3 +40,11 @@
 - [x] **Task 7.4**: 在 `recommendation-tools-specification.md` 與 `payment-route-and-fx.md` 補齊信用卡專屬 `routeFacts`（卡組織 `rateType: "card_scheme"` / JCB / Visa / Mastercard）及多軌道並陳範例。
 - [x] **Task 7.5**: 補齊單元測試（`tests/case6-recommendation-improvements.test.ts` 新增 Issue 4、Issue 5 測試，共 293 個測試全數通過）。
 
+## Phase 8: 匯率自然輸入支援（免 Agent 計算 `ratePpm`）
+- [x] **Task 8.1**: 在 `src/types.ts` 擴充 `FxSnapshot`，新增選填 `rate?: number` 自然匯率屬性。
+- [x] **Task 8.2**: 在 `src/validation.ts` 的 `validateFxSnapshot` 支援自然匯率 `rate` / `exchangeRate`，自動轉換為 `ratePpm`（`Math.round(rate * 1_000_000)`），並支援 `ratePpm < 100` 浮點數自動容錯縮放。
+- [x] **Task 8.3**: 在 `src/mcp-contract.ts` 更新 `fx` schema，開放 `rate` 與 `exchangeRate`，並將 `ratePpm` 從必填移除。
+- [x] **Task 8.4**: 更新 Skill 文檔（`payment-route-and-fx.md` 與 `recommendation-tools-specification.md`）之範例與虛擬碼，改以自然匯率 `rate: 0.215` 呈現。
+- [x] **Task 8.5**: 新增單元測試 `tests/case6-recommendation-improvements.test.ts`（Issue 6: Natural exchange rate input）。
+
+

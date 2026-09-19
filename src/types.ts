@@ -394,6 +394,8 @@ export interface FxSnapshot {
   id: string;
   baseCurrency: Currency;
   quoteCurrency: Currency;
+  /** Natural exchange rate as displayed on quotes/banks (e.g. 0.215 for JPY/TWD). */
+  rate?: number | undefined;
   /** quote minor units per base minor unit, in parts per million. */
   ratePpm: number;
   capturedAt: string;

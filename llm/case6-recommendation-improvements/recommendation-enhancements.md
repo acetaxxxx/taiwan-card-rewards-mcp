@@ -20,6 +20,11 @@ This document provides AI agents with specifications for the improved recommenda
 ## 2. FX Rate Architecture & Decoupling
 - **Standard `recommend` Call (No `fx` Required)**:
   - By default, `recommend` requires **no `fx` input at all**. The engine automatically applies appropriate benchmark rates (spot selling for credit cards, cash selling for cross-border wallets).
+- **Natural Exchange Rate Input (`rate` vs `ratePpm`)**:
+  - Agents can directly supply the natural quote rate displayed on screen/bank quotes (e.g. `"rate": 0.215` for JPY/TWD or `"rate": 32.5` for USD/TWD), or use the alias `"exchangeRate"`.
+  - The MCP server automatically converts `rate` to `ratePpm` (`Math.round(rate * 1_000_000)`). Agents **do not need to calculate `ratePpm`**.
+  - Float resilience: If an agent mistakenly supplies a floating rate in `ratePpm` (e.g. `"ratePpm": 0.215`), the server auto-detects it and scales it by 1,000,000.
+  - Backwards compatibility: Legacy integer `ratePpm` (e.g. `215000`) is fully supported.
 - **Removal of Single Top-Level `fx` Constraint**:
   - The historical single top-level `fx` object with an exclusive `rateType` (e.g. `cash_selling`) is removed from recommended tool usage patterns. It must never poison or fail-close other payment paths (e.g., credit cards requiring `card_scheme`).
 - **Route-Specific Clearing via `routeFacts`**:
@@ -32,7 +37,7 @@ This document provides AI agents with specifications for the improved recommenda
           "id": "fx_quote_jpy_twd_jcb",
           "baseCurrency": "JPY",
           "quoteCurrency": "TWD",
-          "ratePpm": 215000,
+          "rate": 0.215,
           "capturedAt": "2026-09-17T12:00:00Z",
           "provider": "JCB",
           "rateType": "card_scheme",
@@ -45,6 +50,7 @@ This document provides AI agents with specifications for the improved recommenda
   - Route-specific rate overrides on retry should strictly be supplied via the `routeFacts: [{ routeId, edgeId, fx }]` array, preventing cross-route rate poisoning.
 - **Live Quote Snapshots**:
   - `contentHash` is optional in `FxResolutionRequest`.
+
 
 ## 3. Automatic Payment Posture Fanout
 - When `paymentMethod` is omitted in `recommend`, the engine automatically evaluates available payment postures for each card.

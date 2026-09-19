@@ -80,10 +80,23 @@ export function convertMinor(amount: Money, currency: string, tx: TransactionTup
   - `provider`: `"JCB"`, `"Visa"`, `"Mastercard"` 或報價銀行代碼
   - `cardScheme`: 對應國際卡組織（`"jcb"`, `"visa"`, `"mastercard"`）
   - `routeId`: 卡片對應之節點識別（如 `"card:fubon-jcb"`）或專屬路徑 ID
+  - `rate`: 直接填入牌告自然小數（如 `0.215`）
 - **跨境電子錢包**：
   - `rateType`: `"cash_selling"`（現鈔賣出價）
   - `provider`: 合作清算銀行代碼（如 `"TaishinBank"`, `"JKOPAY"`）
   - `routeId`: 錢包路徑代碼（如 `"route_taishin_paypay"`）
+  - `rate`: 直接填入牌告現鈔賣出自然小數（如 `0.2185`）
 - **雙軌並存**：
   - `routeFacts` 陣列支援同時提供多條路徑專屬匯率，透過嚴格的 `routeId` / `edgeId` scope 隔離，兩者互不污染。
+
+### 2.7 匯率自然輸入與自動 PPM 換算 (Natural FX Normalization)
+- **Agent 輸入自由度**：
+  - Agent 在 `fx` 快照中直接填寫牌告畫面上的自然匯率（例如 JPY/TWD 輸入 `rate: 0.215`，USD/TWD 輸入 `rate: 32.5`）。
+  - 同時相容 `exchangeRate: 0.215` 欄位別名。
+  - `ratePpm` 不再作為必填欄位，減輕呼叫端負擔。
+- **底層自動轉換與嚴格運算**：
+  - `validateFxSnapshot` 驗證階段自動以 `Math.round(rate * 1_000_000)` 計算 `ratePpm`。
+  - **浮點數容錯**：若 Agent 誤將自然小數填入 `ratePpm` 欄位（例如 `ratePpm: 0.215`，偵測到數值小於 100），系統自動以 `Math.round(ratePpm * 1_000_000)` 擴增為正確百萬分率，並將自然數值保留於 `rate`。
+  - **向後相容**：若 Agent 提供傳統整數 `ratePpm: 215000`，系統正常運作並自動反推 `rate: 0.215`，兼顧所有現存介面。
+
 

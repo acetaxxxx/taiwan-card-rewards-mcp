@@ -331,5 +331,75 @@ describe('Case6 Recommendation Improvements', () => {
     // 3% of 1,075,000 = 32,250 minor units (322.50 TWD)
     expect(cand?.reward).toEqual({ amountMinor: 32250, currency: 'TWD' });
   });
+
+  it('Issue 6: Natural exchange rate input (rate: 0.215) without agent calculating ratePpm', () => {
+    const store = new MemoryStore();
+    const service = new RewardService(store, 'u1');
+    service.registerCard({ id: 'jcb-card', issuer: 'UnionBank', productName: 'Jihe Card', network: 'JCB' });
+    const source = { id: 's1', url: 'https://example.com', fetchedAt: at, contentHash: 'h1', parserVersion: '1', verified: true as const };
+
+    service.upsertOffer(source, {
+      id: 'rule-jpy-3pct',
+      cardId: 'jcb-card',
+      version: '1',
+      sourceSnapshotId: source.id,
+      status: 'active',
+      validFrom: '2026-01-01T00:00:00Z',
+      settlementCurrency: 'TWD',
+      match: { countries: ['JP'] },
+      reward: { kind: 'percentage', rateBps: 300 }, // 3%
+    });
+
+    // Agent directly inputs natural rate: 0.215 (no ratePpm: 215000)
+    const naturalRateFx = {
+      id: 'fx-natural-quote',
+      baseCurrency: 'JPY',
+      quoteCurrency: 'TWD',
+      rate: 0.215, // Direct quote from screen/bank
+      capturedAt: at,
+      provider: 'JCB',
+      cardScheme: 'JCB',
+      rateType: 'card_scheme' as const,
+    };
+
+    const res = service.recommendIntent({
+      merchant: 'Tokyo Shop',
+      amount: { amount: 30000, currency: 'JPY' },
+      country: 'JP',
+      occurredAt: at,
+      fx: [naturalRateFx as any],
+    });
+
+    const cand = res.candidates.find(c => c.id === 'card:jcb-card');
+    expect(cand?.status).toBe('ready');
+    // 30,000 JPY * 0.215 = 6,450 TWD = 645,000 TWD minor units
+    // 3% of 645,000 = 19,350 TWD minor units
+    expect(cand?.reward).toEqual({ amountMinor: 19350, currency: 'TWD' });
+
+    // Also test rate passed as float in ratePpm: 0.215 (auto-detected and scaled)
+    const floatRatePpmFx = {
+      id: 'fx-float-ppm',
+      baseCurrency: 'JPY',
+      quoteCurrency: 'TWD',
+      ratePpm: 0.215, // Agent mistakenly put float in ratePpm
+      capturedAt: at,
+      provider: 'JCB',
+      cardScheme: 'JCB',
+      rateType: 'card_scheme' as const,
+    };
+
+    const res2 = service.recommendIntent({
+      merchant: 'Tokyo Shop',
+      amount: { amount: 30000, currency: 'JPY' },
+      country: 'JP',
+      occurredAt: at,
+      fx: [floatRatePpmFx as any],
+    });
+
+    const cand2 = res2.candidates.find(c => c.id === 'card:jcb-card');
+    expect(cand2?.status).toBe('ready');
+    expect(cand2?.reward).toEqual({ amountMinor: 19350, currency: 'TWD' });
+  });
 });
+
 

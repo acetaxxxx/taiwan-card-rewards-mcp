@@ -64,7 +64,7 @@
         "id": "fx_quote_jpy_twd_jcb",
         "baseCurrency": "JPY",
         "quoteCurrency": "TWD",
-        "ratePpm": 215000,
+        "rate": 0.215,
         "capturedAt": "2026-09-17T12:00:00Z",
         "maxAgeSeconds": 86400,
         "provider": "JCB",

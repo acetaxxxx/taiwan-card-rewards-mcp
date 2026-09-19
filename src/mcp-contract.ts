@@ -50,7 +50,28 @@ const paymentRouteSelector = closed({
 });
 const appliedExclusion = closed({ sourceLeafId: string, sourceFlowId: string, target: { type: 'string', enum: ['merchant', 'transaction_fact', 'payment_route', 'payment_method'] }, predicate, evidenceRefs: { type: 'array', items: string, minItems: 1, maxItems: 32 } }, ['sourceLeafId', 'sourceFlowId', 'target', 'predicate', 'evidenceRefs']);
 const rule = closed({ id: string, cardId: string, ownerUser: string, trustBasis: { type: 'string', enum: ['official_verified', 'user_confirmed'] }, familyId: string, supersedesRuleId: string, supersessionReason: { type: 'string', enum: ['user_correction', 'user_revocation', 'official_refresh'] }, routeId: string, routeSelector: paymentRouteSelector, version: string, sourceSnapshotId: string, status: { type: 'string', enum: ['candidate', 'active', 'stale', 'superseded', 'needs_review', 'unknown'] }, validFrom: date, validTo: date, settlementCurrency: string, match, predicate, sharedExclusions: { type: 'array', items: appliedExclusion, maxItems: 128 }, requires: { type: 'array', items: { type: 'string', enum: ['source_verified', 'user_confirmation'] } }, reward, capPoolRefs: { type: 'array', items: string, maxItems: 128 }, confirmation: closed({ confirmedAt: date, confirmedBy: string, sourceReference: string, trustBasis: { type: 'string', enum: ['official_verified', 'user_confirmed'] }, termsFingerprint: string, offerPeriod: closed({ validFrom: date, validTo: date }, ['validFrom']), rewardUnit: string, rewardConditionsSummary: string, capSummary: string }, ['confirmedAt', 'confirmedBy', 'offerPeriod', 'rewardUnit']), componentKind: { type: 'string', enum: ['merchant_loyalty', 'payment_provider', 'card_issuer'] }, sponsor: string, benefitGroup: string, useSettlementAmount: { type: 'boolean' }, stacking: { type: 'string', enum: ['confirmed', 'possible'] }, combination: closed({ mode: string, groupId: string, version: string, priority: { type: 'integer' }, prerequisiteRuleIds: { type: 'array', items: string } }, ['mode', 'groupId', 'version']), eventRule: recommendationEventRule, eventChainRule: recommendationEventChainRule }, ['id', 'version', 'sourceSnapshotId', 'status', 'validFrom', 'settlementCurrency', 'match', 'reward']);
-const fx = closed({ id: string, baseCurrency: string, quoteCurrency: string, ratePpm: { type: 'integer', minimum: 1 }, capturedAt: date, maxAgeSeconds: { type: 'integer', minimum: 1 }, provider: string, rateType: { type: 'string', enum: ['cash_selling', 'spot_selling', 'mid_market', 'card_scheme'] }, sourceUrl: { type: 'string', format: 'uri' }, contentHash: string, cardIdScope: string, issuerScope: string, rateDirection: { type: 'string', enum: ['base_to_quote', 'quote_to_base'] }, conversionOwner: { type: 'string', enum: ['merchant', 'wallet', 'payment_provider', 'card_network', 'issuer', 'bank', 'acquirer', 'card_scheme', 'merchant_dcc', 'unknown'] }, conversionTiming: { type: 'string', enum: ['transaction', 'clearing', 'settlement', 'posting'] }, cardScheme: string, routeIdScope: string, edgeIdScope: string }, ['id', 'baseCurrency', 'quoteCurrency', 'ratePpm', 'capturedAt', 'provider', 'rateType']);
+const fx = closed({
+  id: string,
+  baseCurrency: string,
+  quoteCurrency: string,
+  rate: { type: 'number', minimum: 0, description: 'Natural exchange rate as displayed on quotes/banks (e.g. 0.215 for JPY/TWD, 32.5 for USD/TWD). PPM conversion is handled automatically.' },
+  exchangeRate: { type: 'number', minimum: 0, description: 'Alias for natural exchange rate.' },
+  ratePpm: { type: 'number', minimum: 0, description: 'Rate in parts-per-million (e.g. 215000). Supported for backwards compatibility.' },
+  capturedAt: date,
+  maxAgeSeconds: { type: 'integer', minimum: 1 },
+  provider: string,
+  rateType: { type: 'string', enum: ['cash_selling', 'spot_selling', 'mid_market', 'card_scheme'] },
+  sourceUrl: { type: 'string', format: 'uri' },
+  contentHash: string,
+  cardIdScope: string,
+  issuerScope: string,
+  rateDirection: { type: 'string', enum: ['base_to_quote', 'quote_to_base'] },
+  conversionOwner: { type: 'string', enum: ['merchant', 'wallet', 'payment_provider', 'card_network', 'issuer', 'bank', 'acquirer', 'card_scheme', 'merchant_dcc', 'unknown'] },
+  conversionTiming: { type: 'string', enum: ['transaction', 'clearing', 'settlement', 'posting'] },
+  cardScheme: string,
+  routeIdScope: string,
+  edgeIdScope: string,
+}, ['id', 'baseCurrency', 'quoteCurrency', 'capturedAt', 'provider', 'rateType']);
 const route = closed({ kind: { type: 'string', enum: ['direct_card', 'wallet', 'merchant_app'] }, providerId: string, appId: string, displayName: string }, ['kind']);
 const routeContext = closed({ merchantId: string, acceptanceProviderId: string, consumerAppId: string, walletProviderId: string, interoperabilitySchemeId: string, paymentMethod: string, intermediateProviderId: string, cardNetwork: string, issuer: string, fundingSource: string, fundingSubtype: { type: 'string', enum: ['linked_bank_account', 'wallet_balance', 'foreign_currency_account'] }, transactionCurrency: string, settlementCurrency: string, billingCurrency: string, conversionOwner: { type: 'string', enum: ['merchant', 'wallet', 'payment_provider', 'card_network', 'issuer', 'bank', 'acquirer', 'card_scheme', 'merchant_dcc', 'unknown'] }, rateType: { type: 'string', enum: ['cash_selling', 'spot_selling', 'mid_market', 'card_scheme'] }, conversionTiming: { type: 'string', enum: ['transaction', 'clearing', 'settlement', 'posting'] }, foreignTransactionFee: money, markup: money, serviceFee: money, dcc: { type: 'boolean' } }, ['transactionCurrency']);
 const paymentRouteNode = closed({ id: string, kind: { type: 'string', enum: ['funding_source', 'wallet_balance', 'payment_service', 'acceptance_network', 'merchant'] }, displayName: string }, ['id', 'kind', 'displayName']);

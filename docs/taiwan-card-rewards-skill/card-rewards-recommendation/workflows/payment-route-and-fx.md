@@ -61,18 +61,15 @@ ELSE:
             targetUrl = 發卡銀行牌告現鈔賣出價
     rateQuote = 查詢 targetUrl 對應之 rateType 牌告匯率
 
-// 步驟 3：量化計算 PPM 整數值
-ratePpm = Math.round(rateQuote * 1000000)
-
-// 步驟 4：組裝快照並重新調用
+// 步驟 3：組裝快照並重新調用（直接填入牌告自然匯率，MCP 會自動換算 PPM）
 fxSnapshot = {
     id: "fx_quote_" + baseCurrency.toLowerCase() + "_" + quoteCurrency.toLowerCase(),
     baseCurrency: baseCurrency,
     quoteCurrency: quoteCurrency,
-    ratePpm: ratePpm,
+    rate: rateQuote, // 直接填入畫面上看到的牌告匯率（例如 0.215 或 32.5），無需手動乘 1,000,000
     capturedAt: 當前 ISO 8601 UTC 時間,
     maxAgeSeconds: 86400,
-    provider: 報價機構名稱 (例如 "BankOfTaiwan", "TaishinBank"),
+    provider: 報價機構名稱 (例如 "JCB", "BankOfTaiwan", "TaishinBank"),
     rateType: rateType,
     sourceUrl: targetUrl
 }
@@ -140,7 +137,7 @@ recommend({
         "id": "fx_quote_jpy_twd_jcb",
         "baseCurrency": "JPY",
         "quoteCurrency": "TWD",
-        "ratePpm": 215000,
+        "rate": 0.215,
         "capturedAt": "2026-09-17T12:00:00Z",
         "maxAgeSeconds": 86400,
         "provider": "JCB",
@@ -168,7 +165,7 @@ recommend({
         "id": "fx_quote_jpy_twd_taishin",
         "baseCurrency": "JPY",
         "quoteCurrency": "TWD",
-        "ratePpm": 218500,
+        "rate": 0.2185,
         "capturedAt": "2026-09-17T12:00:00Z",
         "maxAgeSeconds": 86400,
         "provider": "TaishinBank",
@@ -195,7 +192,7 @@ recommend({
         "id": "fx_quote_jpy_twd_jcb",
         "baseCurrency": "JPY",
         "quoteCurrency": "TWD",
-        "ratePpm": 215000,
+        "rate": 0.215,
         "capturedAt": "2026-09-17T12:00:00Z",
         "maxAgeSeconds": 86400,
         "provider": "JCB",
@@ -210,7 +207,7 @@ recommend({
         "id": "fx_quote_jpy_twd_taishin",
         "baseCurrency": "JPY",
         "quoteCurrency": "TWD",
-        "ratePpm": 218500,
+        "rate": 0.2185,
         "capturedAt": "2026-09-17T12:00:00Z",
         "maxAgeSeconds": 86400,
         "provider": "TaishinBank",

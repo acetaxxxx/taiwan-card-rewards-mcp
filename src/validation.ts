@@ -100,7 +100,7 @@ export function validateRewardValuationSnapshot(value: unknown): RewardValuation
 
 export function validateFxSnapshot(value: unknown, name: string): FxSnapshot {
   const item = object(value, name);
-  keys(item, ['id', 'baseCurrency', 'quoteCurrency', 'ratePpm', 'capturedAt', 'maxAgeSeconds', 'provider', 'rateType', 'sourceUrl', 'contentHash', 'cardIdScope', 'issuerScope', 'rateDirection', 'conversionOwner', 'conversionTiming', 'cardScheme', 'routeIdScope', 'edgeIdScope'], name);
+  keys(item, ['id', 'baseCurrency', 'quoteCurrency', 'ratePpm', 'rate', 'exchangeRate', 'capturedAt', 'maxAgeSeconds', 'provider', 'rateType', 'sourceUrl', 'contentHash', 'cardIdScope', 'issuerScope', 'rateDirection', 'conversionOwner', 'conversionTiming', 'cardScheme', 'routeIdScope', 'edgeIdScope'], name);
   const rateType = requiredString(item.rateType, `${name}.rateType`);
   if (!['cash_selling', 'spot_selling', 'mid_market', 'card_scheme'].includes(rateType)) throw new RewardServiceError('INVALID_INPUT', `${name}.rateType is invalid`);
   if (item.rateDirection !== undefined && !['base_to_quote', 'quote_to_base'].includes(String(item.rateDirection))) {
@@ -112,11 +112,37 @@ export function validateFxSnapshot(value: unknown, name: string): FxSnapshot {
   if (item.conversionTiming !== undefined && !['transaction', 'clearing', 'settlement', 'posting'].includes(String(item.conversionTiming))) {
     throw new RewardServiceError('INVALID_INPUT', `${name}.conversionTiming is invalid`);
   }
+
+  let ratePpm: number;
+  let rate: number | undefined;
+  if (item.rate !== undefined || item.exchangeRate !== undefined) {
+    const rawRate = item.rate ?? item.exchangeRate;
+    if (typeof rawRate !== 'number' || !Number.isFinite(rawRate) || rawRate <= 0) {
+      throw new RewardServiceError('INVALID_INPUT', `${name}.rate must be a positive finite number`);
+    }
+    rate = rawRate;
+    ratePpm = Math.round(rawRate * 1_000_000);
+  } else if (item.ratePpm !== undefined) {
+    if (typeof item.ratePpm !== 'number' || !Number.isFinite(item.ratePpm) || item.ratePpm <= 0) {
+      throw new RewardServiceError('INVALID_INPUT', `${name}.ratePpm must be a positive finite number`);
+    }
+    if (item.ratePpm < 100) {
+      rate = item.ratePpm;
+      ratePpm = Math.round(item.ratePpm * 1_000_000);
+    } else {
+      ratePpm = Math.round(item.ratePpm);
+      rate = ratePpm / 1_000_000;
+    }
+  } else {
+    throw new RewardServiceError('INVALID_INPUT', `${name} must include rate or ratePpm`);
+  }
+
   return {
     id: requiredString(item.id, `${name}.id`, true),
     baseCurrency: requiredString(item.baseCurrency, `${name}.baseCurrency`, true).toUpperCase(),
     quoteCurrency: requiredString(item.quoteCurrency, `${name}.quoteCurrency`, true).toUpperCase(),
-    ratePpm: finiteRate(item.ratePpm, `${name}.ratePpm`, 1),
+    ...(rate !== undefined ? { rate } : {}),
+    ratePpm,
     capturedAt: iso(item.capturedAt, `${name}.capturedAt`),
     ...(item.maxAgeSeconds === undefined ? {} : { maxAgeSeconds: safeInt(item.maxAgeSeconds, `${name}.maxAgeSeconds`, 1) }),
     provider: requiredString(item.provider, `${name}.provider`),
