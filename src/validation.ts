@@ -1548,9 +1548,20 @@ export function validateRecommendationIntent(value: unknown): RecommendationInte
   return {
     merchant, limit, page,
     ...(input.amount === undefined ? {} : {
-      amount: (typeof input.amount === 'number' && typeof input.currency === 'string')
-        ? validateMoney({ amount: input.amount, currency: input.currency }, 'amount')
-        : validateMoney(input.amount, 'amount')
+      amount: (() => {
+        // Flat form: amount is a bare number, use top-level currency (default TWD)
+        if (typeof input.amount === 'number') {
+          const currency = typeof input.currency === 'string' ? input.currency : 'TWD';
+          return validateMoney({ amount: input.amount, currency }, 'amount');
+        }
+        // Object form: if currency is missing inside the object, fall back to top-level currency or TWD
+        const amtObj = input.amount as Record<string, unknown>;
+        if (amtObj.currency === undefined) {
+          const currency = typeof input.currency === 'string' ? input.currency : 'TWD';
+          return validateMoney({ ...amtObj, currency }, 'amount');
+        }
+        return validateMoney(input.amount, 'amount');
+      })()
     }),
     ...(input.country === undefined ? {} : { country: requiredString(input.country, 'country') }),
     ...(input.market === undefined ? {} : { market: requiredString(input.market, 'market') }),

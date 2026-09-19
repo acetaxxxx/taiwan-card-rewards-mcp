@@ -101,11 +101,12 @@ recommend({
 ## 4. 標準 Payload 範例
 
 ### 4.1 初次探索推薦（自然金額輸入，預設無須帶任何 `fx`）
-直接傳入商家與自然金額（如 USD `4.8`、TWD `20`、JPY `10000`），系統自動依 ISO 4217 次方換算並展開所有可用卡片與多層路徑：
+直接傳入商家與自然金額，`amount` 與 `currency` 放頂層；省略 `currency` 預設 `"TWD"`。系統自動依 ISO 4217 次方換算並展開所有可用卡片與多層路徑：
 ```json
 {
   "merchant": "Bic Camera",
-  "amount": { "amount": 10000, "currency": "JPY" },
+  "amount": 10000,
+  "currency": "JPY",
   "country": "JP",
   "channel": "in_store"
 }
@@ -113,12 +114,22 @@ recommend({
 
 ```json
 {
+  "merchant": "全聯",
+  "amount": 150,
+  "channel": "in_store"
+}
+```
+
+```json
+{
   "merchant": "Uber",
-  "amount": { "amount": 4.8, "currency": "USD" },
+  "amount": 4.8,
+  "currency": "USD",
   "country": "US",
   "channel": "online"
 }
 ```
+
 
 ### 4.2 特定跨境路徑重試（使用 `routeFacts` 補充專屬匯率）
 透過 `routeFacts` 陣列提供各結算路徑（信用卡直刷或跨境錢包）的專屬匯率，彼此嚴格隔離、互不干擾。
@@ -127,7 +138,8 @@ recommend({
 ```json
 {
   "merchant": "Bic Camera",
-  "amount": { "amount": 50000, "currency": "JPY" },
+  "amount": 50000,
+  "currency": "JPY",
   "country": "JP",
   "channel": "in_store",
   "routeFacts": [
@@ -155,7 +167,8 @@ recommend({
 ```json
 {
   "merchant": "東京燒肉店",
-  "amount": { "amount": 30000, "currency": "JPY" },
+  "amount": 30000,
+  "currency": "JPY",
   "country": "JP",
   "channel": "in_store",
   "routeFacts": [
@@ -182,7 +195,8 @@ recommend({
 ```json
 {
   "merchant": "東京電器行",
-  "amount": { "amount": 50000, "currency": "JPY" },
+  "amount": 50000,
+  "currency": "JPY",
   "country": "JP",
   "channel": "in_store",
   "routeFacts": [
@@ -219,3 +233,4 @@ recommend({
   "expectedResultVersion": "v1"
 }
 ```
+

@@ -21,9 +21,8 @@
 - **用途**：消費前比價，支援直接刷卡與多層付款路徑。
 - **Properties 結構**：
   - `merchant` (string, 必填): 商家名稱或模糊字串
-  - `amount` (object 或 number, 選填): 交易金額。支援自然金額（如 USD 填 `4.8`、TWD 填 `20`、JPY 填 `30000`），MCP 伺服器會依據幣別自動換算最小單位，Agent 無須自行乘 100：
-    - 物件形式：`{ "amount": number, "currency": string }`（亦支援 `{ "value": number, "currency": string }` 或相容舊版 `{ "amountMinor": number, "currency": string }`）
-    - 扁平形式：可直接於推薦頂層給予 `"amount": number` 與 `"currency": string`
+  - `amount` (number, 選填): 交易自然金額（直接填入畫面上的數字，如 `4.8`、`20`、`50000`），MCP 伺服器自動依幣別次方換算，Agent 無須乘 100
+  - `currency` (string, 選填): ISO 4217 幣別代碼（如 `"JPY"`、`"USD"`）。**省略時預設 `"TWD"`**
   - `country` (string, 選填): 國別代碼 (e.g. "TW", "JP", "US")
   - `channel` (string, 選填): 交易通路，**封閉枚舉**：
     - `"online"`: 線上網購、APP 內扣款
@@ -37,24 +36,37 @@
   - `limit` (number, 選填): 每頁回傳筆數 (預設 10)
 
 > [!NOTE]
-> - 針對外幣金額，直接傳入自然金額（例如 USD `4.8` 或 JPY `50000`），伺服器會自動依幣別次方計算，避免 Agent 端計算錯誤。
+> - `amount` 與 `currency` 直接放頂層，不需要包成內層物件。
+> - 省略 `currency` 時系統預設為 `"TWD"`，台灣本地消費可直接傳 `"amount": 150`。
+> - 針對外幣金額（如 JPY、USD），記得指定 `currency`；伺服器會自動依幣別次方計算，避免 Agent 端計算錯誤。
 > - 透過 `routeFacts` 陣列提供特定支付路徑的專屬匯率（如信用卡國際組織匯率或電子錢包現鈔賣出牌告）。
 
-#### 範例 1：初次自然金額推薦（免傳 fx）
+#### 範例 1：台灣本地消費（省略 `currency`，預設 TWD）
+```json
+{
+  "merchant": "全聯",
+  "amount": 150,
+  "channel": "in_store"
+}
+```
+
+#### 範例 2：外幣消費（指定 `currency`）
 ```json
 {
   "merchant": "Uber",
-  "amount": { "amount": 4.8, "currency": "USD" },
+  "amount": 4.8,
+  "currency": "USD",
   "country": "US",
   "channel": "online"
 }
 ```
 
-#### 範例 2：信用卡特定路徑補充國際卡組織匯率 (`routeFacts`)
+#### 範例 3：信用卡補充國際卡組織匯率（`routeFacts`）
 ```json
 {
   "merchant": "Bic Camera",
-  "amount": { "amount": 50000, "currency": "JPY" },
+  "amount": 50000,
+  "currency": "JPY",
   "country": "JP",
   "channel": "in_store",
   "routeFacts": [
@@ -76,6 +88,7 @@
   ]
 }
 ```
+
 
 ---
 
