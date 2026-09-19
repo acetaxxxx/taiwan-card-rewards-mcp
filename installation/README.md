@@ -146,7 +146,7 @@ Agent 在接收到安裝或初始化指令時，應依照以下 Checklist 進行
 - [ ] 2. 伺服器握手 (Handshake Validation)
       - 發送 `initialize` JSON-RPC 請求。
       - 驗證回應中的 `protocolVersion` 為 `2024-11-05`。
-      - 驗證 `serverInfo.name` 為 `taiwan_card_rewards_mcp`，`serverInfo.version` 為 `0.16.0` (或更新相容版本)。
+      - 驗證 `serverInfo.name` 為 `taiwan_card_rewards_mcp`，`serverInfo.version` 為 `0.16.1` (或更新相容版本)。
 
 - [ ] 3. 28 項 canonical 公開工具檢核 (28-Tool Contract Verification)
       - 發送 `tools/list` 請求，確認 [`mcp-tools.md`](../docs/taiwan-card-rewards-skill/references/mcp-tools.md) 的 28 項工具完整存在：
