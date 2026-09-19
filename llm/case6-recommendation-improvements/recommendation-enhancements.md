@@ -4,11 +4,18 @@
 This document provides AI agents with specifications for the improved recommendation flow in `taiwan-card-rewards-mcp`, adhering to natural user inputs, decoupled exchange rates, and proactive payment exploration.
 
 ## 1. Natural Currency Input (ISO 4217)
-- **Zero-Decimal Currencies (JPY, KRW)**:
-  - Users and agents provide natural amounts directly. For 30,000 JPY, input `30000` (1 JPY = 1 minor unit).
-  - **NEVER** multiply JPY amounts by 100.
-- **Two-Decimal Currencies (TWD, USD, EUR)**:
-  - Natural inputs (e.g. 500 TWD) are scaled to minor units (50,000 cents) internally by the MCP engine.
+- **Direct Natural Amounts**:
+  - Agents can input natural currency amounts directly without manual calculations or multiplication.
+  - Examples:
+    - USD: `4.8` (or `4.80`) -> automatically scaled to `480` minor units.
+    - TWD: `20` -> automatically scaled to `2000` minor units.
+    - JPY: `30000` -> automatically kept as `30000` minor units (0 decimals).
+  - Supported input formats in `recommend`:
+    1. `{ "amount": { "amount": 4.8, "currency": "USD" } }`
+    2. `{ "amount": { "value": 4.8, "currency": "USD" } }`
+    3. Flat format: `{ "amount": 4.8, "currency": "USD" }`
+    4. Backwards compatible: `{ "amount": { "amountMinor": 480, "currency": "USD" } }`
+    5. Float resilience: `{ "amount": { "amountMinor": 4.8, "currency": "USD" } }` (auto-detected and scaled)
 
 ## 2. FX Rate Architecture & Decoupling
 - **Standard `recommend` Call (No `fx` Required)**:
@@ -17,6 +24,23 @@ This document provides AI agents with specifications for the improved recommenda
   - The historical single top-level `fx` object with an exclusive `rateType` (e.g. `cash_selling`) is removed from recommended tool usage patterns. It must never poison or fail-close other payment paths (e.g., credit cards requiring `card_scheme`).
 - **Route-Specific Clearing via `routeFacts`**:
   - Direct credit cards automatically evaluate under card scheme spot selling rates (`spot_selling` / `card_scheme`).
+    - Credit card `routeFacts` example:
+      ```json
+      {
+        "routeId": "card:fubon-jcb",
+        "fx": {
+          "id": "fx_quote_jpy_twd_jcb",
+          "baseCurrency": "JPY",
+          "quoteCurrency": "TWD",
+          "ratePpm": 215000,
+          "capturedAt": "2026-09-17T12:00:00Z",
+          "provider": "JCB",
+          "rateType": "card_scheme",
+          "cardScheme": "jcb",
+          "sourceUrl": "https://www.jcb.tw/rate/jpy.html"
+        }
+      }
+      ```
   - Cross-border e-wallets (e.g., TaishinPay+ or Jkopay scanning Japanese PayPay) automatically evaluate under partner bank cash selling rates (`cash_selling`).
   - Route-specific rate overrides on retry should strictly be supplied via the `routeFacts: [{ routeId, edgeId, fx }]` array, preventing cross-route rate poisoning.
 - **Live Quote Snapshots**:

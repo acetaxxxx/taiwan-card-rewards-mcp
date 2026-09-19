@@ -61,3 +61,29 @@ export function convertMinor(amount: Money, currency: string, tx: TransactionTup
 在 `recommendIntent` 中：
 1. 針對跨境電子錢包（如 PayPay 掃碼），若尚未收錄該特店的立牌證據，不阻斷拋出 `needs_review`，而是直接生成推薦候選，並附帶 `unverifiedConditions: ["店家支援 PayPay 掃碼"]`。
 2. 系統自動以合作銀行現鈔賣出價折算淨支出 (`netSpend`)，扣除隱藏匯差（約 1.8%~2.0%），讓使用者與 Agent 呼叫一次 `recommend`，即可完整看清所有刷卡與錢包路徑之排序與實質淨效益。
+
+### 2.5 自然金額輸入與自動最小單位縮放 (Natural Amount Normalization)
+- **Agent 輸入自由度**：
+  - Agent 在 `amount` 中直接填寫自然金額（例如 USD 輸入 `4.8`、TWD 輸入 `20`、JPY 輸入 `30000`）。
+  - 支援格式包含：
+    1. `{ "amount": 4.8, "currency": "USD" }`
+    2. `{ "value": 4.8, "currency": "USD" }`
+    3. 扁平格式：頂層直接提供 `"amount": 4.8, "currency": "USD"`
+    4. 容錯機制：若 Agent 誤將浮點數放入 `amountMinor`（如 `{ "amountMinor": 4.8, "currency": "USD" }`），系統能自動識別小數並完成指數換算。
+- **底層嚴格整數運算**：
+  - `validateMoney` 在驗證階段即透過 `Math.round(naturalAmount * 10 ** exponent)` 將金額轉為整數 `amountMinor`。
+  - 系統所有內部計算、規則比對與帳本儲存均嚴格維護整數 minor units，避免浮點運算累積誤差。
+
+### 2.6 信用卡與多軌道專屬匯率輸入範例 (`routeFacts`)
+- **信用卡直刷 / Apple Pay**：
+  - `rateType`: `"card_scheme"`（國際卡組織牌告）或 `"spot_selling"`（即期賣出中價）
+  - `provider`: `"JCB"`, `"Visa"`, `"Mastercard"` 或報價銀行代碼
+  - `cardScheme`: 對應國際卡組織（`"jcb"`, `"visa"`, `"mastercard"`）
+  - `routeId`: 卡片對應之節點識別（如 `"card:fubon-jcb"`）或專屬路徑 ID
+- **跨境電子錢包**：
+  - `rateType`: `"cash_selling"`（現鈔賣出價）
+  - `provider`: 合作清算銀行代碼（如 `"TaishinBank"`, `"JKOPAY"`）
+  - `routeId`: 錢包路徑代碼（如 `"route_taishin_paypay"`）
+- **雙軌並存**：
+  - `routeFacts` 陣列支援同時提供多條路徑專屬匯率，透過嚴格的 `routeId` / `edgeId` scope 隔離，兩者互不污染。
+

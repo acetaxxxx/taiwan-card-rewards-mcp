@@ -205,4 +205,131 @@ describe('Case6 Recommendation Improvements', () => {
     // Payment method node should show apple_pay
     expect(cand?.nodes.some(n => n.displayName === 'apple_pay')).toBe(true);
   });
+
+  it('Issue 4: Natural currency amount input (USD 4.8, TWD 20, JPY 30000) with automatic minor-unit scaling', () => {
+    const store = new MemoryStore();
+    const service = new RewardService(store, 'u1');
+    service.registerCard({ id: 'usd-card', issuer: 'Bank', productName: 'US Card', network: 'VISA' });
+    const source = { id: 's1', url: 'https://example.com', fetchedAt: at, contentHash: 'h1', parserVersion: '1', verified: true as const };
+
+    service.upsertOffer(source, {
+      id: 'rule-usd-5pct',
+      cardId: 'usd-card',
+      version: '1',
+      sourceSnapshotId: source.id,
+      status: 'active',
+      validFrom: '2026-01-01T00:00:00Z',
+      settlementCurrency: 'USD',
+      match: {},
+      reward: { kind: 'percentage', rateBps: 500 }, // 5%
+    });
+
+    // 1. Agent inputs natural USD: amount: { amount: 4.8, currency: 'USD' } -> 480 minor units
+    const res1 = service.recommendIntent({
+      merchant: 'Uber',
+      amount: { amount: 4.8, currency: 'USD' },
+      occurredAt: at,
+    });
+    const cand1 = res1.candidates.find(c => c.id === 'card:usd-card');
+    expect(cand1?.status).toBe('ready');
+    // 5% of 480 cents = 24 cents
+    expect(cand1?.reward).toEqual({ amountMinor: 24, currency: 'USD' });
+
+    // 2. Agent inputs top-level amount: 4.8, currency: 'USD'
+    const res2 = service.recommendIntent({
+      merchant: 'Uber',
+      amount: 4.8,
+      currency: 'USD',
+      occurredAt: at,
+    } as any);
+    const cand2 = res2.candidates.find(c => c.id === 'card:usd-card');
+    expect(cand2?.status).toBe('ready');
+    expect(cand2?.reward).toEqual({ amountMinor: 24, currency: 'USD' });
+
+    // 3. Agent mistakenly inputs float in amountMinor: { amountMinor: 4.8, currency: 'USD' }
+    const res3 = service.recommendIntent({
+      merchant: 'Uber',
+      amount: { amountMinor: 4.8, currency: 'USD' },
+      occurredAt: at,
+    });
+    const cand3 = res3.candidates.find(c => c.id === 'card:usd-card');
+    expect(cand3?.status).toBe('ready');
+    expect(cand3?.reward).toEqual({ amountMinor: 24, currency: 'USD' });
+
+    // 4. Natural TWD: amount: { amount: 20, currency: 'TWD' } -> 2000 minor units
+    service.registerCard({ id: 'twd-card', issuer: 'Bank', productName: 'TW Card', network: 'VISA' });
+    service.upsertOffer(source, {
+      id: 'rule-twd-10pct',
+      cardId: 'twd-card',
+      version: '1',
+      sourceSnapshotId: source.id,
+      status: 'active',
+      validFrom: '2026-01-01T00:00:00Z',
+      settlementCurrency: 'TWD',
+      match: {},
+      reward: { kind: 'percentage', rateBps: 1000 }, // 10%
+    });
+    const res4 = service.recommendIntent({
+      merchant: 'FamilyMart',
+      amount: { amount: 20, currency: 'TWD' },
+      occurredAt: at,
+    });
+    const cand4 = res4.candidates.find(c => c.id === 'card:twd-card');
+    expect(cand4?.status).toBe('ready');
+    // 10% of 2000 cents = 200 cents (2.00 TWD)
+    expect(cand4?.reward).toEqual({ amountMinor: 200, currency: 'TWD' });
+  });
+
+  it('Issue 5: routeFacts with credit card scheme FX example', () => {
+    const store = new MemoryStore();
+    const service = new RewardService(store, 'u1');
+    service.registerCard({ id: 'fubon-jcb', issuer: 'Fubon', productName: 'J Premium Card', network: 'JCB' });
+    const source = { id: 's1', url: 'https://example.com', fetchedAt: at, contentHash: 'h1', parserVersion: '1', verified: true as const };
+
+    service.upsertOffer(source, {
+      id: 'rule-fubon-jpy',
+      cardId: 'fubon-jcb',
+      version: '1',
+      sourceSnapshotId: source.id,
+      status: 'active',
+      validFrom: '2026-01-01T00:00:00Z',
+      settlementCurrency: 'TWD',
+      match: { countries: ['JP'] },
+      reward: { kind: 'percentage', rateBps: 300 }, // 3.0%
+    });
+
+    // Credit card routeFacts example
+    const creditCardRouteFx: FxSnapshot = {
+      id: 'fx_quote_jpy_twd_jcb',
+      baseCurrency: 'JPY',
+      quoteCurrency: 'TWD',
+      ratePpm: 215_000, // 0.215
+      capturedAt: at,
+      maxAgeSeconds: 86400,
+      provider: 'JCB',
+      rateType: 'card_scheme',
+      cardScheme: 'jcb',
+      sourceUrl: 'https://www.jcb.tw/rate/jpy.html',
+    };
+
+    const res = service.recommendIntent({
+      merchant: 'Bic Camera',
+      amount: { amount: 50000, currency: 'JPY' },
+      country: 'JP',
+      occurredAt: at,
+      routeFacts: [
+        {
+          routeId: 'card:fubon-jcb',
+          fx: creditCardRouteFx,
+        },
+      ],
+    });
+
+    const cand = res.candidates.find(c => c.id === 'card:fubon-jcb');
+    expect(cand?.status).toBe('ready');
+    // 50,000 JPY * 0.215 = 10,750 TWD = 1,075,000 minor units
+    // 3% of 1,075,000 = 32,250 minor units (322.50 TWD)
+    expect(cand?.reward).toEqual({ amountMinor: 32250, currency: 'TWD' });
+  });
 });
+

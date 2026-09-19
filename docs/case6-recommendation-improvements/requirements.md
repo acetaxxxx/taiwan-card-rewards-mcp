@@ -13,14 +13,16 @@
 ### REQ-1: 工具完整性與確認
 - **1.1** 系統維持完整的 28 個標準工具合約（從 `create_ingestion` 到 `search_active_offers`），不作任意刪減。
 
-### REQ-2: 外幣自然輸入與 ISO 4217 次方換算
-- **2.1** 使用者或 Agent 進行外幣查詢時，金額輸入應回歸自然貨幣單位（如 100 JPY 就是傳入 100，30,000 JPY 就是傳入 30000），嚴禁強制要求 Agent 手動乘 100。
-- **2.2** 系統內部應支援 ISO 4217 標準貨幣次方字典（JPY: 0, TWD: 2, USD: 2），在換算為結算本幣（TWD）時自動由底層計算縮放，確保 30000 JPY 正確換算為 645,000 TWD minor units (6,450.00 TWD)。
-- **2.3** 全面清理 Skill 文件中的誤導範例，移除 `amountMinor: 5000000` 之類的 JPY 錯誤乘法範例。
+### REQ-2: 外幣與全幣別自然輸入與 ISO 4217 次方換算
+- **2.1** 使用者或 Agent 進行金額輸入時，全面支援自然貨幣單位（如 USD 輸入 `4.8`、TWD 輸入 `20`、JPY 輸入 `30000`），嚴禁要求 Agent 事先計算或手動乘 100。
+- **2.2** 系統內部支援 ISO 4217 標準貨幣次方字典（JPY: 0, TWD: 2, USD: 2），在換算為結算本幣（TWD）時自動由底層計算縮放，將自然金額自動轉為精確的整數 minor units（如 4.8 USD -> 480 minor units, 20 TWD -> 2000 minor units, 30000 JPY -> 30000 minor units）。
+- **2.3** Schema 支援自然屬性（`amount` / `value` / `amountMinor`）以及頂層扁平輸入（`amount: 4.8, currency: "USD"`）。
+- **2.4** 全面清理 Skill 文件中的誤導範例，移除 `amountMinor: 5000000` 之類的錯誤乘法範例。
 
-### REQ-3: 頂層單一匯率與路徑專屬匯率解耦
+### REQ-3: 頂層單一匯率與路徑專屬匯率解耦 (`routeFacts`)
 - **3.1** `recommend` 頂層不得強制要求 Agent 傳入具備排他性的單一 `fx.rateType`（如強制填 `cash_selling` 導致信用卡全滅，或填 `spot_selling` 導致電子錢包全滅）。
-- **3.2** 頂層 `fx` 僅作為全域幣別對的通用參考基準；個別路徑若有特定結算匯率需求，由該路徑自身屬性決定，或透過 `routeFacts` 陣列針對該路徑獨立提供。
+- **3.2** 頂層 `fx` 支援陣列，嚴格依據 scope 隔離；針對個別支付路徑，透過 `routeFacts` 陣列（`[{ routeId, edgeId, fx }]`）提供專屬匯率。
+- **3.3** 文檔與規範需完整提供「信用卡專屬匯率（走 JCB / Visa / Mastercard 卡組織匯率 `card_scheme` 或即期中價）」以及「跨境電子錢包專屬匯率（走合作銀行現鈔賣出牌告價 `cash_selling`）」之 `routeFacts` 範例。
 
 ### REQ-4: 支付姿勢自動展開（無須額外參數，不拋 `unknown`）
 - **4.1** 當呼叫 `recommend` 未指定 `paymentMethod` 時，系統不得將具有行動支付加碼條件的規則標記為 `unknown` 並予以扣減或丟棄。

@@ -103,23 +103,62 @@ recommend({
 
 ## 4. 標準 Payload 範例
 
-### 4.1 初次探索推薦（預設無須帶任何 `fx`）
-直接傳入商家與自然金額，系統自動展開所有可用卡片與多層路徑並預估淨效益：
+### 4.1 初次探索推薦（自然金額輸入，預設無須帶任何 `fx`）
+直接傳入商家與自然金額（如 USD `4.8`、TWD `20`、JPY `10000`），系統自動依 ISO 4217 次方換算並展開所有可用卡片與多層路徑：
 ```json
 {
   "merchant": "Bic Camera",
-  "amount": { "amountMinor": 10000, "currency": "JPY" },
+  "amount": { "amount": 10000, "currency": "JPY" },
   "country": "JP",
   "channel": "in_store"
 }
 ```
 
+```json
+{
+  "merchant": "Uber",
+  "amount": { "amount": 4.8, "currency": "USD" },
+  "country": "US",
+  "channel": "online"
+}
+```
+
 ### 4.2 特定跨境路徑重試（使用 `routeFacts` 補充專屬匯率）
-當針對特定跨境電子錢包（例如台新 Pay+ 掃日本 PayPay）需要指定精確報價時，使用 `routeFacts` 陣列提供該路徑專屬匯率，不影響其他直刷信用卡：
+透過 `routeFacts` 陣列提供各結算路徑（信用卡直刷或跨境錢包）的專屬匯率，彼此嚴格隔離、互不干擾。
+
+#### 範例 A：信用卡專用匯率（走國際卡組織 JCB / Visa / Mastercard 匯率）
+```json
+{
+  "merchant": "Bic Camera",
+  "amount": { "amount": 50000, "currency": "JPY" },
+  "country": "JP",
+  "channel": "in_store",
+  "routeFacts": [
+    {
+      "routeId": "card:fubon-jcb",
+      "fx": {
+        "id": "fx_quote_jpy_twd_jcb",
+        "baseCurrency": "JPY",
+        "quoteCurrency": "TWD",
+        "ratePpm": 215000,
+        "capturedAt": "2026-09-17T12:00:00Z",
+        "maxAgeSeconds": 86400,
+        "provider": "JCB",
+        "rateType": "card_scheme",
+        "cardScheme": "jcb",
+        "sourceUrl": "https://www.jcb.tw/rate/jpy.html"
+      }
+    }
+  ],
+  "expectedResultVersion": "v1"
+}
+```
+
+#### 範例 B：跨境電子錢包專用匯率（走合作銀行現鈔賣出牌告價）
 ```json
 {
   "merchant": "東京燒肉店",
-  "amount": { "amountMinor": 30000, "currency": "JPY" },
+  "amount": { "amount": 30000, "currency": "JPY" },
   "country": "JP",
   "channel": "in_store",
   "routeFacts": [
@@ -138,6 +177,48 @@ recommend({
       }
     }
   ],
-  "expectedResultVersion": 1
+  "expectedResultVersion": "v1"
+}
+```
+
+#### 範例 C：多軌道同時比較（信用卡組織匯率 vs 錢包現鈔賣出並陳）
+```json
+{
+  "merchant": "東京電器行",
+  "amount": { "amount": 50000, "currency": "JPY" },
+  "country": "JP",
+  "channel": "in_store",
+  "routeFacts": [
+    {
+      "routeId": "card:fubon-jcb",
+      "fx": {
+        "id": "fx_quote_jpy_twd_jcb",
+        "baseCurrency": "JPY",
+        "quoteCurrency": "TWD",
+        "ratePpm": 215000,
+        "capturedAt": "2026-09-17T12:00:00Z",
+        "maxAgeSeconds": 86400,
+        "provider": "JCB",
+        "rateType": "card_scheme",
+        "cardScheme": "jcb",
+        "sourceUrl": "https://www.jcb.tw/rate/jpy.html"
+      }
+    },
+    {
+      "routeId": "route_taishin_paypay",
+      "fx": {
+        "id": "fx_quote_jpy_twd_taishin",
+        "baseCurrency": "JPY",
+        "quoteCurrency": "TWD",
+        "ratePpm": 218500,
+        "capturedAt": "2026-09-17T12:00:00Z",
+        "maxAgeSeconds": 86400,
+        "provider": "TaishinBank",
+        "rateType": "cash_selling",
+        "sourceUrl": "https://www.taishinbank.com.tw/TSB/personal/deposit/lookup/realtime/"
+      }
+    }
+  ],
+  "expectedResultVersion": "v1"
 }
 ```

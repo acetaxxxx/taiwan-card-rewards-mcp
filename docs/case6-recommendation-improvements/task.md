@@ -32,3 +32,11 @@
 ## Phase 6: 驗證與文件同步
 - [x] **Task 6.1**: 執行系統全量核心單元測試（61 test files, 291 tests 全部通過，TypeScript 編譯 0 錯誤）。
 - [x] **Task 6.2**: 同步更新 `llm/` 英文規範與 `docs/` 繁體中文文檔。
+
+## Phase 7: 自然金額輸入拓展（USD 4.8 / TWD 20 自動換算）與信用卡 `routeFacts` 範例補充
+- [x] **Task 7.1**: 重構 `src/validation.ts` 的 `validateMoney`，支援 `amount`、`value` 自然金額輸入，並依幣別指數自動縮放為整數 `amountMinor`（4.8 USD -> 480, 20 TWD -> 2000, 30000 JPY -> 30000）。
+- [x] **Task 7.2**: 支援 `amountMinor` 傳入浮點數時自動偵測縮放，並支援推薦頂層扁平傳入 `amount: 4.8, currency: "USD"`。
+- [x] **Task 7.3**: 更新 `src/mcp-contract.ts` 的 `money` 與 `recommendationIntent` schema，明確向 Agent 宣告自然金額欄位與自動換算特性。
+- [x] **Task 7.4**: 在 `recommendation-tools-specification.md` 與 `payment-route-and-fx.md` 補齊信用卡專屬 `routeFacts`（卡組織 `rateType: "card_scheme"` / JCB / Visa / Mastercard）及多軌道並陳範例。
+- [x] **Task 7.5**: 補齊單元測試（`tests/case6-recommendation-improvements.test.ts` 新增 Issue 4、Issue 5 測試，共 293 個測試全數通過）。
+

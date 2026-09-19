@@ -1,4 +1,4 @@
-import { SUPPORTED_PREDICATE_FIELDS } from './types.js';
+import { SUPPORTED_PREDICATE_FIELDS, getCurrencyExponent } from './types.js';
 import type { CardDescriptor, CardProduct, CapPeriod, CapPoolDefinition, CardSwitchCampaign, CardSwitchConfirmation, CardSwitchInput, CardSwitchEnrollment, CardSwitchProjection, EligibilityFact, EvaluationContext, FxSnapshot, HeldCard, MerchantIdentity, MerchantProvenance, Money, OfferConfirmation, OfferProvenance, OfferRuleVersion, OfferSourceSnapshot, Predicate, PredicateValue, RewardBreakdown, RewardSpec, RuleMatch, TransactionTuple, PaymentRouteKind, RewardComponentKind, RewardComponentRecord, PaymentRouteContext, PaymentRouteRecord, PaymentCapabilityRecord, PaymentAccountRecord, PaymentEvent, PaymentEventKind, PaymentEventRule, PaymentEventChainRule, EventRewardLedgerRecord, EventRewardReversalRecord, EventRewardCapUsageRecord, PaymentEventRewardCandidate, PaymentEventRewardCandidateInput, PaymentEventMatch, RewardValuationSnapshot, PaymentRouteSelector, FundingInstrument, ListTransactionsOptions, TransactionTimeBasis, AppliedFxRate, FxRateType, IngestionSourceScope, IngestionFlowRecord, IngestionDraftTombstone, IngestionManifestLeaf, IngestionBenefitLeafSubmission, IngestionLocalExclusion, IngestionMerchantReference, AppliedExclusion, IngestionExclusionArtifact, IngestionExclusionLeafSubmission, IngestionExclusionScope, IngestionExclusionTarget, IngestionParentContinuation } from './types.js';
 import type { StoredState } from './store.js';
 import type { EvidenceRecord, FactCandidate } from './types.js';
@@ -54,8 +54,31 @@ export function validateTimezone(value: unknown, name: string): string {
 
 export function validateMoney(value: unknown, name: string): Money {
   const item = object(value, name);
-  keys(item, ['amountMinor', 'currency'], name);
-  return { amountMinor: safeInt(item.amountMinor, `${name}.amountMinor`), currency: requiredString(item.currency, `${name}.currency`, true).toUpperCase() };
+  keys(item, ['amountMinor', 'amount', 'value', 'currency'], name);
+  const currency = requiredString(item.currency, `${name}.currency`, true).toUpperCase();
+  const exponent = getCurrencyExponent(currency);
+
+  let amountMinor: number;
+  if (item.value !== undefined || item.amount !== undefined) {
+    const raw = item.value ?? item.amount;
+    if (typeof raw !== 'number' || !Number.isFinite(raw) || raw < 0) {
+      throw new RewardServiceError('INVALID_INPUT', `${name} natural amount must be a non-negative finite number`);
+    }
+    amountMinor = Math.round(raw * (10 ** exponent));
+  } else if (item.amountMinor !== undefined) {
+    if (typeof item.amountMinor !== 'number' || !Number.isFinite(item.amountMinor) || item.amountMinor < 0) {
+      throw new RewardServiceError('INVALID_INPUT', `${name}.amountMinor must be a non-negative finite number`);
+    }
+    if (!Number.isInteger(item.amountMinor)) {
+      amountMinor = Math.round(item.amountMinor * (10 ** exponent));
+    } else {
+      amountMinor = item.amountMinor;
+    }
+  } else {
+    throw new RewardServiceError('INVALID_INPUT', `${name} must include amount, value, or amountMinor`);
+  }
+
+  return { amountMinor, currency };
 }
 
 export function validateRewardValuationSnapshot(value: unknown): RewardValuationSnapshot {
@@ -1476,7 +1499,7 @@ export function validateRecommendationSupplementalFacts(value: unknown): Recomme
 
 export function validateRecommendationIntent(value: unknown): RecommendationIntent {
   const input = object(value, 'recommend intent');
-  keys(input, ['merchant', 'amount', 'country', 'market', 'channel', 'paymentMethod', 'occurredAt', 'cardIds', 'routeIds', 'limit', 'page', 'cursor', 'resultVersion', 'expectedResultVersion', 'childFlowId', 'resumedFlowId', 'supplementalFacts', 'fx', 'routeFacts', 'eligibilityFacts'], 'recommend intent');
+  keys(input, ['merchant', 'amount', 'currency', 'country', 'market', 'channel', 'paymentMethod', 'occurredAt', 'cardIds', 'routeIds', 'limit', 'page', 'cursor', 'resultVersion', 'expectedResultVersion', 'childFlowId', 'resumedFlowId', 'supplementalFacts', 'fx', 'routeFacts', 'eligibilityFacts'], 'recommend intent');
   let merchant: RecommendationIntent['merchant'];
   if (typeof input.merchant === 'string') merchant = requiredString(input.merchant, 'merchant');
   else {
@@ -1498,7 +1521,11 @@ export function validateRecommendationIntent(value: unknown): RecommendationInte
   const page = input.page === undefined ? 1 : safeInt(input.page, 'page', 1);
   return {
     merchant, limit, page,
-    ...(input.amount === undefined ? {} : { amount: validateMoney(input.amount, 'amount') }),
+    ...(input.amount === undefined ? {} : {
+      amount: (typeof input.amount === 'number' && typeof input.currency === 'string')
+        ? validateMoney({ amount: input.amount, currency: input.currency }, 'amount')
+        : validateMoney(input.amount, 'amount')
+    }),
     ...(input.country === undefined ? {} : { country: requiredString(input.country, 'country') }),
     ...(input.market === undefined ? {} : { market: requiredString(input.market, 'market') }),
     ...(input.channel === undefined ? {} : { channel: requiredString(input.channel, 'channel') }),
