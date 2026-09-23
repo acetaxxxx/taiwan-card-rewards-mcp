@@ -109,6 +109,10 @@ describe("MCP Contract and Agent Boundary", () => {
     const search = mcpTools.find((tool) => tool.name === "search_active_offers")!.inputSchema as any;
     expect(search.properties).toEqual(expect.objectContaining({ canonicalMerchantId: expect.any(Object), market: expect.any(Object), mcc: expect.any(Object) }));
 
+    const remainingCaps = mcpTools.find((tool) => tool.name === "remaining_caps")!.inputSchema as any;
+    expect(remainingCaps.properties.includeHistorical).toEqual({ type: "boolean", default: false });
+    expect(normalizeMcpToolArguments("remaining_caps", { card_id: "card-1", include_historical: true })).toEqual({ cardId: "card-1", includeHistorical: true });
+
     const upsertOffer = mcpTools.find((tool) => tool.name === "upsert_offer")!.inputSchema as any;
     expect(upsertOffer.properties.capPools.type).toBe("array");
     expect(upsertOffer.properties.capPools.items.type).toBe("object");

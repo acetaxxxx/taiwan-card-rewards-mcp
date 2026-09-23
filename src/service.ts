@@ -2729,11 +2729,30 @@ export class RewardService {
     };
   }
 
-  remainingCaps(cardId: string, asOf = nowIso()): RemainingCap[] {
+  remainingCaps(cardId: string, asOf = nowIso(), includeHistorical = false): RemainingCap[] {
     if (!/^[A-Za-z0-9][A-Za-z0-9_:-]{0,127}$/.test(cardId)) throw new RewardServiceError('INVALID_INPUT', 'cardId is invalid');
+    const asOfTime = Date.parse(asOf);
+    if (!Number.isFinite(asOfTime)) throw new RewardServiceError('INVALID_INPUT', 'asOf is invalid');
     const state = this.store.read();
     const card = state.cards.find((c) => c.id === cardId);
-    const cardRules = state.rules.filter((rule) => rule.cardId === cardId && Boolean(rule.capPoolRefs?.length));
+    const cardRules = state.rules.filter((rule) => {
+      if (rule.cardId !== cardId || !rule.capPoolRefs?.length) return false;
+      if (includeHistorical) return true;
+
+      const source = state.snapshots.find((snapshot) => snapshot.id === rule.sourceSnapshotId);
+      const sourceMeetsRequirements = source !== undefined
+        && (!rule.requires?.includes('source_verified') || source.verified === true)
+        && (!rule.requires?.includes('user_confirmation') || rule.trustBasis === 'user_confirmed');
+      const inRuleWindow = Date.parse(rule.validFrom) <= asOfTime
+        && (!rule.validTo || Date.parse(rule.validTo) >= asOfTime);
+      const sourceCurrent = source !== undefined
+        && (source.validTo === undefined || Date.parse(source.validTo) >= asOfTime);
+      return rule.status === 'active'
+        && (rule.ownerUser === undefined || rule.ownerUser === this.metadataUser)
+        && sourceMeetsRequirements
+        && inRuleWindow
+        && sourceCurrent;
+    });
     const uniquePoolIds = [...new Set(cardRules.flatMap((rule) => rule.capPoolRefs ?? []))];
 
     return uniquePoolIds.map((poolId) => {

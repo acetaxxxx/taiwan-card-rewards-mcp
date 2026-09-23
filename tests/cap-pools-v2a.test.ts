@@ -238,6 +238,32 @@ describe('Schema v2A: canonical cap pool registry and shared aggregation', () =>
     }
   });
 
+  it('returns only cap pools for currently usable rules unless historical results are requested', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'card-rewards-current-cap-'));
+    const store = new FileStore({ dataDir: dir });
+    try {
+      const service = new RewardService(store, undefined);
+      service.registerCard({ id: 'c-current', issuer: 'Bank', productName: 'Current Card' });
+      const activeSource = { ...source, id: 'source-current' };
+      const oldSource = { ...source, id: 'source-old' };
+      const activeRule: OfferRuleVersion = { ...base, id: 'rule-current', cardId: 'c-current', sourceSnapshotId: activeSource.id, capPoolRefs: ['cap-current'] };
+      const supersededRule: OfferRuleVersion = { ...base, id: 'rule-superseded', cardId: 'c-current', sourceSnapshotId: oldSource.id, status: 'superseded', capPoolRefs: ['cap-superseded'] };
+      const expiredRule: OfferRuleVersion = { ...base, id: 'rule-expired', cardId: 'c-current', sourceSnapshotId: oldSource.id, validTo: '2026-08-31T23:59:59Z', capPoolRefs: ['cap-expired'] };
+      const pool = (id: string): CapPoolDefinition => ({ id, metric: 'reward', period: 'calendar_month', limit: 500, currency: 'TWD', timezone: 'Asia/Taipei' });
+
+      service.upsertOffer(activeSource, activeRule, undefined, [pool('cap-current')]);
+      service.upsertOffer(oldSource, supersededRule, undefined, [pool('cap-superseded')]);
+      service.upsertOffer(oldSource, expiredRule, undefined, [pool('cap-expired')]);
+
+      expect(service.remainingCaps('c-current', '2026-09-02T12:00:00Z').map((cap) => cap.usageKey)).toEqual(['cap-current']);
+      expect(service.remainingCaps('c-current', '2026-09-02T12:00:00Z', true).map((cap) => cap.usageKey).sort()).toEqual(['cap-current', 'cap-expired', 'cap-superseded']);
+      expect(() => service.remainingCaps('c-current', 'not-a-date')).toThrow(/asOf is invalid/);
+    } finally {
+      store.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it('validates schema v2 roundtrip and rejects schema v1 and legacy inline caps', () => {
     // Valid v2 stored state
     const validV2 = {

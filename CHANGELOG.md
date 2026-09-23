@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.17.0
+
+- Make `remaining_caps` return cap pools referenced by currently usable rewards by default: active, in-window, source-valid, and visible to the current user. Pass `includeHistorical: true` to audit cap pools from inactive, expired, superseded, or otherwise unavailable rules.
+
 ## 0.16.1
 
 - Auto-scale zero-decimal currencies (JPY, KRW) per ISO 4217 exponents so agents input natural amounts without manual multiplication.

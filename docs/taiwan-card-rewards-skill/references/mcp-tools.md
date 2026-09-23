@@ -50,11 +50,15 @@
 | `list_payment_accounts` | 查詢共用 | read | 列出已登記之電子錢包或帳戶清單 | [條款/卡片規格](file:///Users/hankyin/Practice/taiwan-card-rewards-mcp/docs/taiwan-card-rewards-skill/card-rewards-evidence/workflows/evidence-tools-specification.md#list_payment_accounts) |
 | `record_transaction` | 記帳帳本 | write | 記錄實際購買或退款交易，原子更新 Cap Pool 上限累計 | [記帳規格](file:///Users/hankyin/Practice/taiwan-card-rewards-mcp/docs/taiwan-card-rewards-skill/card-rewards-ledger/workflows/ledger-tools-specification.md#21-record_transaction) |
 | `list_transactions` | 記帳帳本 | read | 查詢歷史實際交易清冊，支援雙時間基準與分頁投影 | [記帳規格](file:///Users/hankyin/Practice/taiwan-card-rewards-mcp/docs/taiwan-card-rewards-skill/card-rewards-ledger/workflows/ledger-tools-specification.md#22-list_transactions) |
-| `remaining_caps` | 記帳帳本 | read | 查詢特定卡片目前週期累積後之剩餘可回饋額度 (Cap) | [記帳規格](file:///Users/hankyin/Practice/taiwan-card-rewards-mcp/docs/taiwan-card-rewards-skill/card-rewards-ledger/workflows/ledger-tools-specification.md#23-remaining_caps) |
+| `remaining_caps` | 記帳帳本 | read | 預設只查詢目前可用回饋的剩餘額度；傳入 `includeHistorical: true` 才用於稽核已失效、已取代或其他不可用規則的歷史 cap | [記帳規格](file:///Users/hankyin/Practice/taiwan-card-rewards-mcp/docs/taiwan-card-rewards-skill/card-rewards-ledger/workflows/ledger-tools-specification.md#23-remaining_caps) |
 | `record_event_reward` | 記帳連鎖 | write | 伺服器端重算資格並記錄跨事件（如儲值後扣款）連鎖回饋 | [記帳規格](file:///Users/hankyin/Practice/taiwan-card-rewards-mcp/docs/taiwan-card-rewards-skill/card-rewards-ledger/workflows/ledger-tools-specification.md#24-record_event_reward) |
 | `reverse_event_reward` | 記帳連鎖 | write | 依明確退款/反轉關聯原子撤銷先前已入帳的事件回饋 | [記帳規格](file:///Users/hankyin/Practice/taiwan-card-rewards-mcp/docs/taiwan-card-rewards-skill/card-rewards-ledger/workflows/ledger-tools-specification.md#25-reverse_event_reward) |
 
 ---
+
+## `remaining_caps` 的目前／歷史模式
+
+`remaining_caps` 以 `asOf` 判定 rule 是否仍可使用；沒有 `asOf` 時使用目前時間。正常推薦或回覆使用者目前可得回饋時，不要傳 `includeHistorical`。只有使用者明確要求核對歷史、已失效或已取代活動時，才傳 `{ "includeHistorical": true }`，並將結果標示為不可用於目前回饋。
 
 ## 3. 全域架構規則與呼叫鐵律 (Global Invariants)
 

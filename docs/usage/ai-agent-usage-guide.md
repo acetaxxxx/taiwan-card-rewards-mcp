@@ -110,7 +110,7 @@ response already carries every diagnostic an Agent needs.
 | `record_transaction` | Mutating | Record an actual purchase (with `idempotencyKey`) or linked refund, updating durable cap usage. | `IDEMPOTENCY_CONFLICT`, `INVALID_REFUND`, `INSUFFICIENT_FACTS`, `NEEDS_REVIEW` |
 | `record_event_reward` | Mutating | Re-evaluate an event-local rule or explicit `funded_by` chain on the server, then record only a matched, non-stacking reward. | `UNKNOWN_EVENT_FACTS`, `NEEDS_REVIEW`, `INELIGIBLE_EVENT_REWARD`, `IDEMPOTENCY_CONFLICT`, `STORE_CORRUPT` |
 | `reverse_event_reward` | Mutating | Reverse a recorded event reward from one explicit refund/reversal event, restoring proportional reward and cap usage. | `INVALID_REFUND`, `AMBIGUOUS_ORIGINAL`, `OVER_REFUND`, `IDEMPOTENCY_CONFLICT` |
-| `remaining_caps` | Read-only | Query remaining reward cap balances per rule and usageKey derived from actual transactions. | `INVALID_INPUT`, `STORE_UNAVAILABLE` |
+| `remaining_caps` | Read-only | Query remaining cap balances for currently usable rewards, derived from actual transactions. Pass `includeHistorical: true` only for an audit of inactive, expired, superseded, or unavailable rule history. | `INVALID_INPUT`, `STORE_UNAVAILABLE` |
 | `get_user_benefit_status` | Read-only | Show current benefit plus available-now and action-required candidates. | `CARD_NOT_FOUND`, `STORE_UNAVAILABLE` |
 | `upsert_user_benefit_status` | Mutating | Record or correct a user-confirmed completed card switch or campaign registration. | `CARD_NOT_FOUND`, `INVALID_CONFIRMATION`, `IDEMPOTENCY_CONFLICT` |
 

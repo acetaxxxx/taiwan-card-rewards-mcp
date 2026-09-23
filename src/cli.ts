@@ -176,7 +176,7 @@ async function callTool(service: RewardService, params: Record<string, unknown>)
     case 'list_transactions': return service.listTransactions(args);
     case 'record_event_reward': return service.recordValidatedEventReward(args);
     case 'reverse_event_reward': return service.reverseEventReward(args);
-    case 'remaining_caps': return maybePaged(service.remainingCaps(String(args.cardId), typeof args.asOf === 'string' ? args.asOf : undefined), (item) => String((item as { usageKey: string }).usageKey));
+    case 'remaining_caps': return maybePaged(service.remainingCaps(String(args.cardId), typeof args.asOf === 'string' ? args.asOf : undefined, args.includeHistorical === true), (item) => String((item as { usageKey: string }).usageKey));
     case 'get_user_benefit_status': {
       const kind = args.kind;
       if (kind !== 'card_switch' && kind !== 'campaign_registration') throw new RewardServiceError('INVALID_INPUT', 'kind is invalid');
