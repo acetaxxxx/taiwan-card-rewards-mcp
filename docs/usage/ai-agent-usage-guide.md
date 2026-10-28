@@ -1,6 +1,6 @@
 # AI Agent Usage Guide for `taiwan-card-rewards-mcp`
 
-`taiwan-card-rewards-mcp` provides a deterministic calculation engine and user-scoped durable ledger for Taiwan credit-card rewards. It operates as a single-tenant stdio MCP server under strict privacy, input validation, and fail-closed safety boundaries.
+`taiwan-card-rewards-mcp` provides a deterministic calculation engine and user-scoped durable ledger for Taiwan credit-card rewards. The local executable operates as a single-tenant stdio MCP server. A separate HTTP executable supports OAuth-authenticated multi-user Streamable HTTP access, with each verified issuer/subject pair mapped to its own FileStore.
 
 ---
 
@@ -48,7 +48,8 @@ npx --yes github:acetaxxxx/taiwan-card-rewards-mcp#v0.16.1 \
 ```
 
 ### Process Boundary & Single-Tenant Scope
-- **Transport**: Standard I/O only (`stdio` newline-delimited JSON-RPC). No HTTP, SSE, or network ports are opened.
+- **Local transport**: Standard I/O (`stdio` newline-delimited JSON-RPC); the local executable opens no network ports.
+- **Remote transport**: The separate `taiwan-card-rewards-mcp-http` executable serves MCP Streamable HTTP at `/mcp`. It requires an external OAuth/OIDC authorization server and a persistent single-process data root. Tokens are validated on each request; tenant paths are derived from verified `(issuer, subject)` claims. See the multi-user service setup in the repository README.
 - **Tenant Isolation**: The parent process launches **one independent MCP process per user**, bound to a dedicated `--data-dir`.
 - **Exclusive Lock**: Upon startup, the process acquires an exclusive file lock (`card-rewards.lock`) in its `--data-dir`. Concurrent processes sharing the same directory are rejected (`LOCK_EXISTS`).
 
@@ -69,7 +70,7 @@ The CLI executable supports `--help` and `-h` to safely print usage options to s
 
 To safely inspect available tools, instructions, and schemas:
 1. **CLI Usage**: Run `taiwan-card-rewards-mcp --help` (or `-h`) to inspect supported startup parameters.
-2. **MCP Handshake & Dynamic Listing**: Connect to the running stdio server with `--data-dir <path>` and issue the standard JSON-RPC `initialize` request (returns server info and instructions) followed by `tools/list` (dynamically returns all 28 canonical tools with complete input schemas).
+2. **MCP Handshake & Dynamic Listing**: Connect to the running stdio server with `--data-dir <path>` or the authenticated HTTP service at its configured `/mcp` URL, then issue `initialize` followed by `tools/list` (returns all 28 canonical tools with complete input schemas).
 3. **Offline Tool Reference**: Consult [`mcp-tools.md`](../taiwan-card-rewards-skill/references/mcp-tools.md) for the authoritative 28-tool matrix, inputs, and fail-closed error contracts.
 
 ---

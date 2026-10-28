@@ -6,6 +6,13 @@ rules from the AI agent's conversational recommendation.
 
 ## Products and ownership
 
+**User Principal**:
+The identity scope that owns one person's Held Cards, private Offer Rules,
+Payment Accounts, and Reward Ledger. It is distinct from an application client
+or display label; identifiers from different identity authorities are distinct
+even when their subject strings match.
+_Avoid_: email address, client ID, display name
+
 **Card Product**:
 The bank-issued card product whose published terms can be evaluated for a reward.
 _Avoid_: held card, card account, user card
@@ -416,6 +423,9 @@ _Avoid_: caller promise, warning flag, best effort
   into a versioned declarative rule before it can affect a calculation.
 - A Card Product is not a Held Card. The same product can have different user
   eligibility facts, selected plans, cycles, or enrollment state.
+- User-owned card state, Payment Accounts, private Offer Rules, and Reward
+  Ledger records belong to one User Principal and are isolated from every other
+  principal.
 - A Transaction Intent never consumes a Reward Cap. Only a Recorded Purchase can
   change the Reward Ledger, and a Refund must remain linked to its source.
 - A Rule Version, Card Cycle, Currency Context, FX Snapshot, and Reward Valuation

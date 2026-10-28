@@ -14,6 +14,27 @@ The executable must require `--data-dir <absolute-directory>`. Startup securely 
 
 The store takes an exclusive process lock (`card-rewards.lock`) for the lifetime of the stdio process. A second process using the same directory is rejected, including after an unclean shutdown; stale locks must be investigated and removed by an operator only after confirming that no process owns the directory.
 
+## Run as a multi-user Streamable HTTP MCP service
+
+The separate `taiwan-card-rewards-mcp-http` executable serves the same 28 tools at the path in `MCP_HTTP_PUBLIC_URL`. It requires a persistent local volume and an external OAuth 2.1/OIDC authorization server. That authorization server must support delegated authorization-code + PKCE for the ChatGPT/Gemini clients, publish metadata and signing keys, and issue signed JWT access tokens whose `sub` identifies the end user and whose `iss`, `aud`, `exp`, and scope claims meet this service's configuration. Configure a signed JWT claim that the authorization server emits only on user-delegated tokens; `MCP_OAUTH_USER_GRANT_CLAIM` and `MCP_OAUTH_USER_GRANT_VALUE` select the claim and required value. This marker lets the service reject machine-to-machine tokens even if they include a `sub`. Register clients as required by those products; set `MCP_OAUTH_REQUIRED_SCOPE` to the scope the clients request (default `mcp`).
+
+Required environment variables:
+
+```sh
+MCP_DATA_ROOT=/srv/taiwan-card-rewards \
+MCP_HTTP_PUBLIC_URL=https://mcp.example.com/mcp \
+MCP_OAUTH_ISSUER=https://auth.example.com/ \
+MCP_OAUTH_METADATA_URL=https://auth.example.com/.well-known/openid-configuration \
+MCP_OAUTH_JWKS_URL=https://auth.example.com/.well-known/jwks.json \
+MCP_OAUTH_USER_GRANT_CLAIM=gty \
+MCP_OAUTH_USER_GRANT_VALUE=authorization_code \
+npx taiwan-card-rewards-mcp-http
+```
+
+Each verified `(issuer, subject)` pair receives a private directory selected by the service; request arguments, headers, and `--user` cannot choose a tenant. Tokens must be signed with one of RS256, PS256, ES256, ES384, or EdDSA, include the canonical MCP URL as an audience, the required scope, and the configured delegated-user marker. The authorization server must never add that marker to client-credentials tokens. The service publishes Protected Resource Metadata and the configured authorization server metadata. Set `MCP_HTTP_ALLOWED_ORIGINS` to the exact browser origins that should call the endpoint; requests without an `Origin` header continue to work for server-side clients. Set `MCP_HTTP_ALLOWED_HOSTS` when a trusted reverse proxy uses an approved Host value different from the public URL hostname. Configure a stable HTTPS URL, TLS termination, and a persistent volume at deployment. One service process may own a data root; do not run multiple replicas against the JSON files. The default in-memory tenant-store limit is 1000 and can be changed with `MCP_HTTP_MAX_TENANTS`.
+
+The stdio executable remains the local single-tenant option described below. HTTP mode is a separately configured server and does not change stdio startup behavior.
+
 ## Run as an Aion stdio MCP server
 
 Build with `npm run build`, then configure Aion's stdio MCP server with command `npx` (or the installed `taiwan-card-rewards-mcp` binary) and arguments `--data-dir /absolute/tenant-directory`. GitHub source installs are supported with `npx --yes github:acetaxxxx/taiwan-card-rewards-mcp#main`; npm runs the package `prepare` script to build `dist/`. Pin release `#v0.16.1` for repeatable use. Agents using the same data directory attach through one shared owner process and local stdio bridges; different data directories remain isolated. The process reads newline-delimited JSON-RPC from stdin and writes responses to stdout; it does not open an HTTP/SSE listener. Reusing one data directory is explicit shared tenancy; `--user` is display metadata only.

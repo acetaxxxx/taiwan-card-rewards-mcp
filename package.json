@@ -6,7 +6,8 @@
     "dist"
   ],
   "bin": {
-    "taiwan-card-rewards-mcp": "dist/cli.js"
+    "taiwan-card-rewards-mcp": "dist/cli.js",
+    "taiwan-card-rewards-mcp-http": "dist/http-cli.js"
   },
   "exports": {
     ".": "./dist/index.js",
@@ -25,5 +26,10 @@
     "@types/node": "^22.0.0",
     "typescript": "^5.7.0",
     "vitest": "^3.0.0"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/node": "2.1.2",
+    "@modelcontextprotocol/server": "2.4.0",
+    "jose": "6.2.13"
   }
 }
