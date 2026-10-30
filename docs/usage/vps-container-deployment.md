@@ -12,13 +12,13 @@ Run planned starts, updates, backups, restores, and identity recovery as the sam
 
 ## Configure and start
 
-1. On the VPS obtain `compose.yaml` and `.env.example` from the intended release. Copy `.env.example` to `.env`. Set `MCP_IMAGE` to a specific `ghcr.io/acetaxxxx/taiwan-card-rewards-mcp` version tag or immutable digest. Feature branches also publish branch and `sha-<commit>` tags; `latest` follows `main` and is not an immutable deployment reference.
+1. On the VPS obtain `compose.yaml`, `.env.example`, and the deployment scripts from the intended release. Copy `.env.example` to `.env`. Set `MCP_IMAGE` to a specific `ghcr.io/acetaxxxx/taiwan-card-rewards-mcp` version tag or immutable digest. Feature branches also publish branch and `sha-<commit>` tags; `latest` follows `main` and is not an immutable deployment reference.
 2. Set `MCP_HTTP_PUBLIC_URL` to the HTTPS URL ending in the MCP path, `MCP_CF_ACCESS_ISSUER` to the Cloudflare Access team issuer (for example `https://team.cloudflareaccess.com`), and `MCP_CF_ACCESS_AUDIENCE` to the application AUD tag. The values must match the Access application protecting this hostname. Set `MCP_HTTP_HOST_PORT` if the host port must differ from `8080`. The container binds to `0.0.0.0:8080`, while Compose publishes only `127.0.0.1:<host-port>:8080`.
-3. Pull the image, initialize the data volume ownership, and start the service for the first time. The container's `node` user has UID/GID 1000 and the service changes the data-root mode to `0700`; the volume root must be owned by that user. The initialization command is intended for a new deployment and changes the volume root, not the ownership of existing tenant files. After bootstrap, use `scripts/mcp-admin.sh` for planned starts, updates, backups, and recovery.
+3. Pull the image, initialize the data and log volume ownership, and start the service for the first time. The container's `node` user has UID/GID 1000; both volume roots must be owned by that user and have mode `0700`. The initialization command is intended for a new deployment and changes the volume roots, not the ownership of existing tenant files. After bootstrap, use `scripts/mcp-admin.sh` for planned starts, updates, backups, and recovery.
 
    ```sh
    docker compose pull
-   docker compose run --rm --no-deps --user root --entrypoint sh mcp -c 'chown 1000:1000 /data && chmod 700 /data'
+   docker compose run --rm --no-deps --user root --entrypoint sh mcp -c 'chown 1000:1000 /data /logs && chmod 700 /data /logs'
    docker compose up -d
    docker compose ps
    docker compose logs --tail=100 mcp
@@ -27,7 +27,15 @@ Run planned starts, updates, backups, restores, and identity recovery as the sam
 4. Route the public MCP hostname through the existing Tunnel to `http://127.0.0.1:<host-port>`. `cloudflared` is running on the VPS host, so that address is the host's loopback. Verify that the original Host header is accepted by the MCP service. The Compose health check uses the public URL's host header because `/healthz` is behind the service's Host allowlist.
 5. Once the service validates Access assertions, enable Managed OAuth on the intended Access application, then verify unauthenticated requests receive OAuth discovery and complete the real ChatGPT/Gemini login and tool flows. Confirm two user accounts are isolated and the same account maps as intended across clients.
 
-The `.env` file is local configuration and must not be committed. It contains configuration values, not user tokens. Do not write Access assertions or user data to logs.
+The `.env` file is local configuration and must not be committed. It contains configuration values, not user tokens. Access assertions and authorization headers are never logged.
+
+## MCP request logs and rotation
+
+Compose defaults `MCP_HTTP_DIAGNOSTIC_LOGS` to `1`; direct process runs leave it disabled unless explicitly set to `1`. Each MCP request log records the HTTP method, path without query parameters, an allowlisted JSON-RPC method name, status, duration, processing phase, authentication state, normalized Origin, Cloudflare Ray ID, and bounded request/response bodies. Request bodies are captured only after service authentication succeeds; rejected requests still record status and phase, plus an allowlisted method header when supplied. JSON body capture is capped at 256 KiB per body and has a one-second read limit; short `text/plain` error responses are included. Sensitive-key values are redacted recursively, including PAN/card/account numbers, CVV/CVC/OTP/PIN, passwords/passcodes, cookies, credentials/private keys, secrets, tokens, API keys, authorization, user IDs/principals, email, phone, display name, data directory, and path fields. The redactor also checks JSON encoded inside string fields. Invalid, oversized, timed-out, and streaming response bodies are marked as omitted. Access assertions and authorization header values are never logged.
+
+Request and response bodies can still contain allowed card and transaction details from any tenant, so treat these as private financial data. The detailed log lives in the separate `mcp_logs` volume at `/logs/mcp-http.log`; the volume persists across container updates and is not included in tenant-data backups. The log directory has mode `0700` and files have mode `0600`. The deployment wrapper repairs the log volume root ownership and mode without changing existing log files. Do not copy output into public issues or the repository. `scripts/mcp-http-logs.sh 20` prints recent call metadata and body sizes; `scripts/mcp-http-logs.sh --with-bodies 20` explicitly prints captured values. `docker compose logs --since=24h mcp` shows request metadata and body byte counts without body values. Set `MCP_HTTP_DIAGNOSTIC_LOGS=0` in `.env` and redeploy with `./scripts/mcp-admin.sh deploy` to disable request diagnostics.
+
+The application rotates detailed logs at 10 MiB per file and retains at most five files (about 50 MiB total). Rotation is size-based, so low-volume logs remain until new records exceed the limit. Compose also rotates Docker stdout/stderr metadata logs with the compressed `json-file` driver at 10 MiB per file and five files. See [Docker's json-file rotation options](https://docs.docker.com/engine/logging/drivers/json-file/).
 
 ## Image publication
 
@@ -45,4 +53,4 @@ docker compose logs --tail=100 mcp
 
 Check health and authenticate through the actual Tunnel before considering the update complete. If deployment fails, inspect the logs, set `MCP_IMAGE` to the previous tag or digest, and run `./scripts/mcp-admin.sh deploy` again. Confirm storage-schema compatibility first: an old image may not understand data migrated by the new image. All planned admin and deployment operations must use this wrapper; direct `docker compose stop`, `start`, `up`, or `pull` can race with an admin operation. Do not use `docker compose down -v` on the production deployment, because it removes the data volume.
 
-The default Compose project `taiwan-card-rewards` names the volume `taiwan-card-rewards_mcp_data`. Overriding `COMPOSE_PROJECT_NAME` changes the actual volume name; use a consistent project name for deployment, backups, and restoration. Existing volumes must have usable ownership and permissions before starting the non-root container. Backups stored on the VPS do not protect against loss of the VPS or its disk.
+The default Compose project `taiwan-card-rewards` names the volumes `taiwan-card-rewards_mcp_data` and `taiwan-card-rewards_mcp_logs`. Overriding `COMPOSE_PROJECT_NAME` changes both volume names; use a consistent project name for deployment, backups, and restoration. Existing volumes must have usable ownership and permissions before starting the non-root container. `docker compose down -v` removes both tenant data and diagnostic logs. Backups stored on the VPS do not protect against loss of the VPS or its disk.

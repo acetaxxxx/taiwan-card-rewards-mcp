@@ -12,7 +12,7 @@ WORKDIR /app
 COPY --from=build /app/package.json /app/package-lock.json ./
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
-RUN mkdir /data && chown node:node /data && chmod 700 /data
+RUN mkdir -p /data /logs && chown node:node /data /logs && chmod 700 /data /logs
 USER node
 EXPOSE 8080
 CMD ["node", "dist/http-cli.js"]

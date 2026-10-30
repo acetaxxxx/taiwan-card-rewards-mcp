@@ -12,10 +12,13 @@ services:
       MCP_DATA_ROOT: /data
       MCP_HTTP_HOST: 0.0.0.0
       MCP_HTTP_PORT: "8080"
+      MCP_HTTP_DIAGNOSTIC_LOGS: ${MCP_HTTP_DIAGNOSTIC_LOGS:-1}
+      MCP_HTTP_LOG_DIR: /logs
     ports:
       - "127.0.0.1:${MCP_HTTP_HOST_PORT:-8080}:8080"
     volumes:
       - mcp_data:/data
+      - mcp_logs:/logs
     healthcheck:
       test:
         - CMD
@@ -26,6 +29,13 @@ services:
       timeout: 5s
       retries: 3
       start_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+        compress: "true"
 
 volumes:
   mcp_data:
+  mcp_logs:

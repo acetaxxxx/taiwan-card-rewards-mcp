@@ -142,6 +142,11 @@ if [[ "${1:-}" == deploy ]]; then
     if [[ "$was_running" == true ]]; then docker compose start mcp >/dev/null; fi
     exit 1
   fi
+  if ! docker compose run --rm --no-deps --user root --entrypoint sh mcp -c 'chown 1000:1000 /logs && chmod 700 /logs'; then
+    printf '%s\n' 'Log volume initialization failed; restarting the existing service.' >&2
+    if [[ "$was_running" == true ]]; then docker compose start mcp >/dev/null; fi
+    exit 1
+  fi
   if ! docker compose up -d --no-deps mcp; then
     printf '%s\n' 'Deployment failed; inspect the service and restore the previous MCP_IMAGE if needed.' >&2
     exit 1

@@ -21,8 +21,9 @@ if (process.argv.includes('--help') || process.argv.includes('-h')) {
     '  MCP_OAUTH_USER_GRANT_CLAIM          JWT claim that marks a delegated user grant',
     '  MCP_OAUTH_USER_GRANT_VALUE          Required value of that delegated-grant claim',
     '',
+    '  MCP_HTTP_DIAGNOSTIC_LOGS            Request/response JSON diagnostics (set 1 to enable; Compose defaults to 1)',
     'Optional: MCP_HTTP_HOST, MCP_HTTP_PORT, MCP_HTTP_ALLOWED_HOSTS, MCP_HTTP_ALLOWED_ORIGINS,',
-    '          MCP_HTTP_MAX_TENANTS, MCP_OAUTH_REQUIRED_SCOPE.',
+    '          MCP_HTTP_MAX_TENANTS, MCP_HTTP_LOG_DIR, MCP_OAUTH_REQUIRED_SCOPE.',
   ].join('\n') + '\n');
 } else {
   startHttpMcpService().catch((error: unknown) => {

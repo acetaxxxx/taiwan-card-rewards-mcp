@@ -21,6 +21,15 @@ import { loadHttpServiceConfig, type HttpServiceConfig } from './http-config.js'
 import { createCloudflareAccessGate, createTokenVerifier, loadAuthorizationServerMetadata } from './http-auth.js';
 import { createTenantRegistry } from './http-tenants.js';
 import { getMcpErrorData } from './mcp-errors.js';
+import {
+  captureDiagnosticRequest,
+  captureDiagnosticResponse,
+  httpDiagnosticsEnabled,
+  initializeHttpDiagnosticLog,
+  writeHttpDiagnostic,
+  type DiagnosticBodySnapshot,
+  type DiagnosticRequestSnapshot,
+} from './http-diagnostics.js';
 
 const packageJson = createRequire(import.meta.url)('../package.json') as { version: string };
 const maxRequestBodySize = 4 * 1024 * 1024;
@@ -40,6 +49,16 @@ function addCors(response: Response, origin: string | null): Response {
   headers.set('Access-Control-Expose-Headers', 'WWW-Authenticate, MCP-Protocol-Version, MCP-Session-Id, Last-Event-ID, Allow');
   headers.append('Vary', 'Origin');
   return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+}
+
+function safeOrigin(value: string | null): string | undefined {
+  if (!value) return undefined;
+  try { return new URL(value).origin; }
+  catch { return undefined; }
+}
+
+function safeCloudflareRayId(value: string | null): string | undefined {
+  return value && /^[A-Za-z0-9-]{1,64}$/.test(value) ? value : undefined;
 }
 
 export function createHttpHandler(config: HttpServiceConfig, metadata: OAuthMetadata | undefined, tenants: ReturnType<typeof createTenantRegistry>, cloudflareKeys?: JWTVerifyGetKey) {
@@ -94,28 +113,102 @@ export function createHttpHandler(config: HttpServiceConfig, metadata: OAuthMeta
   const fetchHandler = {
     async fetch(request: Request): Promise<Response> {
       const url = new URL(request.url);
-      const metadataResponse = authMetadata ? oauthMetadataResponse(request, authMetadata) : undefined;
-      if (metadataResponse) return metadataResponse;
-      if (url.pathname !== config.mcpPath) return new Response('Not found', { status: 404 });
+      const isMcpEndpoint = url.pathname === config.mcpPath;
+      const isMetadataEndpoint = Boolean(authMetadata && url.pathname.startsWith('/.well-known/oauth-protected-resource'));
+      const diagnosticsEnabled = httpDiagnosticsEnabled();
+      const startedAt = Date.now();
       const origin = request.headers.get('origin');
-      if (origin && !config.allowedOrigins.has(origin)) return new Response('Origin not allowed', { status: 403 });
-      if (request.method === 'OPTIONS') {
-        if (!origin) return new Response(null, { status: 204, headers: { Allow: 'GET, POST, DELETE, OPTIONS' } });
-        return new Response(null, {
-          status: 204,
-          headers: {
-            'Access-Control-Allow-Origin': origin,
-            'Access-Control-Allow-Methods': 'GET, POST, DELETE, OPTIONS',
-            'Access-Control-Allow-Headers': 'Authorization, Content-Type, Mcp-Protocol-Version, Mcp-Session-Id, Last-Event-ID, Accept',
-            'Access-Control-Expose-Headers': 'WWW-Authenticate, MCP-Protocol-Version, MCP-Session-Id, Last-Event-ID, Allow',
-            'Access-Control-Max-Age': '600',
-            Vary: 'Origin',
-          },
-        });
+      const normalizedOrigin = safeOrigin(origin);
+      const cfRay = safeCloudflareRayId(request.headers.get('cf-ray'));
+      let requestSnapshotPromise: Promise<DiagnosticRequestSnapshot | undefined> = Promise.resolve(undefined);
+      let responseSnapshotPromise: Promise<DiagnosticBodySnapshot | undefined> = Promise.resolve(undefined);
+      const credentialsPresent = config.auth.mode === 'cloudflare-access'
+        ? request.headers.has('cf-access-jwt-assertion')
+        : /^Bearer\s+\S+/i.test(request.headers.get('authorization') ?? '');
+      let authResult = credentialsPresent ? 'present' : 'missing';
+      let phase = 'routing';
+      let status = 500;
+      const complete = (response: Response): Response => {
+        status = response.status;
+        if (diagnosticsEnabled && (isMcpEndpoint || isMetadataEndpoint)) {
+          responseSnapshotPromise = captureDiagnosticResponse(response).catch(() => undefined);
+        }
+        return response;
+      };
+
+      try {
+        const metadataResponse = authMetadata ? oauthMetadataResponse(request, authMetadata) : undefined;
+        if (metadataResponse) {
+          phase = 'oauth_discovery';
+          return complete(metadataResponse);
+        }
+        if (!isMcpEndpoint) {
+          phase = 'not_found';
+          const response = new Response('Not found', { status: 404 });
+          return complete(response);
+        }
+        if (origin && !config.allowedOrigins.has(origin)) {
+          phase = 'origin_denied';
+          const response = new Response('Origin not allowed', { status: 403 });
+          return complete(response);
+        }
+        if (request.method === 'OPTIONS') {
+          phase = 'preflight';
+          const response = !origin
+            ? new Response(null, { status: 204, headers: { Allow: 'GET, POST, DELETE, OPTIONS' } })
+            : new Response(null, {
+              status: 204,
+              headers: {
+                'Access-Control-Allow-Origin': origin,
+                'Access-Control-Allow-Methods': 'GET, POST, DELETE, OPTIONS',
+                'Access-Control-Allow-Headers': 'Authorization, Content-Type, Mcp-Protocol-Version, Mcp-Session-Id, Last-Event-ID, Accept',
+                'Access-Control-Expose-Headers': 'WWW-Authenticate, MCP-Protocol-Version, MCP-Session-Id, Last-Event-ID, Allow',
+                'Access-Control-Max-Age': '600',
+                Vary: 'Origin',
+              },
+            });
+          return complete(response);
+        }
+        phase = 'authentication';
+        const authInfo = await authGate(request);
+        if (authInfo instanceof Response) {
+          authResult = credentialsPresent ? 'rejected' : 'missing';
+          phase = 'authentication_denied';
+          const response = addCors(authInfo, origin);
+          return complete(response);
+        }
+        authResult = 'accepted';
+        phase = 'mcp';
+        if (diagnosticsEnabled) requestSnapshotPromise = captureDiagnosticRequest(request).catch(() => undefined);
+        const response = addCors(await protocolHandler.fetch(request, { authInfo }), origin);
+        return complete(response);
+      } catch (error) {
+        phase = 'handler_error';
+        throw error;
+      } finally {
+        if (diagnosticsEnabled && (isMcpEndpoint || isMetadataEndpoint)) {
+          const timestamp = new Date().toISOString();
+          const baseRecord = {
+            timestamp,
+            method: request.method,
+            path: url.pathname,
+            status,
+            durationMs: Date.now() - startedAt,
+            phase,
+            auth: authResult,
+            ...(normalizedOrigin ? { origin: normalizedOrigin } : {}),
+            ...(cfRay ? { cfRay } : {}),
+          };
+          void Promise.all([requestSnapshotPromise, responseSnapshotPromise]).then(([requestSnapshot, responseBody]) => {
+            writeHttpDiagnostic({
+              ...baseRecord,
+              ...(requestSnapshot?.rpcMethod ? { rpcMethod: requestSnapshot.rpcMethod } : {}),
+              ...(requestSnapshot?.body ? { requestBody: requestSnapshot.body } : {}),
+              ...(responseBody ? { responseBody } : {}),
+            });
+          }).catch(() => writeHttpDiagnostic(baseRecord));
+        }
       }
-      const authInfo = await authGate(request);
-      if (authInfo instanceof Response) return addCors(authInfo, origin);
-      return addCors(await protocolHandler.fetch(request, { authInfo }), origin);
     },
   };
   return { handler: toNodeHandler(fetchHandler, { maxRequestBodySize }), fetch: fetchHandler.fetch, close: protocolHandler.close };
@@ -128,6 +221,7 @@ function respond(res: http.ServerResponse, status: number, body: string, headers
 
 export async function startHttpMcpService(): Promise<void> {
   const config = loadHttpServiceConfig();
+  initializeHttpDiagnosticLog();
   const metadata = config.auth.mode === 'oauth' ? await loadAuthorizationServerMetadata(config.auth) : undefined;
   const tenants = createTenantRegistry(config.dataRoot, config.maxTenants);
   const { handler, close: closeProtocol } = createHttpHandler(config, metadata, tenants);
