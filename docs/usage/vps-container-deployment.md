@@ -8,7 +8,7 @@ Run planned starts, updates, backups, restores, and identity recovery as the sam
 
 - A VPS with Docker Engine and Compose, persistent local storage, and the existing host-based Cloudflare Tunnel. Use one MCP process for the data volume; never run another container or stdio process against the same tenant directories.
 - A Cloudflare Access application for the MCP hostname, using the existing Google identity provider and an Access policy allowing the chosen accounts. Managed OAuth client registration, redirect URIs, and policies must be configured and verified in Cloudflare separately; the application JWT audience tag is available in the Access application settings.
-- A GHCR image from this repository. Pulling a public package requires no login; confirm its visibility after the first publication. For a private package, authenticate the VPS to GHCR with a suitably scoped credential.
+- A GHCR image from this repository. The first publication creates the package; make it Public in Package settings before expecting anonymous pulls. GitHub does not allow a Public package to be made Private again. For a private package, authenticate the VPS to GHCR with a suitably scoped credential.
 
 ## Configure and start
 
