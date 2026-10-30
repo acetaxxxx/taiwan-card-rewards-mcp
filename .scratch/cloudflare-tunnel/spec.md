@@ -54,7 +54,6 @@ Use Cloudflare Access Managed OAuth and verify its signed per-user assertion at 
 
 ## Remaining acceptance work
 
-- Feature-branch image publish now passes in [GitHub Actions run 40995141820](https://github.com/acetaxxxx/taiwan-card-rewards-mcp/actions/runs/40995141820). The new package is Private and anonymous manifest access returns 403; change it to Public in Package settings (GitHub makes this change irreversible), then confirm anonymous pull access.
 - Configure an isolated Cloudflare Access application and Managed OAuth policy for the test hostname, preserving existing Tunnel and Access applications.
 - Deploy on the target VPS with the host `cloudflared` route and verify startup, loopback-only host publishing, backups, restore, restart and rollback.
 - Complete real ChatGPT and Gemini OAuth connection, PKCE, tool discovery and representative tool calls; verify two-user isolation and same-principal behavior across clients.

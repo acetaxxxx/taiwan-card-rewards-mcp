@@ -7,7 +7,7 @@
 - `npm run typecheck`、`npm run docs:check`、`npm run test:migration`：通過。
 - `npm test -- --maxWorkers=2`：64 個測試檔、322 個測試通過。完整測試需在允許 Unix domain socket 的環境執行；sandbox 內既有 shared-MCP 測試會因 `EPERM` 失敗。
 - Docker `linux/amd64` image build：通過；本機 container smoke 確認 `/healthz` 回 200、未驗證的 MCP request 回 401，且 named-volume 資料在 container recreate 後保留。
-- Compose 設定解析：通過。GitHub Actions run [40995141820](https://github.com/acetaxxxx/taiwan-card-rewards-mcp/actions/runs/40995141820) 的 verify 與 multi-platform image publish 均成功；但新 GHCR package 目前是 Private，使用無憑證 Docker config 的 manifest 查詢回 403。公開設定尚待 GitHub Package Settings 完成。
+- Compose 設定解析：通過。GitHub Actions run [40995141820](https://github.com/acetaxxxx/taiwan-card-rewards-mcp/actions/runs/40995141820) 的 verify 與 multi-platform image publish 均成功。GHCR package 已設為 Public；使用全新的空白 `DOCKER_CONFIG` 匿名查詢 `ghcr.io/acetaxxxx/taiwan-card-rewards-mcp:sha-fab27089054eb265458800a6e5800236308f66f3` 成功，可讀取 `linux/amd64` 與 `linux/arm64` manifests。
 - Cloudflare Access／Tunnel、VPS 及 ChatGPT／Gemini 真實連線尚未部署驗收。
 
 ## 自動化：HTTP 認證與使用者隔離
