@@ -14,10 +14,11 @@ import {
 } from '@modelcontextprotocol/server';
 import { hostHeaderValidation, toNodeHandler } from '@modelcontextprotocol/node';
 import type { NodeIncomingMessageLike, NodeServerResponseLike } from '@modelcontextprotocol/node';
+import type { JWTVerifyGetKey } from 'jose';
 import { callMcpTool } from './mcp-dispatch.js';
 import { mcpInstructions, mcpTools } from './mcp-contract.js';
 import { loadHttpServiceConfig, type HttpServiceConfig } from './http-config.js';
-import { createTokenVerifier, loadAuthorizationServerMetadata } from './http-auth.js';
+import { createCloudflareAccessGate, createTokenVerifier, loadAuthorizationServerMetadata } from './http-auth.js';
 import { createTenantRegistry } from './http-tenants.js';
 import { getMcpErrorData } from './mcp-errors.js';
 
@@ -41,21 +42,28 @@ function addCors(response: Response, origin: string | null): Response {
   return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
 }
 
-function createHttpHandler(config: HttpServiceConfig, metadata: OAuthMetadata, tenants: ReturnType<typeof createTenantRegistry>) {
-  const resourceMetadataUrl = getOAuthProtectedResourceMetadataUrl(config.publicUrl);
-  const authMetadata: AuthMetadataOptions = {
-    oauthMetadata: metadata,
-    resourceServerUrl: config.publicUrl,
-    scopesSupported: [config.requiredScope],
-    resourceName: 'Taiwan Card Rewards MCP',
-    dangerouslyAllowInsecureIssuerUrl: new URL(config.issuer).protocol === 'http:',
-  };
-  const authGate = requireBearerAuth({
-    verifier: createTokenVerifier(config, metadata),
-    expectedResource: config.publicUrl,
-    requiredScopes: [config.requiredScope],
-    resourceMetadataUrl,
-  });
+export function createHttpHandler(config: HttpServiceConfig, metadata: OAuthMetadata | undefined, tenants: ReturnType<typeof createTenantRegistry>, cloudflareKeys?: JWTVerifyGetKey) {
+  let authMetadata: AuthMetadataOptions | undefined;
+  let authGate: (request: Request) => Promise<import('@modelcontextprotocol/server').AuthInfo | Response>;
+  if (config.auth.mode === 'oauth') {
+    if (!metadata) throw new Error('OAuth metadata is required for oauth mode');
+    const resourceMetadataUrl = getOAuthProtectedResourceMetadataUrl(config.publicUrl);
+    authMetadata = {
+      oauthMetadata: metadata,
+      resourceServerUrl: config.publicUrl,
+      scopesSupported: [config.auth.requiredScope],
+      resourceName: 'Taiwan Card Rewards MCP',
+      dangerouslyAllowInsecureIssuerUrl: new URL(config.auth.issuer).protocol === 'http:',
+    };
+    authGate = requireBearerAuth({
+      verifier: createTokenVerifier(config.auth, config.publicUrl, metadata),
+      expectedResource: config.publicUrl,
+      requiredScopes: [config.auth.requiredScope],
+      resourceMetadataUrl,
+    });
+  } else {
+    authGate = createCloudflareAccessGate(config.auth, cloudflareKeys);
+  }
   const protocolHandler = createMcpHandler(({ authInfo }) => {
     if (!authInfo) throw new OAuthError(OAuthErrorCode.InvalidToken, 'authenticated user identity is required');
     const service = tenants.service(authInfo);
@@ -86,7 +94,7 @@ function createHttpHandler(config: HttpServiceConfig, metadata: OAuthMetadata, t
   const fetchHandler = {
     async fetch(request: Request): Promise<Response> {
       const url = new URL(request.url);
-      const metadataResponse = oauthMetadataResponse(request, authMetadata);
+      const metadataResponse = authMetadata ? oauthMetadataResponse(request, authMetadata) : undefined;
       if (metadataResponse) return metadataResponse;
       if (url.pathname !== config.mcpPath) return new Response('Not found', { status: 404 });
       const origin = request.headers.get('origin');
@@ -110,7 +118,7 @@ function createHttpHandler(config: HttpServiceConfig, metadata: OAuthMetadata, t
       return addCors(await protocolHandler.fetch(request, { authInfo }), origin);
     },
   };
-  return { handler: toNodeHandler(fetchHandler, { maxRequestBodySize }), close: protocolHandler.close };
+  return { handler: toNodeHandler(fetchHandler, { maxRequestBodySize }), fetch: fetchHandler.fetch, close: protocolHandler.close };
 }
 
 function respond(res: http.ServerResponse, status: number, body: string, headers: Record<string, string> = {}): void {
@@ -120,7 +128,7 @@ function respond(res: http.ServerResponse, status: number, body: string, headers
 
 export async function startHttpMcpService(): Promise<void> {
   const config = loadHttpServiceConfig();
-  const metadata = await loadAuthorizationServerMetadata(config);
+  const metadata = config.auth.mode === 'oauth' ? await loadAuthorizationServerMetadata(config.auth) : undefined;
   const tenants = createTenantRegistry(config.dataRoot, config.maxTenants);
   const { handler, close: closeProtocol } = createHttpHandler(config, metadata, tenants);
   const validateHost = hostHeaderValidation(config.allowedHosts);

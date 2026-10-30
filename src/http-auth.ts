@@ -1,12 +1,13 @@
 import { OAuthError, OAuthErrorCode, type AuthInfo, type OAuthMetadata } from '@modelcontextprotocol/server';
 import { createRemoteJWKSet, errors as joseErrors, jwtVerify } from 'jose';
-import { secureUrl, type HttpServiceConfig } from './http-config.js';
+import type { JWTVerifyGetKey } from 'jose';
+import { secureUrl, type OAuthAuthConfig, type CloudflareAccessAuthConfig } from './http-config.js';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
-export async function loadAuthorizationServerMetadata(config: HttpServiceConfig): Promise<OAuthMetadata> {
+export async function loadAuthorizationServerMetadata(config: OAuthAuthConfig): Promise<OAuthMetadata> {
   const response = await fetch(config.metadataUrl, { redirect: 'error', signal: AbortSignal.timeout(10_000) });
   if (!response.ok) throw new Error(`OAuth metadata request failed with HTTP ${response.status}`);
   const value: unknown = await response.json();
@@ -24,14 +25,13 @@ export async function loadAuthorizationServerMetadata(config: HttpServiceConfig)
   return value as OAuthMetadata;
 }
 
-export function createTokenVerifier(config: HttpServiceConfig, metadata: OAuthMetadata) {
-  const jwks = createRemoteJWKSet(config.jwksUrl);
+export function createTokenVerifier(config: OAuthAuthConfig, publicUrl: URL, metadata: OAuthMetadata, jwks: JWTVerifyGetKey = createRemoteJWKSet(config.jwksUrl)) {
   return {
     async verifyAccessToken(token: string): Promise<AuthInfo> {
       try {
         const { payload } = await jwtVerify(token, jwks, {
           issuer: config.issuer,
-          audience: config.publicUrl.href,
+          audience: publicUrl.href,
           algorithms: ['RS256', 'PS256', 'ES256', 'ES384', 'EdDSA'],
         });
         if (typeof payload.sub !== 'string' || payload.sub.length === 0 || typeof payload.iss !== 'string') {
@@ -56,7 +56,7 @@ export function createTokenVerifier(config: HttpServiceConfig, metadata: OAuthMe
           clientId,
           scopes,
           expiresAt: payload.exp,
-          resource: config.publicUrl,
+          resource: publicUrl,
           extra: { issuer: metadata.issuer, subject: payload.sub },
         };
       } catch (error) {
@@ -65,5 +65,34 @@ export function createTokenVerifier(config: HttpServiceConfig, metadata: OAuthMe
         throw error;
       }
     },
+  };
+}
+
+/** The identity assertion is supplied by Cloudflare after Managed OAuth resolves the opaque client token. */
+export function createCloudflareAccessGate(config: CloudflareAccessAuthConfig, keys: JWTVerifyGetKey = createRemoteJWKSet(config.jwksUrl)) {
+  return async (request: Request): Promise<AuthInfo | Response> => {
+    const assertion = request.headers.get('Cf-Access-Jwt-Assertion');
+    if (!assertion) return new Response('Unauthorized', { status: 401 });
+    try {
+      const { payload } = await jwtVerify(assertion, keys, {
+        issuer: config.issuer,
+        audience: config.audience,
+        algorithms: ['RS256'],
+        requiredClaims: ['iss', 'sub', 'aud', 'exp', 'type'],
+      });
+      if (payload.type !== 'app' || typeof payload.sub !== 'string' || !payload.sub.trim() || typeof payload.exp !== 'number'
+        || payload.common_name !== undefined || payload.service_token_id !== undefined) {
+        return new Response('Unauthorized', { status: 401 });
+      }
+      return {
+        token: assertion,
+        clientId: payload.sub,
+        scopes: [],
+        expiresAt: payload.exp,
+        extra: { issuer: config.issuer, subject: payload.sub },
+      };
+    } catch {
+      return new Response('Unauthorized', { status: 401 });
+    }
   };
 }

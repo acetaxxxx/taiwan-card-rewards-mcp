@@ -151,6 +151,29 @@ describe("LedgerStore persistence seam and FileStore adapter", () => {
     }
   });
 
+  it("reopens single-process HTTP storage despite a stale PID file and prevents duplicate in-process owners", () => {
+    const dir = mkdtempSync(join(tmpdir(), "card-rewards-http-owner-"));
+    try {
+      const lockFile = join(dir, "card-rewards.lock");
+      const staleLock = JSON.stringify({ pid: 1 });
+      writeFileSync(lockFile, staleLock);
+      const store = new FileStore(config(dir), { lock: false });
+      expect(() => new FileStore(config(dir), { lock: false })).toThrow(/LOCK_EXISTS/);
+      store.update((state) => { state.cards.push(sampleCard); });
+      store.close();
+      expect(readFileSync(lockFile, "utf8")).toBe(staleLock);
+      const reopened = new FileStore(config(dir), { lock: false });
+      expect(reopened.read().cards).toEqual([sampleCard]);
+      expect(() => store.read()).toThrow(/STORE_CLOSED/);
+      expect(() => store.write(emptyState())).toThrow(/STORE_CLOSED/);
+      expect(() => store.update(() => {})).toThrow(/STORE_CLOSED/);
+      expect(reopened.read().cards).toEqual([sampleCard]);
+      reopened.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("recovers a lock left by a process that no longer exists", () => {
     const dir = mkdtempSync(join(tmpdir(), "card-rewards-stale-lock-"));
     try {

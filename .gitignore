@@ -2,6 +2,9 @@ node_modules/
 dist/
 coverage/
 *.log
+.env
+.env.*
+!.env.example
 
 # Local AionUi-injected skills are not repository content.
 .agents/skills/aionui-config

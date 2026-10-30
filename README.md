@@ -16,11 +16,14 @@ The store takes an exclusive process lock (`card-rewards.lock`) for the lifetime
 
 ## Run as a multi-user Streamable HTTP MCP service
 
-The separate `taiwan-card-rewards-mcp-http` executable serves the same 28 tools at the path in `MCP_HTTP_PUBLIC_URL`. It requires a persistent local volume and an external OAuth 2.1/OIDC authorization server. That authorization server must support delegated authorization-code + PKCE for the ChatGPT/Gemini clients, publish metadata and signing keys, and issue signed JWT access tokens whose `sub` identifies the end user and whose `iss`, `aud`, `exp`, and scope claims meet this service's configuration. Configure a signed JWT claim that the authorization server emits only on user-delegated tokens; `MCP_OAUTH_USER_GRANT_CLAIM` and `MCP_OAUTH_USER_GRANT_VALUE` select the claim and required value. This marker lets the service reject machine-to-machine tokens even if they include a `sub`. Register clients as required by those products; set `MCP_OAUTH_REQUIRED_SCOPE` to the scope the clients request (default `mcp`).
+For the Cloudflare Tunnel VPS container deployment, see the [VPS container deployment guide](docs/usage/vps-container-deployment.md).
+
+The separate `taiwan-card-rewards-mcp-http` executable serves the same 28 tools at the path in `MCP_HTTP_PUBLIC_URL` and requires a persistent local volume. It supports two mutually exclusive authentication modes. For a VPS behind Cloudflare Access Managed OAuth, set `MCP_AUTH_MODE=cloudflare-access`, `MCP_CF_ACCESS_ISSUER`, and `MCP_CF_ACCESS_AUDIENCE`; Cloudflare handles Google login and client OAuth, while the origin verifies Cloudflare's signed application assertion for each user. The [VPS deployment guide](docs/usage/vps-container-deployment.md) covers this setup. This mode does not require configuring client IDs or client secrets in the MCP service. The existing `oauth` mode remains the default and requires an external OAuth 2.1/OIDC authorization server that supports delegated authorization-code + PKCE, publishes metadata and signing keys, and issues signed JWT access tokens. Configure a signed claim that appears only on user-delegated tokens so the service can reject machine-to-machine tokens even if they include a `sub`.
 
 Required environment variables:
 
 ```sh
+MCP_AUTH_MODE=oauth \
 MCP_DATA_ROOT=/srv/taiwan-card-rewards \
 MCP_HTTP_PUBLIC_URL=https://mcp.example.com/mcp \
 MCP_OAUTH_ISSUER=https://auth.example.com/ \
@@ -31,7 +34,7 @@ MCP_OAUTH_USER_GRANT_VALUE=authorization_code \
 npx taiwan-card-rewards-mcp-http
 ```
 
-Each verified `(issuer, subject)` pair receives a private directory selected by the service; request arguments, headers, and `--user` cannot choose a tenant. Tokens must be signed with one of RS256, PS256, ES256, ES384, or EdDSA, include the canonical MCP URL as an audience, the required scope, and the configured delegated-user marker. The authorization server must never add that marker to client-credentials tokens. The service publishes Protected Resource Metadata and the configured authorization server metadata. Set `MCP_HTTP_ALLOWED_ORIGINS` to the exact browser origins that should call the endpoint; requests without an `Origin` header continue to work for server-side clients. Set `MCP_HTTP_ALLOWED_HOSTS` when a trusted reverse proxy uses an approved Host value different from the public URL hostname. Configure a stable HTTPS URL, TLS termination, and a persistent volume at deployment. One service process may own a data root; do not run multiple replicas against the JSON files. The default in-memory tenant-store limit is 1000 and can be changed with `MCP_HTTP_MAX_TENANTS`.
+Each verified `(issuer, subject)` pair receives a private directory selected by the service; request arguments, headers, and `--user` cannot choose a tenant. In `oauth` mode, tokens must be signed with one of RS256, PS256, ES256, ES384, or EdDSA, include the canonical MCP URL as audience, the required scope, and the configured delegated-user marker. The service publishes Protected Resource Metadata and the configured authorization server metadata. In Cloudflare mode, Cloudflare Access owns OAuth discovery and opaque client tokens; the origin verifies the signed Access assertion and does not trust caller-provided identity headers. Set `MCP_HTTP_ALLOWED_ORIGINS` to exact browser origins if needed and `MCP_HTTP_ALLOWED_HOSTS` when a trusted reverse proxy uses an approved Host value different from the public URL hostname. Configure a stable HTTPS URL, TLS termination, and persistent volume at deployment. One service process may own a data root; do not run multiple replicas against the JSON files. The default in-memory tenant-store limit is 1000 and can be changed with `MCP_HTTP_MAX_TENANTS`.
 
 The stdio executable remains the local single-tenant option described below. HTTP mode is a separately configured server and does not change stdio startup behavior.
 

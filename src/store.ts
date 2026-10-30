@@ -57,15 +57,19 @@ export interface LedgerStore {
   close(): void;
 }
 
+// Prevent two store instances in this process from keeping divergent state.
+const processOwnedDirectories = new Set<string>();
+
 /** A single-process, tenant-bound JSON store. The future sidecar can replace this interface with SQLite. */
 export class FileStore implements LedgerStore {
   readonly filePath: string;
   readonly lockPath: string;
-  private readonly lockFd: number;
+  private readonly lockFd: number | undefined;
+  private readonly processOwnedDirectory: string | undefined;
   private state: StoredState;
   private closed = false;
 
-  constructor(config: StartupConfig) {
+  constructor(config: StartupConfig, options: { lock?: boolean } = {}) {
     this.filePath = path.join(config.dataDir, 'card-rewards.json');
     this.lockPath = path.join(config.dataDir, 'card-rewards.lock');
     let fd: number | undefined;
@@ -103,7 +107,11 @@ export class FileStore implements LedgerStore {
         throw new StoreError('LOCK_EXISTS', 'another MCP process already owns this data directory');
       }
     };
-    this.lockFd = acquireLock();
+    const canonical = fs.realpathSync(config.dataDir);
+    if (processOwnedDirectories.has(canonical)) throw new StoreError('LOCK_EXISTS', 'this process already owns this data directory');
+    this.lockFd = options.lock === false ? undefined : acquireLock();
+    processOwnedDirectories.add(canonical);
+    this.processOwnedDirectory = canonical;
     try {
       this.state = this.load();
     } catch (error) {
@@ -115,15 +123,20 @@ export class FileStore implements LedgerStore {
   close(): void {
     if (this.closed) return;
     this.closed = true;
-    try { fs.closeSync(this.lockFd); } catch { /* already closed */ }
-    try { fs.unlinkSync(this.lockPath); } catch { /* preserve process shutdown */ }
+    if (this.processOwnedDirectory !== undefined) processOwnedDirectories.delete(this.processOwnedDirectory);
+    if (this.lockFd !== undefined) {
+      try { fs.closeSync(this.lockFd); } catch { /* already closed */ }
+      try { fs.unlinkSync(this.lockPath); } catch { /* preserve process shutdown */ }
+    }
   }
 
   read(): StoredState {
+    if (this.closed) throw new StoreError('STORE_CLOSED', 'store is closed');
     return structuredClone(this.state);
   }
 
   write(next: StoredState): void {
+    if (this.closed) throw new StoreError('STORE_CLOSED', 'store is closed');
     const tempPath = `${this.filePath}.${process.pid}.tmp`;
     let normalized: StoredState;
     try {

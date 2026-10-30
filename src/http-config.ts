@@ -3,16 +3,28 @@ import * as path from 'node:path';
 
 const requiredScopeDefault = 'mcp';
 
-export interface HttpServiceConfig {
-  dataRoot: string;
-  publicUrl: URL;
-  mcpPath: string;
+export interface OAuthAuthConfig {
+  mode: 'oauth';
   issuer: string;
   metadataUrl: URL;
   jwksUrl: URL;
   userGrantClaim: string;
   userGrantValue: string;
   requiredScope: string;
+}
+
+export interface CloudflareAccessAuthConfig {
+  mode: 'cloudflare-access';
+  issuer: string;
+  audience: string;
+  jwksUrl: URL;
+}
+
+export interface HttpServiceConfig {
+  dataRoot: string;
+  publicUrl: URL;
+  mcpPath: string;
+  auth: OAuthAuthConfig | CloudflareAccessAuthConfig;
   port: number;
   host: string;
   allowedHosts: string[];
@@ -76,15 +88,27 @@ function parseOrigins(raw: string | undefined): Set<string> {
 export function loadHttpServiceConfig(): HttpServiceConfig {
   const publicUrl = secureUrl(requiredEnv('MCP_HTTP_PUBLIC_URL'), 'MCP_HTTP_PUBLIC_URL', true);
   if (publicUrl.pathname === '/' || publicUrl.pathname.endsWith('/')) throw new Error('MCP_HTTP_PUBLIC_URL must identify a non-root endpoint path without a trailing slash');
-  const issuer = requiredEnv('MCP_OAUTH_ISSUER');
-  secureUrl(issuer, 'MCP_OAUTH_ISSUER', true);
-  const metadataUrl = secureUrl(requiredEnv('MCP_OAUTH_METADATA_URL'), 'MCP_OAUTH_METADATA_URL', true);
-  const jwksUrl = secureUrl(requiredEnv('MCP_OAUTH_JWKS_URL'), 'MCP_OAUTH_JWKS_URL', true);
-  const userGrantClaim = requiredEnv('MCP_OAUTH_USER_GRANT_CLAIM');
-  const userGrantValue = requiredEnv('MCP_OAUTH_USER_GRANT_VALUE');
-  if (!/^[A-Za-z0-9._:-]{1,128}$/.test(userGrantClaim)) throw new Error('MCP_OAUTH_USER_GRANT_CLAIM must be a JWT claim name');
-  const requiredScope = process.env.MCP_OAUTH_REQUIRED_SCOPE?.trim() || requiredScopeDefault;
-  if (!/^[\x21\x23-\x5B\x5D-\x7E]+$/.test(requiredScope)) throw new Error('MCP_OAUTH_REQUIRED_SCOPE must be one OAuth scope token');
+  const mode = process.env.MCP_AUTH_MODE?.trim() || 'oauth';
+  let auth: HttpServiceConfig['auth'];
+  if (mode === 'oauth') {
+    const issuer = requiredEnv('MCP_OAUTH_ISSUER');
+    secureUrl(issuer, 'MCP_OAUTH_ISSUER', true);
+    const metadataUrl = secureUrl(requiredEnv('MCP_OAUTH_METADATA_URL'), 'MCP_OAUTH_METADATA_URL', true);
+    const jwksUrl = secureUrl(requiredEnv('MCP_OAUTH_JWKS_URL'), 'MCP_OAUTH_JWKS_URL', true);
+    const userGrantClaim = requiredEnv('MCP_OAUTH_USER_GRANT_CLAIM');
+    const userGrantValue = requiredEnv('MCP_OAUTH_USER_GRANT_VALUE');
+    if (!/^[A-Za-z0-9._:-]{1,128}$/.test(userGrantClaim)) throw new Error('MCP_OAUTH_USER_GRANT_CLAIM must be a JWT claim name');
+    const requiredScope = process.env.MCP_OAUTH_REQUIRED_SCOPE?.trim() || requiredScopeDefault;
+    if (!/^[\x21\x23-\x5B\x5D-\x7E]+$/.test(requiredScope)) throw new Error('MCP_OAUTH_REQUIRED_SCOPE must be one OAuth scope token');
+    auth = { mode, issuer, metadataUrl, jwksUrl, userGrantClaim, userGrantValue, requiredScope };
+  } else if (mode === 'cloudflare-access') {
+    const issuerUrl = secureUrl(requiredEnv('MCP_CF_ACCESS_ISSUER'), 'MCP_CF_ACCESS_ISSUER');
+    if (issuerUrl.pathname !== '/') throw new Error('MCP_CF_ACCESS_ISSUER must be a Cloudflare Access team origin');
+    const issuer = issuerUrl.origin;
+    auth = { mode, issuer, audience: requiredEnv('MCP_CF_ACCESS_AUDIENCE'), jwksUrl: new URL('/cdn-cgi/access/certs', issuer) };
+  } else {
+    throw new Error('MCP_AUTH_MODE must be oauth or cloudflare-access');
+  }
   const port = positiveInteger(process.env.MCP_HTTP_PORT, 8080, 'MCP_HTTP_PORT');
   if (port > 65535) throw new Error('MCP_HTTP_PORT must not exceed 65535');
   const maxTenants = positiveInteger(process.env.MCP_HTTP_MAX_TENANTS, 1000, 'MCP_HTTP_MAX_TENANTS');
@@ -100,12 +124,7 @@ export function loadHttpServiceConfig(): HttpServiceConfig {
     dataRoot: canonicalDataRoot(requiredEnv('MCP_DATA_ROOT')),
     publicUrl,
     mcpPath: publicUrl.pathname,
-    issuer,
-    metadataUrl,
-    jwksUrl,
-    userGrantClaim,
-    userGrantValue,
-    requiredScope,
+    auth,
     port,
     host: process.env.MCP_HTTP_HOST?.trim() || '0.0.0.0',
     allowedHosts: [...allowedHosts],

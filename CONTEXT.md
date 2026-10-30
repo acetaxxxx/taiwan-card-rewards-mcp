@@ -449,8 +449,9 @@ _Avoid_: caller promise, warning flag, best effort
   names; Agent alias/translation guesses must be validated before reward
   evaluation, and market/country belong to offer applicability rather than issuer
   identity.
-- The MerchantIdentity catalog is a deployment-shared reference catalog, while
-  user transactions, held cards, and reward ledgers remain strictly tenant-isolated.
+- Each User Principal has a separate Merchant Identity catalog. A future shared
+  reference catalog requires an explicit design; user transactions, held cards,
+  and reward ledgers remain strictly tenant-isolated.
 - Canonical merchant IDs are generated authoritatively by MCP as immutable `mch_<ULID>`
   during controlled registration; LLM agents propose candidates but never assign IDs.
 - Merged or duplicate merchant identities never rewrite historical records; deprecated

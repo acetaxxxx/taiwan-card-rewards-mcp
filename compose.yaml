@@ -1,0 +1,31 @@
+name: taiwan-card-rewards
+
+services:
+  mcp:
+    image: ${MCP_IMAGE:?Set MCP_IMAGE to a GHCR image tag or digest}
+    restart: unless-stopped
+    init: true
+    env_file:
+      - ${MCP_ENV_FILE:-.env}
+    environment:
+      MCP_AUTH_MODE: cloudflare-access
+      MCP_DATA_ROOT: /data
+      MCP_HTTP_HOST: 0.0.0.0
+      MCP_HTTP_PORT: "8080"
+    ports:
+      - "127.0.0.1:${MCP_HTTP_HOST_PORT:-8080}:8080"
+    volumes:
+      - mcp_data:/data
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "const q=require('node:http').get({hostname:'127.0.0.1',port:8080,path:'/healthz',headers:{host:new URL(process.env.MCP_HTTP_PUBLIC_URL).host},timeout:3000},r=>{r.resume();process.exit(r.statusCode===200?0:1)});q.on('timeout',()=>q.destroy());q.on('error',()=>process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  mcp_data:
