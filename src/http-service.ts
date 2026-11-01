@@ -190,7 +190,8 @@ export function createHttpHandler(config: HttpServiceConfig, metadata: OAuthMeta
         }
         authResult = 'accepted';
         tenantRef = tenants.tenantRef(authInfo);
-        oauthClientId = safeOAuthClientId(authInfo.extra?.oauthClientId);
+        const fallbackClientId = config.auth.mode === 'cloudflare-access' ? 'cloudflare-managed-oauth' : 'oauth-user-delegated';
+        oauthClientId = authInfo.clientId === fallbackClientId ? undefined : safeOAuthClientId(authInfo.clientId);
         phase = 'mcp';
         if (diagnosticsEnabled) requestSnapshotPromise = captureDiagnosticRequest(request).catch(() => undefined);
         const response = addCors(await protocolHandler.fetch(request, { authInfo }), origin);

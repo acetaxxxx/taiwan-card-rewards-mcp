@@ -51,14 +51,14 @@ export function createTokenVerifier(config: OAuthAuthConfig, publicUrl: URL, met
           : typeof payload.azp === 'string'
             ? payload.azp
             : undefined;
-        const clientId = oauthClientId ?? payload.sub;
+        const clientId = oauthClientId ?? 'oauth-user-delegated';
         return {
           token,
           clientId,
           scopes,
           expiresAt: payload.exp,
           resource: publicUrl,
-          extra: { issuer: metadata.issuer, subject: payload.sub, ...(oauthClientId ? { oauthClientId } : {}) },
+          extra: { issuer: metadata.issuer, subject: payload.sub },
         };
       } catch (error) {
         if (error instanceof OAuthError) throw error;
@@ -95,7 +95,7 @@ export function createCloudflareAccessGate(config: CloudflareAccessAuthConfig, k
         clientId: oauthClientId ?? 'cloudflare-managed-oauth',
         scopes: [],
         expiresAt: payload.exp,
-        extra: { issuer: config.issuer, subject: payload.sub, ...(oauthClientId ? { oauthClientId } : {}) },
+        extra: { issuer: config.issuer, subject: payload.sub },
       };
     } catch {
       return new Response('Unauthorized', { status: 401 });
