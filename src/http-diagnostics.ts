@@ -27,7 +27,7 @@ export interface DiagnosticBodySnapshot {
   value?: unknown;
   capturedBytes: number;
   truncated?: true;
-  omitted?: 'invalid_json' | 'capture_timeout' | 'read_failed' | 'too_large' | 'unsupported_content_type' | 'streaming_response';
+  omitted?: 'invalid_json' | 'invalid_sse' | 'capture_timeout' | 'read_failed' | 'too_large' | 'unsupported_content_type' | 'streaming_response';
 }
 
 export interface DiagnosticRequestSnapshot {
@@ -84,13 +84,27 @@ function shouldRedactKey(key: string): boolean {
     || normalized === 'userid'
     || normalized === 'userprincipal'
     || normalized === 'owneruser'
+    || normalized === 'tenantref'
+    || normalized === 'tenantid'
     || normalized === 'principal'
     || normalized === 'subject'
+    || normalized === 'sub'
     || normalized === 'email'
     || normalized === 'phone'
     || normalized === 'displayname'
     || normalized === 'datadir'
     || normalized === 'path';
+}
+
+export function sanitizeDiagnosticHint(value: string | null, limit: number): string | undefined {
+  if (!value) return undefined;
+  const normalized = value.replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim()
+    .replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, '[REDACTED]')
+    .replace(/\b(?:Bearer|Basic)\s+[^\s,;]+/gi, '[REDACTED]')
+    .replace(/\beyJ[A-Za-z0-9_-]*\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g, '[REDACTED]')
+    .replace(/\b[A-Za-z0-9_-]{48,}\b/g, '[REDACTED]')
+    .replace(/\+?\d[\d(). -]{8,}\d/g, '[REDACTED]');
+  return normalized.slice(0, limit) || undefined;
 }
 
 function redactDiagnosticValue(value: unknown): unknown {
@@ -102,10 +116,19 @@ function redactDiagnosticValue(value: unknown): unknown {
     } catch { /* Keep ordinary text unchanged. */ }
   }
   if (!isRecord(value)) return value;
-  return Object.fromEntries(Object.entries(value).map(([key, nested]) => [
-    key,
-    shouldRedactKey(key) ? '[REDACTED]' : redactDiagnosticValue(nested),
-  ]));
+  return Object.fromEntries(Object.entries(value).map(([key, nested]) => {
+    const normalizedKey = key.toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (normalizedKey === 'clientinfo') {
+      if (!isRecord(nested)) return [key, '[REDACTED]'];
+      const clientInfo: Record<string, string> = {};
+      const name = sanitizeDiagnosticHint(typeof nested.name === 'string' ? nested.name : null, 128);
+      const version = sanitizeDiagnosticHint(typeof nested.version === 'string' ? nested.version : null, 80);
+      if (name) clientInfo.name = name;
+      if (version) clientInfo.version = version;
+      return [key, clientInfo];
+    }
+    return [key, shouldRedactKey(key) ? '[REDACTED]' : redactDiagnosticValue(nested)];
+  }));
 }
 
 function isJsonContentType(value: string | null): boolean {
@@ -113,7 +136,7 @@ function isJsonContentType(value: string | null): boolean {
   return mediaType === 'application/json' || Boolean(mediaType?.endsWith('+json'));
 }
 
-async function readBoundedBody(stream: ReadableStream<Uint8Array> | null, allowPlainText = false): Promise<BoundedBodyCapture | undefined> {
+async function readBoundedBody(stream: ReadableStream<Uint8Array> | null, allowPlainText = false, includePartialText = false): Promise<BoundedBodyCapture | undefined> {
   if (!stream) return undefined;
   let reader: ReadableStreamDefaultReader<Uint8Array>;
   try { reader = stream.getReader(); }
@@ -180,7 +203,12 @@ async function readBoundedBody(stream: ReadableStream<Uint8Array> | null, allowP
   const prefix = new TextDecoder().decode(bytes);
   let rpcMethod = methodFromPrefix(prefix);
   if (omitted) {
-    return { body: { capturedBytes, ...(truncated ? { truncated: true as const } : {}), omitted }, ...(rpcMethod ? { rpcMethod } : {}) };
+    return { body: {
+      ...(includePartialText && capturedBytes > 0 ? { value: prefix } : {}),
+      capturedBytes,
+      ...(truncated ? { truncated: true as const } : {}),
+      omitted,
+    }, ...(rpcMethod ? { rpcMethod } : {}) };
   }
   try {
     const value: unknown = JSON.parse(prefix);
@@ -291,18 +319,118 @@ export async function captureDiagnosticRequest(request: Request): Promise<Diagno
 
 export async function captureDiagnosticResponse(response: Response): Promise<DiagnosticBodySnapshot | undefined> {
   const contentType = response.headers.get('content-type');
-  if (contentType?.toLowerCase().startsWith('text/event-stream')) {
-    return { capturedBytes: 0, omitted: 'streaming_response' };
-  }
+  const isEventStream = contentType?.toLowerCase().startsWith('text/event-stream') ?? false;
   const isPlainText = contentType?.split(';', 1)[0]?.trim().toLowerCase() === 'text/plain';
-  if (!isJsonContentType(contentType) && !isPlainText) return undefined;
-  return (await readBoundedBody(response.clone().body, isPlainText))?.body;
+  if (!isJsonContentType(contentType) && !isPlainText && !isEventStream) return undefined;
+  const capture = await readBoundedBody(response.clone().body, isPlainText || isEventStream, isEventStream);
+  if (!capture || !isEventStream) return capture?.body;
+  const rawText = typeof capture.body.value === 'string' ? capture.body.value : undefined;
+  if (rawText === undefined) return capture.body;
+  const messages = parseSseMessages(rawText);
+  if (messages.length === 0) {
+    return {
+      capturedBytes: capture.body.capturedBytes,
+      ...(capture.body.truncated ? { truncated: true as const } : {}),
+      omitted: capture.body.omitted ?? 'invalid_sse',
+    };
+  }
+  return {
+    value: redactDiagnosticValue(messages),
+    capturedBytes: capture.body.capturedBytes,
+    ...(capture.body.truncated ? { truncated: true as const } : {}),
+    ...(capture.body.omitted ? { omitted: capture.body.omitted } : {}),
+  };
+}
+
+function parseSseMessages(value: string): Record<string, unknown>[] {
+  const messages: Record<string, unknown>[] = [];
+  for (const frame of value.split(/\r?\n\r?\n/)) {
+    const data = frame.split(/\r?\n/)
+      .filter((line) => line.startsWith('data:'))
+      .map((line) => line.slice(5).replace(/^ /, ''))
+      .join('\n');
+    if (!data || data === '[DONE]') continue;
+    try {
+      const parsed: unknown = JSON.parse(data);
+      if (isRecord(parsed)) messages.push(parsed);
+    } catch { /* Ignore non-JSON SSE events; only JSON-RPC frames aid MCP diagnosis. */ }
+  }
+  return messages;
+}
+
+function boundedDiagnosticText(value: unknown, limit: number): string | undefined {
+  return sanitizeDiagnosticHint(typeof value === 'string' ? value : null, limit);
+}
+
+function rpcMessages(body: unknown): Record<string, unknown>[] {
+  if (!isRecord(body) || !Object.hasOwn(body, 'value')) return [];
+  const value = body.value;
+  if (Array.isArray(value)) return value.filter(isRecord);
+  return isRecord(value) ? [value] : [];
+}
+
+function safeErrorCode(value: unknown): string | number | undefined {
+  if (typeof value === 'number' && Number.isSafeInteger(value)) return value;
+  if (typeof value === 'string' && /^[A-Z][A-Z0-9_]{0,63}$/.test(value)) return value;
+  return undefined;
+}
+
+function toolErrorCodeFromResult(result: Record<string, unknown>): string | number | undefined {
+  if (!Array.isArray(result.content)) return undefined;
+  for (const item of result.content) {
+    if (!isRecord(item) || typeof item.text !== 'string') continue;
+    try {
+      const parsed: unknown = JSON.parse(item.text);
+      if (isRecord(parsed)) {
+        const code = safeErrorCode(parsed.code);
+        if (code !== undefined) return code;
+      }
+    } catch { /* Tool content can be ordinary text. */ }
+  }
+  return undefined;
+}
+
+function diagnosticRpcSummary(record: Record<string, unknown>): Record<string, unknown> {
+  const requests = rpcMessages(record.requestBody);
+  const request = requests.find((message) => typeof message.method === 'string') ?? requests[0];
+  if (!request) return {};
+  const method = typeof request.method === 'string' ? request.method : record.rpcMethod;
+  const summary: Record<string, unknown> = {};
+  if (method === 'initialize' && isRecord(request.params) && isRecord(request.params.clientInfo)) {
+    const name = boundedDiagnosticText(request.params.clientInfo.name, 128);
+    const version = boundedDiagnosticText(request.params.clientInfo.version, 80);
+    if (name) summary.mcpClientName = name;
+    if (version) summary.mcpClientVersion = version;
+  }
+  if (method !== 'tools/call' || !isRecord(request.params)) return summary;
+  const toolName = boundedDiagnosticText(request.params.name, 128);
+  if (toolName && /^[A-Za-z0-9][A-Za-z0-9_.:-]*$/.test(toolName)) summary.toolName = toolName;
+
+  const responses = rpcMessages(record.responseBody);
+  const response = request.id === undefined
+    ? responses.find((message) => Object.hasOwn(message, 'result') || Object.hasOwn(message, 'error'))
+    : responses.find((message) => message.id === request.id);
+  if (!response) return summary;
+  if (isRecord(response.error)) {
+    summary.toolOutcome = 'rpc_error';
+    const code = safeErrorCode(response.error.code);
+    if (code !== undefined) summary.jsonRpcErrorCode = code;
+    return summary;
+  }
+  if (!isRecord(response.result)) return summary;
+  summary.toolOutcome = response.result.isError === true ? 'tool_error' : 'success';
+  if (typeof response.result.isError === 'boolean') summary.toolIsError = response.result.isError;
+  if (response.result.isError === true) {
+    const code = toolErrorCodeFromResult(response.result);
+    if (code !== undefined) summary.toolErrorCode = code;
+  }
+  return summary;
 }
 
 export function writeHttpDiagnostic(record: Record<string, unknown>): void {
   if (!httpDiagnosticsEnabled()) return;
   if (!diagnosticLogInitialized) initializeHttpDiagnosticLog();
-  const event = { event: 'mcp_http_request', timestamp: new Date().toISOString(), ...record };
+  const event = { event: 'mcp_http_request', timestamp: new Date().toISOString(), ...record, ...diagnosticRpcSummary(record) };
   if (!diagnosticLogPath) {
     writeMetadataSummary(event, Boolean(record.requestBody || record.responseBody));
     return;

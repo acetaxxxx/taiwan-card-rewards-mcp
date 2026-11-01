@@ -26,6 +26,7 @@ import {
   captureDiagnosticResponse,
   httpDiagnosticsEnabled,
   initializeHttpDiagnosticLog,
+  sanitizeDiagnosticHint,
   writeHttpDiagnostic,
   type DiagnosticBodySnapshot,
   type DiagnosticRequestSnapshot,
@@ -59,6 +60,13 @@ function safeOrigin(value: string | null): string | undefined {
 
 function safeCloudflareRayId(value: string | null): string | undefined {
   return value && /^[A-Za-z0-9-]{1,64}$/.test(value) ? value : undefined;
+}
+
+function safeOAuthClientId(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const normalized = value.replace(/[\u0000-\u001f\u007f]/g, '').trim();
+  if (!normalized || normalized.length > 256 || /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i.test(normalized)) return undefined;
+  return normalized;
 }
 
 export function createHttpHandler(config: HttpServiceConfig, metadata: OAuthMetadata | undefined, tenants: ReturnType<typeof createTenantRegistry>, cloudflareKeys?: JWTVerifyGetKey) {
@@ -120,6 +128,7 @@ export function createHttpHandler(config: HttpServiceConfig, metadata: OAuthMeta
       const origin = request.headers.get('origin');
       const normalizedOrigin = safeOrigin(origin);
       const cfRay = safeCloudflareRayId(request.headers.get('cf-ray'));
+      const userAgent = sanitizeDiagnosticHint(request.headers.get('user-agent'), 256);
       let requestSnapshotPromise: Promise<DiagnosticRequestSnapshot | undefined> = Promise.resolve(undefined);
       let responseSnapshotPromise: Promise<DiagnosticBodySnapshot | undefined> = Promise.resolve(undefined);
       const credentialsPresent = config.auth.mode === 'cloudflare-access'
@@ -128,6 +137,8 @@ export function createHttpHandler(config: HttpServiceConfig, metadata: OAuthMeta
       let authResult = credentialsPresent ? 'present' : 'missing';
       let phase = 'routing';
       let status = 500;
+      let tenantRef: string | undefined;
+      let oauthClientId: string | undefined;
       const complete = (response: Response): Response => {
         status = response.status;
         if (diagnosticsEnabled && (isMcpEndpoint || isMetadataEndpoint)) {
@@ -178,6 +189,8 @@ export function createHttpHandler(config: HttpServiceConfig, metadata: OAuthMeta
           return complete(response);
         }
         authResult = 'accepted';
+        tenantRef = tenants.tenantRef(authInfo);
+        oauthClientId = safeOAuthClientId(authInfo.extra?.oauthClientId);
         phase = 'mcp';
         if (diagnosticsEnabled) requestSnapshotPromise = captureDiagnosticRequest(request).catch(() => undefined);
         const response = addCors(await protocolHandler.fetch(request, { authInfo }), origin);
@@ -196,6 +209,10 @@ export function createHttpHandler(config: HttpServiceConfig, metadata: OAuthMeta
             durationMs: Date.now() - startedAt,
             phase,
             auth: authResult,
+            authMode: config.auth.mode,
+            ...(tenantRef ? { tenantRef } : {}),
+            ...(oauthClientId ? { oauthClientId } : {}),
+            ...(userAgent ? { userAgent } : {}),
             ...(normalizedOrigin ? { origin: normalizedOrigin } : {}),
             ...(cfRay ? { cfRay } : {}),
           };

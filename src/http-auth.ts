@@ -46,18 +46,19 @@ export function createTokenVerifier(config: OAuthAuthConfig, publicUrl: URL, met
           : Array.isArray(payload.scp) && payload.scp.every((scope) => typeof scope === 'string')
             ? payload.scp
             : [];
-        const clientId = typeof payload.client_id === 'string'
+        const oauthClientId = typeof payload.client_id === 'string'
           ? payload.client_id
           : typeof payload.azp === 'string'
             ? payload.azp
-            : payload.sub;
+            : undefined;
+        const clientId = oauthClientId ?? payload.sub;
         return {
           token,
           clientId,
           scopes,
           expiresAt: payload.exp,
           resource: publicUrl,
-          extra: { issuer: metadata.issuer, subject: payload.sub },
+          extra: { issuer: metadata.issuer, subject: payload.sub, ...(oauthClientId ? { oauthClientId } : {}) },
         };
       } catch (error) {
         if (error instanceof OAuthError) throw error;
@@ -84,12 +85,17 @@ export function createCloudflareAccessGate(config: CloudflareAccessAuthConfig, k
         || payload.common_name !== undefined || payload.service_token_id !== undefined) {
         return new Response('Unauthorized', { status: 401 });
       }
+      const oauthClientId = typeof payload.client_id === 'string'
+        ? payload.client_id
+        : typeof payload.azp === 'string'
+          ? payload.azp
+          : undefined;
       return {
         token: assertion,
-        clientId: payload.sub,
+        clientId: oauthClientId ?? 'cloudflare-managed-oauth',
         scopes: [],
         expiresAt: payload.exp,
-        extra: { issuer: config.issuer, subject: payload.sub },
+        extra: { issuer: config.issuer, subject: payload.sub, ...(oauthClientId ? { oauthClientId } : {}) },
       };
     } catch {
       return new Response('Unauthorized', { status: 401 });
